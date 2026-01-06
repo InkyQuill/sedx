@@ -103,10 +103,11 @@ sedx "{ s/foo/bar/g; s/baz/qux/g }" file.txt
 
 ## 📦 Installation
 
-### From Cargo (Recommended)
+### From GitHub (Recommended - via Cargo)
 
 ```bash
-cargo install sedx
+# Install directly from GitHub repository
+cargo install --git https://github.com/InkyQuill/sedx.git
 ```
 
 ### From Source
@@ -121,6 +122,13 @@ cargo build --release
 
 # Install to system path (optional)
 sudo cp target/release/sedx /usr/local/bin/
+```
+
+### From crates.io (Coming Soon)
+
+```bash
+# Will be available after publishing to crates.io
+cargo install sedx
 ```
 
 ### From GitHub Releases
