@@ -49,57 +49,57 @@ $ sedx rollback 20260106-210000-abc123
 | Command grouping `{}` | ✅ | ✅ |
 | Quit command `q` | ✅ | ✅ |
 
-## ⚠️ Важные отличия от GNU sed / Important Differences from GNU sed
+## ⚠️ Important Differences from GNU sed
 
-### Регулярные выражения / Regular Expressions
+### Regular Expressions
 
-**SedX использует расширенный синтаксис регулярных выражений (ERE)**, аналогично `sed -E`:
+**SedX uses Extended Regular Expressions (ERE)** by default, similar to `sed -E`:
 
 ```bash
-# Группы используют круглые скобки без экранирования
-sedx 's/([a-z]+)/\U\1/g'  # Правильно
-sedx 's/\([a-z]\+\)/\U\1/g'  # Неправильно (это BRE синтаксис)
+# Groups use parentheses without escaping
+sedx 's/([a-z]+)/\U\1/g'  # Correct (ERE syntax)
+sedx 's/\([a-z]\+\)/\U\1/g'  # Incorrect (this is BRE syntax)
 ```
 
-В GNU sed по умолчанию используется базовый синтаксис (BRE), где `(`, `)`, `{`, `}` нужно экранировать.
+GNU sed uses Basic Regular Expressions (BRE) by default, where `(`, `)`, `{`, `}` must be escaped with `\`.
 
-### Обратные ссылки в заменах / Backreferences in Replacements
+### Backreferences in Replacements
 
-SedX поддерживает обратные ссылки в заменах, но использует расширенный синтаксис регулярных выражений:
+SedX supports backreferences in replacements using ERE syntax:
 
 ```bash
-# Дублирование слова: "test test" → "test"
-sedx 's/([a-z]+) \1/\1/g'  # Правильно (ERE синтаксис)
-sed 's/\([a-z]\+\) \1/\1/g'  # GNU sed с BRE синтаксисом
+# Remove duplicate words: "test test" → "test"
+sedx 's/([a-z]+) \1/\1/g'  # Correct (ERE syntax)
+sed 's/\([a-z]\+\) \1/\1/g'  # GNU sed with BRE syntax
 ```
 
-### Подстановка по шаблону / Pattern Substitution
+### Pattern Substitution
 
-Подстановка по шаблону применяется ко **всем** совпадающим строкам (соответствует поведению GNU sed):
+Pattern substitution applies to **all** matching lines (matches GNU sed behavior):
 
 ```bash
-# Заменить "test" на "fix" во всех строках, содержащих "error"
-/error/s/test/fix/  # Применяется ко всем строкам с "error"
+# Replace "test" with "fix" in all lines containing "error"
+/error/s/test/fix/  # Applies to all lines with "error"
 ```
 
-### Группировка команд / Command Grouping
+### Command Grouping
 
-При использовании фигурных скобок в shell используйте одинарные кавычки:
+When using curly braces in shell, use single quotes to prevent shell interpretation:
 
 ```bash
-# Одинарные кавычки (рекомендуется)
+# Single quotes (recommended)
 sedx '{s/foo/bar/g; s/baz/qux/g}' file.txt
 
-# Если нужны двойные кавычки - экранируйте скобки
+# If double quotes are needed, escape the braces
 sedx "{ s/foo/bar/g; s/baz/qux/g }" file.txt
 ```
 
-### Уникальные возможности SedX / SedX Unique Features
+### SedX Unique Features
 
-- **Автоматические резервные копии** при редактировании файлов
-- **Откат изменений** с помощью флага `--rollback`
-- **Режим dry-run** для безопасного тестирования
-- **Цветной вывод** для лучшей читаемости (можно отключить)
+- **Automatic backups** when editing files
+- **Rollback changes** with `--rollback` flag
+- **Dry-run mode** for safe testing
+- **Colored output** for better readability (can be disabled)
 
 ## 📦 Installation
 
