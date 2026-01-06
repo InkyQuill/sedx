@@ -1,0 +1,35 @@
+/target
+
+# Rust
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.bak
+*.backup
+
+# Test files
+/tmp/sedx_tests/
+/test_*.txt
+!/tests/**/*.txt
+
+# Root level test files (temporary)
+input.txt
+test_*.sed
+*.sed
+
+# Build artifacts
+/dist/
+/build/
