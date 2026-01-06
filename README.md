@@ -108,7 +108,15 @@ sedx "{ s/foo/bar/g; s/baz/qux/g }" file.txt
 ```bash
 # Install directly from GitHub repository
 cargo install --git https://github.com/InkyQuill/sedx.git
+
+# Add ~/.cargo/bin to your PATH if not already there
+export PATH="$HOME/.cargo/bin:$PATH"
 ```
+
+**Note:** Make sure `~/.cargo/bin` is in your PATH. Add this to your shell config:
+- **Bash**: Add `export PATH="$HOME/.cargo/bin:$PATH"` to `~/.bashrc`
+- **Zsh**: Add `export PATH="$HOME/.cargo/bin:$PATH"` to `~/.zshrc`
+- **Fish**: Add `fish_add_path ~/.cargo/bin` to `~/.config/fish/config.fish`
 
 ### From Source
 
