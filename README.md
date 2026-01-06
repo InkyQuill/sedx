@@ -154,7 +154,28 @@ sudo cp sedx /usr/local/bin/
 
 ```bash
 $ sedx --version
-SedX v1.0.0 - Safe Sed Extended
+sedx 0.1.0
+
+Copyright (c) 2025 InkyQuill
+License: MIT
+Source: https://github.com/InkyQuill/sedx
+Rust Edition: 2024
+```
+
+### Installing Man Pages
+
+After installing from source, you can optionally install the man page:
+
+```bash
+# Install man page (requires sudo)
+sudo cp man/sedx.1 /usr/local/share/man/man1/
+
+# Or install to user directory (no sudo required)
+mkdir -p ~/.local/share/man/man1/
+cp man/sedx.1 ~/.local/share/man/man1/
+
+# Verify man page installation
+man sedx
 ```
 
 ## 🎯 Quick Start

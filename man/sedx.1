@@ -1,0 +1,271 @@
+.\"
+.\" sedx.1 - SedX manual page
+.\" Copyright (c) 2025 InkyQuill
+.\" Licensed under MIT License
+.\"
+.TH "SEDX" "1" "January 2025" "sedx 0.1.0" "User Commands"
+.SH NAME
+sedx \- Safe sed with preview, context, and automatic rollback
+.SH SYNOPSIS
+\fBsedx\fP [\fIOPTIONS\fP] \fIEXPRESSION\fP \fIFILE\fR...
+\fBsedx\fP [\fICOMMAND\fP]
+.SH DESCRIPTION
+SedX is a modern replacement for GNU sed written in Rust. It provides safe file
+editing with automatic backups, dry-run mode, and easy rollback. Unlike sed,
+sedx shows you exactly what will change before applying modifications.
+.PP
+\fBFeatures:\fP
+.RS
+.IP \(bu 2
+Automatic backups before every modification
+.IP \(bu 2
+Dry-run mode to preview changes
+.IP \(bu 2
+Easy rollback with one command
+.IP \(bu 2
+Colored diff output
+.IP \(bu 2
+Extended regex by default (ERE)
+.IP \(bu 2
+~90% GNU sed compatibility
+.RE
+.SH OPTIONS
+.TP
+\fB-d\fR, \fB--dry-run\fR
+Preview changes without modifying files. This is the default behavior.
+.TP
+\fB-i\fR, \fB--interactive\fR
+Ask for confirmation before applying each change.
+.TP
+\fB-n\fR, \fB--context\fR=\fINUM\fR
+Number of context lines to show around changes (default: 2).
+Use 0 to show only changed lines (equivalent to --no-context).
+.TP
+\fB--no-context\fR
+Show only changed lines without context. Equivalent to --context=0.
+.TP
+\fB-h\fR, \fB--help\fR
+Print help information.
+.TP
+\fB-V\fR, \fB--version\fR
+Print version information.
+.SH COMMANDS
+.TP
+\fBrollback\fR [\fIID\fR]
+Rollback a previous operation. If no backup ID is specified, rolls back the
+most recent operation. Use \fBsedx history\fP to see all available backups.
+.TP
+\fBhistory\fR
+Display a log of all sedx operations. Shows timestamp, expression, files
+affected, and backup location for each operation.
+.TP
+\fBstatus\fR
+Display backup directory location and disk usage.
+.SH EXPRESSIONS
+SedX supports most GNU sed expressions:
+.PP
+\fBSubstitution:\fP
+.RS
+.PP
+\fBs/pattern/replacement/flags\fR
+.PP
+Flags:
+.RS
+.IP \(bu 2
+\fBg\fR - Replace all occurrences in each line
+.IP \(bu 2
+\fBi\fR - Case-insensitive matching
+.IP \(bu 2
+\fBp\fR - Print the modified line
+.RE
+.RE
+.PP
+\fBDelete:\fP
+.RS
+.PP
+\fBd\fR - Delete line or lines in range
+.RE
+.PP
+\fBPrint:\fP
+.RS
+.PP
+\fBp\fR - Print line or lines in range
+.RE
+.PP
+\fBQuit:\fP
+.RS
+.PP
+\fBq\fR - Stop processing after current line
+.RE
+.PP
+\fBAddressing:\fP
+.RS
+.IP \(bu 2
+\fBN\fR - Line number
+.IP \(bu 2
+\fB/pattern/\fR - Lines matching pattern
+.IP \(bu 2
+\fB$start,$end\fR - Range from start to end
+.IP \(bu 2
+\fB$start,+N\fR - Range from start for N lines
+.IP \(bu 2
+\fB!pattern\fR - Negation (lines NOT matching pattern)
+.RE
+.PP
+\fBGrouping:\fP
+.RS
+.PP
+\fB{cmd1; cmd2; cmd3}\fR - Execute multiple commands
+.RE
+.SH EXAMPLES
+.PP
+\fBBasic substitution:\fP
+.RS
+.PP
+\fBsedx 's/foo/bar/g' file.txt\fR
+.RE
+.PP
+\fBOnly in lines matching pattern:\fP
+.RS
+.PP
+\fBsedx '/error/s/test/fix/' file.txt\fR
+.RE
+.PP
+\fBDelete lines 5-10:\fP
+.RS
+.PP
+\fBsedx '5,10d' file.txt\fR
+.RE
+.PP
+\fBMultiple commands:\fP
+.RS
+.PP
+\fBsedx '{s/a/A/g; s/b/B/g}' file.txt\fR
+.RE
+.PP
+\fBBackreference (remove duplicates):\fP
+.RS
+.PP
+\fBsedx 's/([a-z]+) \\1/\\1/g' file.txt\fR
+.RE
+.PP
+\fBRollback last change:\fP
+.RS
+.PP
+\fBsedx rollback\fR
+.RE
+.PP
+\fBView operation history:\fP
+.RS
+.PP
+\fBsedx history\fR
+.RE
+.SH REGULAR EXPRESSIONS
+SedX uses Extended Regular Expressions (ERE) by default, similar to \fBsed -E\fR:
+.RS
+.IP \(bu 2
+\fB(...)\fR - Grouping (no backslash needed)
+.IP \(bu 2
+\fB+\fR - One or more
+.IP \(bu 2
+\fB?\fR - Zero or one
+.IP \(bu 2
+\fB|\fR - Alternation
+.IP \(bu 2
+\fB[[:class:]]\fR - Character classes
+.RE
+.PP
+Backreferences work in both patterns and replacements:
+.RS
+.IP \(bu 2
+Patterns use \\1, \\2, etc.
+.IP \(bu 2
+Replacements use $1, $2, etc. (automatically converted from \\1)
+.RE
+.SH BACKUPS
+Backups are created automatically before every modification. They are stored in:
+.RS
+.PP
+\fI~/.sedx/backups/\fR
+.PP
+Each backup has a timestamp in the filename:
+.RE
+.RS
+.PP
+\fIfile.txt.backup.20250107_143022\fR
+.RE
+.PP
+To rollback a change:
+.RS
+.PP
+\fBsedx rollback file.txt.backup.20250107_143022\fR
+.RE
+.PP
+Or rollback the last operation:
+.RS
+.PP
+\fBsedx rollback\fR
+.RE
+.SH DIFF OUTPUT
+SedX uses colored output to show changes:
+.RS
+.IP \(bu 2
+\fBGreen\fR (+) - Lines that will be added
+.IP \(bu 2
+\fBRed\fR (-) - Lines that will be deleted
+.IP \(bu 2
+\fBYellow\fR (→) - Lines that will be modified
+.RE
+.PP
+Context lines are shown in the default color to provide surrounding context.
+.SH DIFFERENCES FROM GNU SED
+.TP
+\fBExtended Regex\fP
+SedX uses ERE by default. Use \fB([a-z]+)\fR instead of \fB\\([a-z]\\+\\)\fR.
+.TP
+\fBAutomatic Backups\fP
+SedX creates backups automatically. sed requires manual backups.
+.TP
+\fBDry-run Mode\fP
+SedX previews changes by default. sed has no preview mode.
+.TP
+\fBPattern Substitution\fP
+\fB/error/s/test/fix/\fR applies to ALL matching lines (GNU sed behavior).
+.TP
+\fBNo In-place Editing\fP
+SedX doesn't support \fB-i\fR flag (yet). Use \fB--rollback\fP instead.
+.SH EXIT STATUS
+.TP
+0
+Changes were successfully applied (or preview shown)
+.TP
+1
+No changes were needed or an error occurred
+.SH FILES
+.TP
+\fI~/.sedx/backups/\fR
+Default backup directory
+.TP
+\fI~/.sedx/history.json\fR
+Operation history log
+.SH ENVIRONMENT
+.TP
+\fBSEDX_BACKUP_DIR\fR
+Override default backup directory location
+.TP
+\fBNO_COLOR\fR
+Disable colored output (set to any value)
+.SH REPORTING BUGS
+GitHub Issues: \fIhttps://github.com/InkyQuill/sedx/issues\fR
+.SH SEE ALSO
+.BR sed (1),
+.BR awk (1),
+.BR grep (1)
+.SH AUTHOR
+InkyQuill <\fIhttps://github.com/InkyQuill\fR>
+.SH COPYRIGHT
+Copyright (C) 2025 InkyQuill
+.LP
+Licensed under the MIT License. Source code available at:
+.br
+\fIhttps://github.com/InkyQuill/sedx\fR
