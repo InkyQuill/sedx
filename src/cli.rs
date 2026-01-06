@@ -1,9 +1,22 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
+const LONG_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    "
+
+Copyright (c) 2025 InkyQuill
+License: MIT
+Source: https://github.com/InkyQuill/sedx
+Rust Edition: 2024"
+);
+
 #[derive(Parser)]
 #[command(name = "sedx")]
 #[command(about = "Safe sed with preview, context, and automatic rollback", long_about = None)]
+#[command(version = env!("CARGO_PKG_VERSION"))]
+#[command(long_version = LONG_VERSION)]
+#[command(propagate_version = true)]
 struct Cli {
     /// Sed expression to execute (e.g., 's/old/new/g', '10d', '1,5p')
     #[arg(value_name = "EXPRESSION")]
