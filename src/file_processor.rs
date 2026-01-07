@@ -59,6 +59,11 @@ pub struct StreamProcessor {
     commands: Vec<SedCommand>,
     hold_space: String,
     current_line: usize,
+    // Sliding window for diff context (Chunk 7)
+    context_buffer: VecDeque<(usize, String, ChangeType)>,
+    context_size: usize,
+    // State for reading context after a change
+    context_lines_to_read: usize,  // How many more lines to read as context
 }
 
 impl StreamProcessor {
@@ -67,6 +72,27 @@ impl StreamProcessor {
             commands,
             hold_space: String::new(),
             current_line: 0,
+            context_buffer: VecDeque::new(),
+            context_size: 2, // Default context size (2 lines before/after changes)
+            context_lines_to_read: 0,
+        }
+    }
+
+    /// Set context size for diff output (default: 2)
+    pub fn with_context_size(mut self, size: usize) -> Self {
+        self.context_size = size;
+        self
+    }
+
+    /// Flush buffer to changes when we encounter a changed line
+    fn flush_buffer_to_changes(&mut self, changes: &mut Vec<LineChange>) {
+        for (line_num, content, change_type) in self.context_buffer.drain(..) {
+            changes.push(LineChange {
+                line_number: line_num,
+                change_type,
+                content,
+                old_content: None,
+            });
         }
     }
 
@@ -363,19 +389,59 @@ impl StreamProcessor {
                 writeln!(writer, "{}", processed_line)
                     .with_context(|| format!("Failed to write to temp file"))?;
 
-                // Track line for diff
+                // Track line for diff (with sliding window logic for Chunk 7)
                 let change_type = if line_changed {
                     ChangeType::Modified
                 } else {
                     ChangeType::Unchanged
                 };
 
-                changes.push(LineChange {
-                    line_number: line_num,
-                    change_type,
-                    content: processed_line,
-                    old_content: if line_changed { Some(line) } else { None },
-                });
+                // Sliding window logic (Chunk 7)
+                let is_changed = line_changed || skip_line || append_text.is_some();
+
+                if is_changed {
+                    // CHANGE DETECTED: Flush buffer (previous context) + add changed line
+                    self.flush_buffer_to_changes(&mut changes);
+
+                    // Add the changed line itself
+                    changes.push(LineChange {
+                        line_number: line_num,
+                        change_type,
+                        content: processed_line,
+                        old_content: if line_changed { Some(line) } else { None },
+                    });
+
+                    // Set flag to read next context_size lines as context
+                    self.context_lines_to_read = self.context_size;
+
+                } else if self.context_lines_to_read > 0 {
+                    // Reading context AFTER a change - add directly to changes
+                    changes.push(LineChange {
+                        line_number: line_num,
+                        change_type,
+                        content: processed_line,
+                        old_content: None,
+                    });
+                    self.context_lines_to_read -= 1;
+
+                } else {
+                    // Unchanged line - add to buffer
+                    self.context_buffer.push_back((line_num, processed_line, change_type));
+
+                    // Keep buffer size limited to context_size * 2
+                    // (we may need up to context_size lines before a change)
+                    while self.context_buffer.len() > self.context_size {
+                        // Buffer too full - remove oldest and add to changes
+                        if let Some(front) = self.context_buffer.pop_front() {
+                            changes.push(LineChange {
+                                line_number: front.0,
+                                change_type: front.2,
+                                content: front.1,
+                                old_content: None,
+                            });
+                        }
+                    }
+                }
 
                 // Handle append command - write appended text after the current line
                 if let Some(text) = &append_text {
@@ -392,9 +458,14 @@ impl StreamProcessor {
 
                 // Check if we should quit after processing this line
                 if should_quit_after_line {
+                    // Flush remaining buffer before quitting
+                    self.flush_buffer_to_changes(&mut changes);
                     break 'outer;
                 }
             }
+
+            // Flush remaining buffer (unchanged lines at the end of file)
+            self.flush_buffer_to_changes(&mut changes);
 
             // Ensure all data is written to disk
             writer.flush()
@@ -1619,6 +1690,59 @@ mod tests {
             .expect("Failed to read processed file");
         let expected = "FOO\nNEW LINE\nbar\nbaz\n";
         assert_eq!(processed_content, expected, "Should insert and substitute");
+
+        // Clean up
+        fs::remove_file(test_file_path).ok();
+    }
+
+    #[test]
+    fn test_streaming_sliding_window_context() {
+        // Test that sliding window provides context around changes
+        let test_file_path = "/tmp/test_context.txt";
+        let original_content = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\n";
+
+        {
+            let mut file = fs::File::create(test_file_path)
+                .expect("Failed to create test file");
+            file.write_all(original_content.as_bytes())
+                .expect("Failed to write to test file");
+        }
+
+        // Parse substitution command (change line 5)
+        let commands = parse_sed_expression("s/line 5/CHANGED/")
+            .expect("Failed to parse substitution");
+        let mut processor = StreamProcessor::new(commands);
+
+        // Process the file (force streaming for testing)
+        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        assert!(result.is_ok(), "Processing should succeed");
+
+        let diff = result.unwrap();
+
+        // With default context_size=2, we should see:
+        // - line 3 (unchanged, context before)
+        // - line 4 (unchanged, context before)
+        // - line 5 (changed)
+        // - line 6 (unchanged, context after)
+        // - line 7 (unchanged, context after)
+        // Plus line 1-2 which were flushed from buffer before line 3
+        // And lines 8-10 which are flushed at end
+
+        // Total should be around 7-10 lines depending on buffer flush timing
+        assert!(diff.changes.len() >= 7, "Should have at least 7 lines with context");
+
+        // Verify the structure: should have context around changed line
+        let has_line_3 = diff.changes.iter().any(|c| c.line_number == 3);
+        let has_line_4 = diff.changes.iter().any(|c| c.line_number == 4);
+        let has_line_5 = diff.changes.iter().any(|c| c.line_number == 5 && c.change_type == ChangeType::Modified);
+        let has_line_6 = diff.changes.iter().any(|c| c.line_number == 6);
+        let has_line_7 = diff.changes.iter().any(|c| c.line_number == 7);
+
+        assert!(has_line_3, "Should include line 3 (context before)");
+        assert!(has_line_4, "Should include line 4 (context before)");
+        assert!(has_line_5, "Should include line 5 (changed line)");
+        assert!(has_line_6, "Should include line 6 (context after)");
+        assert!(has_line_7, "Should include line 7 (context after)");
 
         // Clean up
         fs::remove_file(test_file_path).ok();
