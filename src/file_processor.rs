@@ -29,6 +29,7 @@ pub struct FileDiff {
     pub changes: Vec<LineChange>,
     pub all_lines: Vec<(usize, String, ChangeType)>,  // (line_number, content, change_type)
     pub printed_lines: Vec<String>,  // Lines from print commands
+    pub is_streaming: bool,  // True if processed in streaming mode (all_lines may be empty)
 }
 
 // Legacy structure for backward compatibility
@@ -405,15 +406,16 @@ impl StreamProcessor {
             .with_context(|| format!("Failed to persist temp file to {}", file_path.display()))?;
 
         // Build FileDiff result
-        let all_lines: Vec<(usize, String, ChangeType)> = changes.iter()
-            .map(|c| (c.line_number, c.content.clone(), c.change_type.clone()))
-            .collect();
+        // NOTE: In streaming mode, we don't populate all_lines to save memory
+        // The diff formatter will handle this differently for streaming mode
+        let all_lines = Vec::new(); // Empty in streaming mode
 
         Ok(FileDiff {
             file_path: file_path.display().to_string(),
             changes,
             all_lines,
             printed_lines: Vec::new(),
+            is_streaming: true,  // Streaming mode
         })
     }
 }
@@ -493,6 +495,7 @@ impl FileProcessor {
             changes,
             all_lines,
             printed_lines: self.printed_lines.clone(),
+            is_streaming: false,  // In-memory mode
         })
     }
 
@@ -1170,12 +1173,14 @@ mod tests {
         let commands = parse_sed_expression("").expect("Failed to parse empty expression");
         let mut processor = StreamProcessor::new(commands);
 
-        // Process the file
-        let result = processor.process_streaming(Path::new(test_file_path));
+        // Process the file (force streaming for testing)
+        let result = processor.process_streaming_forced(Path::new(test_file_path));
         assert!(result.is_ok(), "Processing should succeed");
 
         let diff = result.unwrap();
-        assert_eq!(diff.all_lines.len(), 5, "Should have 5 lines");
+        // In streaming mode (Chunk 6), we track only changed lines
+        // For passthrough with no commands, changes contains all lines as Unchanged
+        assert_eq!(diff.changes.len(), 5, "Should have 5 line changes");
 
         // Verify content is unchanged
         let processed_content = fs::read_to_string(test_file_path)
@@ -1221,7 +1226,8 @@ mod tests {
         assert!(result.is_ok(), "Processing should succeed");
 
         let diff = result.unwrap();
-        assert_eq!(diff.all_lines.len(), 3, "Should have 3 lines");
+        // In streaming mode, all_lines is empty (Chunk 6), check changes instead
+        assert_eq!(diff.changes.len(), 3, "Should have 3 line changes");
 
         // Verify content
         let processed_content = fs::read_to_string(test_file_path)
@@ -1352,7 +1358,8 @@ mod tests {
         assert!(result.is_ok(), "Processing should succeed");
 
         let diff = result.unwrap();
-        assert_eq!(diff.all_lines.len(), 3, "Should track 3 deleted lines");
+        // In streaming mode, all_lines is empty (Chunk 6), check changes instead
+        assert_eq!(diff.changes.len(), 3, "Should track 3 deleted lines");
 
         // Verify all lines were deleted
         let processed_content = fs::read_to_string(test_file_path)

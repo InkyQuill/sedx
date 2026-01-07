@@ -46,8 +46,14 @@ impl DiffFormatter {
             output.push_str(&format!("{}\n", diff.file_path));
         }
 
-        // Filter lines to show based on context
-        let lines_to_show = Self::filter_lines_with_context(&diff.all_lines, context_size);
+        // Check if this is streaming mode (all_lines is empty)
+        let lines_to_show = if diff.is_streaming && diff.all_lines.is_empty() {
+            // Streaming mode: use changes directly without context
+            Self::format_changes_streaming(&diff.changes, context_size)
+        } else {
+            // In-memory mode: use all_lines with context
+            Self::filter_lines_with_context(&diff.all_lines, context_size)
+        };
 
         for (line_num, content, change_type) in lines_to_show {
             // Special handling for "..." placeholder
@@ -190,6 +196,19 @@ impl DiffFormatter {
         }
 
         result
+    }
+
+    /// Format changes in streaming mode (without storing all lines)
+    /// For Chunk 6: Simple diff showing only changed lines without context
+    fn format_changes_streaming(
+        changes: &[crate::file_processor::LineChange],
+        _context_size: usize
+    ) -> Vec<(usize, String, ChangeType)> {
+        // In streaming mode (Chunk 6), we show only changed lines without context
+        // This saves memory for large files
+        changes.iter()
+            .map(|c| (c.line_number, c.content.clone(), c.change_type.clone()))
+            .collect()
     }
 
     /// Legacy method - format simple preview (backward compatibility)
