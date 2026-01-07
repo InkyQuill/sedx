@@ -179,7 +179,7 @@ impl StreamProcessor {
             let mut writer = BufWriter::new(temp_file.as_file());
 
             // Read line by line
-            for line_result in reader.lines() {
+            'outer: for line_result in reader.lines() {
                 let line = line_result
                     .with_context(|| format!("Failed to read line from {}", file_path.display()))?;
 
@@ -191,6 +191,8 @@ impl StreamProcessor {
                 let mut line_changed = false;
                 let mut skip_line = false;  // For delete command
                 let mut print_line = false;  // For print command
+                let mut append_text: Option<String> = None;  // For append command
+                let mut should_quit_after_line = false;  // For quit command
 
                 for cmd in &self.commands {
                     match cmd {
@@ -242,6 +244,95 @@ impl StreamProcessor {
                                 }
                             }
                         }
+                        SedCommand::Insert { text, address } => {
+                            // Insert text BEFORE the specified line
+                            match address {
+                                Address::LineNumber(n) if *n == line_num => {
+                                    // Insert before current line
+                                    writeln!(writer, "{}", text)
+                                        .with_context(|| "Failed to write inserted line")?;
+                                    // Track the inserted line for diff
+                                    changes.push(LineChange {
+                                        line_number: line_num,
+                                        change_type: ChangeType::Added,
+                                        content: text.clone(),
+                                        old_content: None,
+                                    });
+                                }
+                                Address::LineNumber(_) => {
+                                    // Not at the target line yet, continue
+                                }
+                                _ => {
+                                    // Complex addresses (patterns) not yet supported - delegate to in-memory
+                                    drop(writer);
+                                    let mut processor = FileProcessor::new(self.commands.clone());
+                                    return processor.process_file_with_context(file_path);
+                                }
+                            }
+                        }
+                        SedCommand::Append { text, address } => {
+                            // Append text AFTER the specified line
+                            match address {
+                                Address::LineNumber(n) if *n == line_num => {
+                                    // Store text to append after current line
+                                    append_text = Some(text.clone());
+                                }
+                                Address::LineNumber(_) => {
+                                    // Not at the target line yet or already passed it, continue
+                                }
+                                _ => {
+                                    // Complex addresses (patterns) not yet supported - delegate to in-memory
+                                    drop(writer);
+                                    let mut processor = FileProcessor::new(self.commands.clone());
+                                    return processor.process_file_with_context(file_path);
+                                }
+                            }
+                        }
+                        SedCommand::Change { text, address } => {
+                            // Change (replace) the specified line with new text
+                            match address {
+                                Address::LineNumber(n) if *n == line_num => {
+                                    // Replace current line with new text
+                                    processed_line = text.clone();
+                                    line_changed = true;
+                                }
+                                Address::LineNumber(_) => {
+                                    // Not at the target line yet, continue
+                                }
+                                _ => {
+                                    // Complex addresses (patterns) not yet supported - delegate to in-memory
+                                    drop(writer);
+                                    let mut processor = FileProcessor::new(self.commands.clone());
+                                    return processor.process_file_with_context(file_path);
+                                }
+                            }
+                        }
+                        SedCommand::Quit { address } => {
+                            // Stop processing at specified line
+                            match address {
+                                None => {
+                                    // Quit immediately - don't process or write this line
+                                    break 'outer;
+                                }
+                                Some(Address::LineNumber(n)) if *n == line_num => {
+                                    // Quit after processing and writing this line
+                                    should_quit_after_line = true;
+                                }
+                                Some(Address::LineNumber(_)) => {
+                                    // Not at the target line yet, continue
+                                }
+                                Some(Address::LastLine) => {
+                                    // Quit after processing this line
+                                    should_quit_after_line = true;
+                                }
+                                _ => {
+                                    // Complex addresses (patterns) not yet supported - delegate to in-memory
+                                    drop(writer);
+                                    let mut processor = FileProcessor::new(self.commands.clone());
+                                    return processor.process_file_with_context(file_path);
+                                }
+                            }
+                        }
                         // Other commands not yet supported - delegate to in-memory
                         _ => {
                             drop(writer);
@@ -284,6 +375,24 @@ impl StreamProcessor {
                     content: processed_line,
                     old_content: if line_changed { Some(line) } else { None },
                 });
+
+                // Handle append command - write appended text after the current line
+                if let Some(text) = &append_text {
+                    writeln!(writer, "{}", text)
+                        .with_context(|| "Failed to write appended line")?;
+                    // Track the appended line for diff
+                    changes.push(LineChange {
+                        line_number: line_num + 1,
+                        change_type: ChangeType::Added,
+                        content: text.clone(),
+                        old_content: None,
+                    });
+                }
+
+                // Check if we should quit after processing this line
+                if should_quit_after_line {
+                    break 'outer;
+                }
             }
 
             // Ensure all data is written to disk
@@ -1312,6 +1421,197 @@ mod tests {
         let processed_content = fs::read_to_string(test_file_path)
             .expect("Failed to read processed file");
         assert_eq!(processed_content, original_content, "File should be unchanged");
+
+        // Clean up
+        fs::remove_file(test_file_path).ok();
+    }
+
+    #[test]
+    fn test_streaming_insert() {
+        // Test insert command (inserts text before specified line)
+        let test_file_path = "/tmp/test_insert.txt";
+        let original_content = "line 1\nline 2\nline 3\n";
+
+        {
+            let mut file = fs::File::create(test_file_path)
+                .expect("Failed to create test file");
+            file.write_all(original_content.as_bytes())
+                .expect("Failed to write to test file");
+        }
+
+        // Parse insert command (2i\TEXT means insert TEXT before line 2)
+        let commands = parse_sed_expression(r"2i\INSERTED LINE")
+            .expect("Failed to parse insert");
+        let mut processor = StreamProcessor::new(commands);
+
+        // Process the file (force streaming for testing)
+        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        assert!(result.is_ok(), "Processing should succeed");
+
+        // Verify the line was inserted
+        let processed_content = fs::read_to_string(test_file_path)
+            .expect("Failed to read processed file");
+        let expected = "line 1\nINSERTED LINE\nline 2\nline 3\n";
+        assert_eq!(processed_content, expected, "Line should be inserted before line 2");
+
+        // Clean up
+        fs::remove_file(test_file_path).ok();
+    }
+
+    #[test]
+    fn test_streaming_append() {
+        // Test append command (appends text after specified line)
+        let test_file_path = "/tmp/test_append.txt";
+        let original_content = "line 1\nline 2\nline 3\n";
+
+        {
+            let mut file = fs::File::create(test_file_path)
+                .expect("Failed to create test file");
+            file.write_all(original_content.as_bytes())
+                .expect("Failed to write to test file");
+        }
+
+        // Parse append command (2a\TEXT means append TEXT after line 2)
+        let commands = parse_sed_expression(r"2a\APPENDED LINE")
+            .expect("Failed to parse append");
+        let mut processor = StreamProcessor::new(commands);
+
+        // Process the file (force streaming for testing)
+        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        assert!(result.is_ok(), "Processing should succeed");
+
+        // Verify the line was appended
+        let processed_content = fs::read_to_string(test_file_path)
+            .expect("Failed to read processed file");
+        let expected = "line 1\nline 2\nAPPENDED LINE\nline 3\n";
+        assert_eq!(processed_content, expected, "Line should be appended after line 2");
+
+        // Clean up
+        fs::remove_file(test_file_path).ok();
+    }
+
+    #[test]
+    fn test_streaming_change() {
+        // Test change command (replaces specified line with new text)
+        let test_file_path = "/tmp/test_change.txt";
+        let original_content = "line 1\nline 2\nline 3\n";
+
+        {
+            let mut file = fs::File::create(test_file_path)
+                .expect("Failed to create test file");
+            file.write_all(original_content.as_bytes())
+                .expect("Failed to write to test file");
+        }
+
+        // Parse change command (2c\TEXT means change line 2 to TEXT)
+        let commands = parse_sed_expression(r"2c\CHANGED LINE")
+            .expect("Failed to parse change");
+        let mut processor = StreamProcessor::new(commands);
+
+        // Process the file (force streaming for testing)
+        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        assert!(result.is_ok(), "Processing should succeed");
+
+        // Verify the line was changed
+        let processed_content = fs::read_to_string(test_file_path)
+            .expect("Failed to read processed file");
+        let expected = "line 1\nCHANGED LINE\nline 3\n";
+        assert_eq!(processed_content, expected, "Line 2 should be changed");
+
+        // Clean up
+        fs::remove_file(test_file_path).ok();
+    }
+
+    #[test]
+    fn test_streaming_quit_at_line() {
+        // Test quit command (stops processing at specified line)
+        let test_file_path = "/tmp/test_quit.txt";
+        let original_content = "line 1\nline 2\nline 3\nline 4\nline 5\n";
+
+        {
+            let mut file = fs::File::create(test_file_path)
+                .expect("Failed to create test file");
+            file.write_all(original_content.as_bytes())
+                .expect("Failed to write to test file");
+        }
+
+        // Parse quit command (3q means quit after processing line 3)
+        let commands = parse_sed_expression(r"3q")
+            .expect("Failed to parse quit");
+        let mut processor = StreamProcessor::new(commands);
+
+        // Process the file (force streaming for testing)
+        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        assert!(result.is_ok(), "Processing should succeed");
+
+        // Verify processing stopped at line 3
+        let processed_content = fs::read_to_string(test_file_path)
+            .expect("Failed to read processed file");
+        let expected = "line 1\nline 2\nline 3\n";
+        assert_eq!(processed_content, expected, "Should stop at line 3");
+
+        // Clean up
+        fs::remove_file(test_file_path).ok();
+    }
+
+    #[test]
+    fn test_streaming_quit_immediately() {
+        // Test quit command without address (quits immediately)
+        let test_file_path = "/tmp/test_quit_immediate.txt";
+        let original_content = "line 1\nline 2\nline 3\n";
+
+        {
+            let mut file = fs::File::create(test_file_path)
+                .expect("Failed to create test file");
+            file.write_all(original_content.as_bytes())
+                .expect("Failed to write to test file");
+        }
+
+        // Parse quit command (q means quit immediately, output nothing)
+        let commands = parse_sed_expression(r"q")
+            .expect("Failed to parse quit");
+        let mut processor = StreamProcessor::new(commands);
+
+        // Process the file (force streaming for testing)
+        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        assert!(result.is_ok(), "Processing should succeed");
+
+        // Verify file is empty (quit before writing anything)
+        let processed_content = fs::read_to_string(test_file_path)
+            .expect("Failed to read processed file");
+        assert_eq!(processed_content, "", "Should be empty (quit immediately)");
+
+        // Clean up
+        fs::remove_file(test_file_path).ok();
+    }
+
+    #[test]
+    fn test_streaming_insert_and_substitute() {
+        // Test combination of insert and substitute commands
+        let test_file_path = "/tmp/test_insert_sub.txt";
+        let original_content = "foo\nbar\nbaz\n";
+
+        {
+            let mut file = fs::File::create(test_file_path)
+                .expect("Failed to create test file");
+            file.write_all(original_content.as_bytes())
+                .expect("Failed to write to test file");
+        }
+
+        // Parse insert then substitute
+        let commands = parse_sed_expression(r"2i\NEW LINE; s/foo/FOO/")
+            .expect("Failed to parse commands");
+        let mut processor = StreamProcessor::new(commands);
+
+        // Process the file (force streaming for testing)
+        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        assert!(result.is_ok(), "Processing should succeed");
+
+        // Verify both commands were applied
+        let processed_content = fs::read_to_string(test_file_path)
+            .expect("Failed to read processed file");
+        let expected = "FOO\nNEW LINE\nbar\nbaz\n";
+        assert_eq!(processed_content, expected, "Should insert and substitute");
 
         // Clean up
         fs::remove_file(test_file_path).ok();
