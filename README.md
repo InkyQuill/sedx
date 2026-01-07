@@ -154,7 +154,7 @@ sudo cp sedx /usr/local/bin/
 
 ```bash
 $ sedx --version
-sedx 0.1.0
+sedx 0.2.0-alpha
 
 Copyright (c) 2025 InkyQuill
 License: MIT
@@ -320,6 +320,38 @@ sedx '/debug/!s/production/development/g' config.txt
 # Delete all except first 5 lines
 sedx '1,5!d' file.txt
 ```
+
+### Hold Space Operations
+
+SedX supports GNU sed hold space commands for advanced text manipulation:
+
+```bash
+# Move first line to end of file
+sedx '1h; 1d; $G' file.txt
+
+# Delete specific line, restore at end
+sedx '5h; 5d; $G' file.txt
+
+# Duplicate each line
+sedx 'G' file.txt
+
+# Copy line to hold space, retrieve later
+sedx '1h; 10g' file.txt
+
+# Accumulate lines, output at end
+sedx '1,5H; $g' file.txt
+```
+
+**Hold Space Commands:**
+- `h` - Copy pattern space to hold space (overwrite)
+- `H` - Append pattern space to hold space (with newline)
+- `g` - Copy hold space to pattern space (overwrite)
+- `G` - Append hold space to pattern space (with newline)
+- `x` - Exchange pattern space and hold space
+
+**Limitations:**
+- When `g` is used with a single-line address (e.g., `5g`), only the first line of multiline hold space is used
+- Full multiline replacement is supported only when `g` has no range (replaces entire file)
 
 ## 🎨 Output Format
 

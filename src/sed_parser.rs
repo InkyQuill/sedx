@@ -33,6 +33,22 @@ pub enum SedCommand {
         range: Option<(Address, Address)>, // Optional range for the group
         commands: Vec<SedCommand>, // Commands to execute
     },
+    // Hold space operations
+    Hold {
+        range: Option<(Address, Address)>, // h command - copy to hold space
+    },
+    HoldAppend {
+        range: Option<(Address, Address)>, // H command - append to hold space
+    },
+    Get {
+        range: Option<(Address, Address)>, // g command - get from hold space
+    },
+    GetAppend {
+        range: Option<(Address, Address)>, // G command - append from hold space
+    },
+    Exchange {
+        range: Option<(Address, Address)>, // x command - exchange buffers
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -94,6 +110,39 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
         return parse_group(cmd);
     }
 
+    // Check for hold space commands (before other single-char commands)
+    // These need to be checked carefully to avoid confusion with substitution patterns
+    let last_char = cmd.chars().last().unwrap_or(' ');
+
+    if last_char == 'h' || last_char == 'H' {
+        // Hold command - check it's not part of a substitution
+        if !cmd.starts_with('s') && cmd.chars().filter(|&c| c == 's').count() <= 1 {
+            return if last_char == 'H' {
+                parse_hold_append(cmd)
+            } else {
+                parse_hold(cmd)
+            };
+        }
+    }
+
+    if last_char == 'g' || last_char == 'G' {
+        // Get command - check it's not part of a substitution
+        if !cmd.starts_with('s') && cmd.chars().filter(|&c| c == 's').count() <= 1 {
+            return if last_char == 'G' {
+                parse_get_append(cmd)
+            } else {
+                parse_get(cmd)
+            };
+        }
+    }
+
+    if last_char == 'x' {
+        // Exchange command - check it's not part of a substitution
+        if !cmd.starts_with('s') && cmd.chars().filter(|&c| c == 's').count() <= 1 {
+            return parse_exchange(cmd);
+        }
+    }
+
     // Determine command type by looking at the last character or special patterns
     if cmd.ends_with('q') && !cmd.starts_with('s') {
         // Quit command
@@ -126,6 +175,11 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
             'q' => parse_quit(cmd),
             'd' => parse_delete(cmd),
             'p' => parse_print(cmd),
+            'h' => parse_hold(cmd),
+            'H' => parse_hold_append(cmd),
+            'g' => parse_get(cmd),
+            'G' => parse_get_append(cmd),
+            'x' => parse_exchange(cmd),
             _ => Err(anyhow!("Unknown sed command: {}", cmd))
         }
     }
@@ -397,6 +451,83 @@ fn parse_change(cmd: &str) -> Result<SedCommand> {
         text: parts[1].to_string(),
         address,
     })
+}
+
+// Hold space command parsing functions
+
+fn parse_hold(cmd: &str) -> Result<SedCommand> {
+    // h or addr h or addr1,addr2 h
+    let cmd = cmd.trim();
+    let addr_part = &cmd[..cmd.len() - 1]; // Remove 'h'
+
+    let range = parse_optional_range(addr_part)?;
+
+    Ok(SedCommand::Hold { range })
+}
+
+fn parse_hold_append(cmd: &str) -> Result<SedCommand> {
+    // H or addr H
+    let cmd = cmd.trim();
+    let addr_part = &cmd[..cmd.len() - 1]; // Remove 'H'
+
+    let range = parse_optional_range(addr_part)?;
+
+    Ok(SedCommand::HoldAppend { range })
+}
+
+fn parse_get(cmd: &str) -> Result<SedCommand> {
+    // g or addr g
+    let cmd = cmd.trim();
+    let addr_part = &cmd[..cmd.len() - 1]; // Remove 'g'
+
+    let range = parse_optional_range(addr_part)?;
+
+    Ok(SedCommand::Get { range })
+}
+
+fn parse_get_append(cmd: &str) -> Result<SedCommand> {
+    // G or addr G
+    let cmd = cmd.trim();
+    let addr_part = &cmd[..cmd.len() - 1]; // Remove 'G'
+
+    let range = parse_optional_range(addr_part)?;
+
+    Ok(SedCommand::GetAppend { range })
+}
+
+fn parse_exchange(cmd: &str) -> Result<SedCommand> {
+    // x or addr x
+    let cmd = cmd.trim();
+    let addr_part = &cmd[..cmd.len() - 1]; // Remove 'x'
+
+    let range = parse_optional_range(addr_part)?;
+
+    Ok(SedCommand::Exchange { range })
+}
+
+/// Helper function to parse optional ranges for hold space commands
+/// Returns None if no address (applies to all lines)
+/// Returns Some((start, end)) if address or range specified
+fn parse_optional_range(addr_part: &str) -> Result<Option<(Address, Address)>> {
+    let addr_part = addr_part.trim();
+
+    if addr_part.is_empty() {
+        return Ok(None); // No address = applies to all lines
+    }
+
+    if let Some(comma_pos) = addr_part.find(',') {
+        // Range: addr1,addr2
+        let start = &addr_part[..comma_pos];
+        let end = &addr_part[comma_pos + 1..];
+
+        let start_addr = parse_address(start)?;
+        let end_addr = parse_address(end)?;
+        return Ok(Some((start_addr, end_addr)));
+    }
+
+    // Single address
+    let addr = parse_address(addr_part)?;
+    Ok(Some((addr.clone(), addr)))
 }
 
 fn parse_address(addr: &str) -> Result<Address> {
@@ -671,5 +802,109 @@ mod tests {
             }
             _ => panic!("Expected Group command"),
         }
+    }
+
+    // Hold space command tests
+    #[test]
+    fn test_parse_hold_simple() {
+        let cmd = parse_single_command("h").unwrap();
+        assert_eq!(
+            cmd,
+            SedCommand::Hold { range: None }
+        );
+    }
+
+    #[test]
+    fn test_parse_hold_with_address() {
+        let cmd = parse_single_command("5h").unwrap();
+        assert_eq!(
+            cmd,
+            SedCommand::Hold {
+                range: Some((
+                    Address::LineNumber(5),
+                    Address::LineNumber(5)
+                ))
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_hold_append_with_range() {
+        let cmd = parse_single_command("1,5H").unwrap();
+        assert_eq!(
+            cmd,
+            SedCommand::HoldAppend {
+                range: Some((
+                    Address::LineNumber(1),
+                    Address::LineNumber(5)
+                ))
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_get_append() {
+        let cmd = parse_single_command("$G").unwrap();
+        assert_eq!(
+            cmd,
+            SedCommand::GetAppend {
+                range: Some((
+                    Address::LastLine,
+                    Address::LastLine
+                ))
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_exchange_with_pattern() {
+        let cmd = parse_single_command("/pattern/x").unwrap();
+        match cmd {
+            SedCommand::Exchange { range: Some((Address::Pattern(p), _)) } => {
+                assert_eq!(p, "pattern");
+            }
+            _ => panic!("Expected Exchange command with pattern"),
+        }
+    }
+
+    #[test]
+    fn test_parse_get_with_negation() {
+        let cmd = parse_single_command("/foo/!g").unwrap();
+        match cmd {
+            SedCommand::Get { range: Some((Address::Negated(_), _)) } => {
+                // Success
+            }
+            _ => panic!("Expected Get command with negation"),
+        }
+    }
+
+    #[test]
+    fn test_parse_hold_range_with_patterns() {
+        let cmd = parse_single_command("/start/,/end/H").unwrap();
+        match cmd {
+            SedCommand::HoldAppend { range: Some((Address::Pattern(s), Address::Pattern(e))) } => {
+                assert_eq!(s, "start");
+                assert_eq!(e, "end");
+            }
+            _ => panic!("Expected HoldAppend with pattern range"),
+        }
+    }
+
+    #[test]
+    fn test_parse_get_simple() {
+        let cmd = parse_single_command("g").unwrap();
+        assert_eq!(
+            cmd,
+            SedCommand::Get { range: None }
+        );
+    }
+
+    #[test]
+    fn test_parse_exchange_simple() {
+        let cmd = parse_single_command("x").unwrap();
+        assert_eq!(
+            cmd,
+            SedCommand::Exchange { range: None }
+        );
     }
 }

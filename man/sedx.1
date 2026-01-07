@@ -3,7 +3,7 @@
 .\" Copyright (c) 2025 InkyQuill
 .\" Licensed under MIT License
 .\"
-.TH "SEDX" "1" "January 2025" "sedx 0.1.0" "User Commands"
+.TH "SEDX" "1" "January 2025" "sedx 0.2.0-alpha" "User Commands"
 .SH NAME
 sedx \- Safe sed with preview, context, and automatic rollback
 .SH SYNOPSIS
@@ -116,6 +116,37 @@ Flags:
 .RS
 .PP
 \fB{cmd1; cmd2; cmd3}\fR - Execute multiple commands
+.RE
+.PP
+\fBHold Space Operations:\fP
+.RS
+.PP
+SedX supports GNU sed hold space commands for advanced text manipulation:
+.PP
+.IP \(bu 2
+\fBh\fR - Copy pattern space (current line) to hold space (overwrite)
+.IP \(bu 2
+\fBH\fR - Append pattern space to hold space (with newline)
+.IP \(bu 2
+\fBg\fR - Copy hold space to pattern space (overwrite)
+.IP \(bu 2
+\fBG\fR - Append hold space to pattern space (with newline)
+.IP \(bu 2
+\fBx\fR - Exchange pattern space and hold space
+.PP
+Hold space commands can be combined with addresses:
+.RS
+.IP \(bu 2
+\fB5h\fR - Copy line 5 to hold space
+.IP \(bu 2
+\fB1,5H\fR - Append lines 1-5 to hold space
+.IP \(bu 2
+\fB$g\fR - On last line, copy hold space to pattern space
+.IP \(bu 2
+\fB/pattern/x\fR - Exchange on lines matching pattern
+.RE
+.PP
+\fILimitations:\fP When \fBg\fR is used with a single-line address, only the first line of multiline hold space is used. Full multiline replacement is supported only when \fBg\fR has no range.
 .RE
 .SH EXAMPLES
 .PP

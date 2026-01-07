@@ -16,7 +16,7 @@ impl DiffFormatter {
     }
 
     /// Format file diff with context and new indicators
-    pub fn format_diff_with_context(diff: &FileDiff, context_size: usize, expression: &str) -> String {
+    pub fn format_diff_with_context(diff: &FileDiff, context_size: usize, _expression: &str) -> String {
         let use_color = Self::should_use_color();
         let mut output = String::new();
 
@@ -130,7 +130,7 @@ impl DiffFormatter {
         }
 
         // Find indices of all changed lines
-        let mut changed_indices: Vec<usize> = lines.iter()
+        let changed_indices: Vec<usize> = lines.iter()
             .enumerate()
             .filter(|(_, (_, _, ct))| *ct != ChangeType::Unchanged)
             .map(|(i, _)| i)
@@ -162,7 +162,7 @@ impl DiffFormatter {
         let mut result = Vec::new();
         let mut last_included_end = None;
 
-        for (group_idx, group) in groups.iter().enumerate() {
+        for (_group_idx, group) in groups.iter().enumerate() {
             let group_start = group.first().unwrap();
             let group_end = group.last().unwrap();
 

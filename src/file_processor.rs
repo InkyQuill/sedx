@@ -1,8 +1,11 @@
 use anyhow::{Context, Result};
 use crate::sed_parser::{SedCommand, Address};
 use regex::{Regex, RegexBuilder};
-use std::fs;
-use std::path::Path;
+use std::fs::{self, File};
+use std::path::{Path, PathBuf};
+use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::collections::VecDeque;
+use tempfile::NamedTempFile;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChangeType {
@@ -39,6 +42,271 @@ pub struct FileChange {
 pub struct FileProcessor {
     commands: Vec<SedCommand>,
     printed_lines: Vec<String>,
+    hold_space: String,
+}
+
+/// Result of applying a command in streaming mode
+#[derive(Debug)]
+enum StreamResult {
+    Output(String),           // Line should be output
+    Skip,                     // Don't output (deleted)
+    StopProcessing,           // Quit command encountered
+}
+
+/// Processor for streaming large files with constant memory usage
+pub struct StreamProcessor {
+    commands: Vec<SedCommand>,
+    hold_space: String,
+    current_line: usize,
+}
+
+impl StreamProcessor {
+    pub fn new(commands: Vec<SedCommand>) -> Self {
+        Self {
+            commands,
+            hold_space: String::new(),
+            current_line: 0,
+        }
+    }
+
+    /// Check if file should use streaming based on size
+    fn should_use_streaming(file_size: u64) -> bool {
+        const STREAMING_THRESHOLD: u64 = 100 * 1024 * 1024; // 100MB
+        file_size >= STREAMING_THRESHOLD
+    }
+
+    /// Apply substitution to a single line
+    fn apply_substitution_to_line(
+        &self,
+        line: &str,
+        pattern: &str,
+        replacement: &str,
+        flags: &Vec<char>,
+    ) -> Result<String> {
+        let global = flags.contains(&'g');
+        let case_insensitive = flags.contains(&'i');
+
+        // Check for numbered substitution (e.g., s/foo/bar/2)
+        let nth_occurrence: Option<usize> = flags.iter()
+            .find(|c| c.is_ascii_digit())
+            .and_then(|c| c.to_digit(10))
+            .map(|d| d as usize);
+
+        let re = if case_insensitive {
+            RegexBuilder::new(pattern)
+                .case_insensitive(true)
+                .build()
+                .with_context(|| format!("Invalid regex pattern: {}", pattern))?
+        } else {
+            Regex::new(pattern)
+                .with_context(|| format!("Invalid regex pattern: {}", pattern))?
+        };
+
+        match nth_occurrence {
+            Some(n) if n > 0 => {
+                // Replace only the Nth occurrence
+                let mut result = line.to_string();
+                let mut count = 0;
+                for mat in re.find_iter(line) {
+                    count += 1;
+                    if count == n {
+                        result = format!("{}{}{}",
+                            &line[..mat.start()],
+                            replacement,
+                            &line[mat.end()..]
+                        );
+                        break;
+                    }
+                }
+                Ok(result)
+            }
+            Some(_) => Ok(line.to_string()), // 0 means no substitution
+            None => {
+                // Standard behavior
+                if global {
+                    Ok(re.replace_all(line, replacement).to_string())
+                } else {
+                    Ok(re.replace(line, replacement).to_string())
+                }
+            }
+        }
+    }
+
+    /// Process a file using streaming approach (constant memory)
+    ///
+    /// Currently implements substitution commands. More command types will be added.
+    pub fn process_streaming(&mut self, file_path: &Path) -> Result<FileDiff> {
+        // Check file exists and get size
+        let metadata = fs::metadata(file_path)
+            .with_context(|| format!("Failed to read file metadata: {}", file_path.display()))?;
+
+        if !Self::should_use_streaming(metadata.len()) {
+            // File is small, delegate to in-memory processing
+            let mut processor = FileProcessor::new(self.commands.clone());
+            return processor.process_file_with_context(file_path);
+        }
+
+        self.process_streaming_forced(file_path)
+    }
+
+    /// Process a file using streaming approach, forcing streaming mode
+    /// regardless of file size (used for testing)
+    pub fn process_streaming_forced(&mut self, file_path: &Path) -> Result<FileDiff> {
+        self.process_streaming_internal(file_path)
+    }
+
+    /// Internal streaming implementation (shared by both public methods)
+    fn process_streaming_internal(&mut self, file_path: &Path) -> Result<FileDiff> {
+        // Get parent directory for temp file
+        let parent_dir = file_path.parent()
+            .unwrap_or(Path::new("."));
+
+        // Create temp file in same directory as target (for atomic rename)
+        let temp_file = NamedTempFile::new_in(parent_dir)
+            .with_context(|| format!("Failed to create temp file in {}", parent_dir.display()))?;
+
+        // Open input file
+        let input_file = File::open(file_path)
+            .with_context(|| format!("Failed to open file: {}", file_path.display()))?;
+
+        let reader = BufReader::new(input_file);
+
+        let mut line_num = 0;
+        let mut changes: Vec<LineChange> = Vec::new();
+
+        // Write using a separate block to ensure writer is dropped before persist
+        {
+            let mut writer = BufWriter::new(temp_file.as_file());
+
+            // Read line by line
+            for line_result in reader.lines() {
+                let line = line_result
+                    .with_context(|| format!("Failed to read line from {}", file_path.display()))?;
+
+                line_num += 1;
+                self.current_line = line_num;
+
+                // Apply sed commands to this line
+                let mut processed_line = line.clone();
+                let mut line_changed = false;
+                let mut skip_line = false;  // For delete command
+                let mut print_line = false;  // For print command
+
+                for cmd in &self.commands {
+                    match cmd {
+                        SedCommand::Substitution { pattern, replacement, flags, range } => {
+                            // For now, only handle substitution without range (apply to all lines)
+                            if range.is_none() {
+                                let original_line = processed_line.clone();
+                                processed_line = self.apply_substitution_to_line(
+                                    &processed_line,
+                                    pattern,
+                                    replacement,
+                                    flags
+                                )?;
+                                line_changed = processed_line != original_line;
+                            } else {
+                                // Ranges not yet supported in streaming - delegate to in-memory
+                                drop(writer);
+                                let mut processor = FileProcessor::new(self.commands.clone());
+                                return processor.process_file_with_context(file_path);
+                            }
+                        }
+                        SedCommand::Delete { range: (start, end) } => {
+                            // Check if range affects all lines (simple case)
+                            match (start, end) {
+                                (Address::LineNumber(1), Address::LastLine) => {
+                                    // Delete all lines
+                                    skip_line = true;
+                                }
+                                _ => {
+                                    // Complex ranges not yet supported - delegate to in-memory
+                                    drop(writer);
+                                    let mut processor = FileProcessor::new(self.commands.clone());
+                                    return processor.process_file_with_context(file_path);
+                                }
+                            }
+                        }
+                        SedCommand::Print { range: (start, end) } => {
+                            // Check if range affects all lines (simple case)
+                            match (start, end) {
+                                (Address::LineNumber(1), Address::LastLine) => {
+                                    // Print all lines
+                                    print_line = true;
+                                }
+                                _ => {
+                                    // Complex ranges not yet supported - delegate to in-memory
+                                    drop(writer);
+                                    let mut processor = FileProcessor::new(self.commands.clone());
+                                    return processor.process_file_with_context(file_path);
+                                }
+                            }
+                        }
+                        // Other commands not yet supported - delegate to in-memory
+                        _ => {
+                            drop(writer);
+                            let mut processor = FileProcessor::new(self.commands.clone());
+                            return processor.process_file_with_context(file_path);
+                        }
+                    }
+                }
+
+                // Handle print command (print to stdout)
+                if print_line {
+                    println!("{}", processed_line);
+                }
+
+                // Skip writing if line was deleted
+                if skip_line {
+                    changes.push(LineChange {
+                        line_number: line_num,
+                        change_type: ChangeType::Deleted,
+                        content: line.clone(),
+                        old_content: None,
+                    });
+                    continue;  // Don't write this line
+                }
+
+                // Write the processed line
+                writeln!(writer, "{}", processed_line)
+                    .with_context(|| format!("Failed to write to temp file"))?;
+
+                // Track line for diff
+                let change_type = if line_changed {
+                    ChangeType::Modified
+                } else {
+                    ChangeType::Unchanged
+                };
+
+                changes.push(LineChange {
+                    line_number: line_num,
+                    change_type,
+                    content: processed_line,
+                    old_content: if line_changed { Some(line) } else { None },
+                });
+            }
+
+            // Ensure all data is written to disk
+            writer.flush()
+                .with_context(|| "Failed to flush temp file")?;
+        } // writer dropped here
+
+        // Atomic rename: temp file becomes the actual file
+        temp_file.persist(file_path)
+            .with_context(|| format!("Failed to persist temp file to {}", file_path.display()))?;
+
+        // Build FileDiff result
+        let all_lines: Vec<(usize, String, ChangeType)> = changes.iter()
+            .map(|c| (c.line_number, c.content.clone(), c.change_type.clone()))
+            .collect();
+
+        Ok(FileDiff {
+            file_path: file_path.display().to_string(),
+            changes,
+            all_lines,
+            printed_lines: Vec::new(),
+        })
+    }
 }
 
 impl FileProcessor {
@@ -46,6 +314,7 @@ impl FileProcessor {
         Self {
             commands,
             printed_lines: Vec::new(),
+            hold_space: String::new(),
         }
     }
 
@@ -73,6 +342,8 @@ impl FileProcessor {
 
         // Clear printed lines from previous run
         self.printed_lines.clear();
+        // Reset hold space for each file
+        self.hold_space.clear();
 
         // Apply all sed commands (stop if quit is encountered)
         let commands = self.commands.clone();
@@ -209,6 +480,21 @@ impl FileProcessor {
                 let commands_vec = commands.to_vec();
                 return self.apply_group(lines, range, &commands_vec);
             }
+            SedCommand::Hold { range } => {
+                self.apply_hold(lines, range)?;
+            }
+            SedCommand::HoldAppend { range } => {
+                self.apply_hold_append(lines, range)?;
+            }
+            SedCommand::Get { range } => {
+                self.apply_get(lines, range)?;
+            }
+            SedCommand::GetAppend { range } => {
+                self.apply_get_append(lines, range)?;
+            }
+            SedCommand::Exchange { range } => {
+                self.apply_exchange(lines, range)?;
+            }
         }
         Ok(true)
     }
@@ -230,7 +516,7 @@ impl FileProcessor {
         // Check for negated pattern range
         if let Some((start, end)) = range {
             if let (Address::Negated(start_inner), Address::Negated(end_inner)) = (start, end) {
-                if let (Address::Pattern(start_pat), Address::Pattern(end_pat)) = (start_inner.as_ref(), end_inner.as_ref()) {
+                if let (Address::Pattern(start_pat), Address::Pattern(_end_pat)) = (start_inner.as_ref(), end_inner.as_ref()) {
                     // Apply substitution to lines NOT matching the pattern
                     let pattern_re = Regex::new(start_pat)
                         .with_context(|| format!("Invalid regex pattern: {}", start_pat))?;
@@ -346,7 +632,7 @@ impl FileProcessor {
 
         // Check if both addresses are negated patterns - delete lines NOT matching
         if let (Address::Negated(start_inner), Address::Negated(end_inner)) = (&range.0, &range.1) {
-            if let (Address::Pattern(start_pat), Address::Pattern(end_pat)) = (start_inner.as_ref(), end_inner.as_ref()) {
+            if let (Address::Pattern(start_pat), Address::Pattern(_end_pat)) = (start_inner.as_ref(), end_inner.as_ref()) {
                 return self.apply_negated_pattern_delete(lines, start_pat);
             }
         }
@@ -516,7 +802,7 @@ impl FileProcessor {
     fn collect_print_lines(&mut self, lines: &[String], range: &(Address, Address)) -> Result<()> {
         // Special handling for negated pattern addresses
         if let (Address::Negated(start_inner), Address::Negated(end_inner)) = (&range.0, &range.1) {
-            if let (Address::Pattern(start_pat), Address::Pattern(end_pat)) = (start_inner.as_ref(), end_inner.as_ref()) {
+            if let (Address::Pattern(start_pat), Address::Pattern(_end_pat)) = (start_inner.as_ref(), end_inner.as_ref()) {
                 // Print lines NOT matching the pattern
                 use regex::Regex;
                 let re = Regex::new(start_pat)
@@ -593,5 +879,441 @@ impl FileProcessor {
                 Ok(inner_idx + 1)
             }
         }
+    }
+
+    // Hold space operations
+
+    /// h command: Copy pattern space (current line) to hold space (overwrite)
+    fn apply_hold(&mut self, lines: &mut Vec<String>, range: &Option<(Address, Address)>) -> Result<()> {
+        match range {
+            None => {
+                // No range - copy last line to hold space
+                if let Some(last_line) = lines.last() {
+                    self.hold_space = last_line.clone();
+                }
+            }
+            Some((start, end)) => {
+                let start_idx = self.resolve_address(&start, lines, 0)?;
+                let end_idx = self.resolve_address(&end, lines, lines.len().saturating_sub(1))?;
+
+                // Apply to range - hold space gets set to each line in sequence
+                // Final value is the last line in range (GNU sed behavior)
+                if end_idx < lines.len() {
+                    self.hold_space = lines[end_idx].clone();
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// H command: Append pattern space to hold space (with newline)
+    fn apply_hold_append(&mut self, lines: &mut Vec<String>, range: &Option<(Address, Address)>) -> Result<()> {
+        match range {
+            None => {
+                // Apply to each line (GNU sed: H applies to pattern space of each line)
+                // In our implementation, "no range" means apply once to the whole content
+                // For H without range, we append the last line
+                if let Some(last_line) = lines.last() {
+                    if !self.hold_space.is_empty() {
+                        self.hold_space.push('\n');
+                    }
+                    self.hold_space.push_str(last_line);
+                }
+            }
+            Some((start, end)) => {
+                let start_idx = self.resolve_address(&start, lines, 0)?;
+                let end_idx = self.resolve_address(&end, lines, lines.len().saturating_sub(1))?;
+
+                // Append all lines in range to hold space
+                for i in start_idx..=end_idx.min(lines.len() - 1) {
+                    if !self.hold_space.is_empty() {
+                        self.hold_space.push('\n');
+                    }
+                    self.hold_space.push_str(&lines[i]);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// g command: Copy hold space to pattern space (overwrite current line(s))
+    fn apply_get(&mut self, lines: &mut Vec<String>, range: &Option<(Address, Address)>) -> Result<()> {
+        // Split hold space into lines
+        let hold_lines: Vec<String> = if self.hold_space.is_empty() {
+            Vec::new()
+        } else {
+            self.hold_space.lines().map(String::from).collect()
+        };
+
+        match range {
+            None => {
+                // No range - replace all lines with hold space content
+                lines.clear();
+                lines.extend(hold_lines);
+            }
+            Some((start, end)) => {
+                let start_idx = self.resolve_address(&start, lines, 0)?;
+                let end_idx = self.resolve_address(&end, lines, lines.len().saturating_sub(1))?;
+
+                // Replace each line in range with hold space content
+                // For multiline hold space with single-line address, use first line
+                for i in start_idx..=end_idx.min(lines.len() - 1) {
+                    if hold_lines.is_empty() {
+                        lines[i] = String::new();
+                    } else {
+                        // Use first line of hold space (SedX limitation)
+                        lines[i] = hold_lines[0].clone();
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// G command: Append hold space to pattern space (with newline)
+    fn apply_get_append(&mut self, lines: &mut Vec<String>, range: &Option<(Address, Address)>) -> Result<()> {
+        match range {
+            None => {
+                // Append hold space (or just newline if empty) to each line
+                for line in lines.iter_mut() {
+                    line.push('\n');
+                    if !self.hold_space.is_empty() {
+                        line.push_str(&self.hold_space);
+                    }
+                }
+            }
+            Some((start, end)) => {
+                let start_idx = self.resolve_address(&start, lines, 0)?;
+                let end_idx = self.resolve_address(&end, lines, lines.len().saturating_sub(1))?;
+
+                for i in start_idx..=end_idx.min(lines.len() - 1) {
+                    lines[i].push('\n');
+                    if !self.hold_space.is_empty() {
+                        lines[i].push_str(&self.hold_space);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// x command: Exchange pattern space and hold space
+    fn apply_exchange(&mut self, lines: &mut Vec<String>, range: &Option<(Address, Address)>) -> Result<()> {
+        match range {
+            None => {
+                // Exchange all lines with hold space
+                let pattern_content = lines.join("\n");
+                let hold_content = self.hold_space.clone();
+
+                // Set hold space to pattern space
+                self.hold_space = pattern_content;
+
+                // Set pattern space to old hold space
+                // If hold space was empty, don't clear lines (GNU sed behavior)
+                if !hold_content.is_empty() {
+                    lines.clear();
+                    for line in hold_content.lines() {
+                        lines.push(line.to_string());
+                    }
+                }
+                // If hold space was empty, lines remain unchanged
+            }
+            Some((start, end)) => {
+                let start_idx = self.resolve_address(&start, lines, 0)?;
+                let end_idx = self.resolve_address(&end, lines, lines.len().saturating_sub(1))?;
+
+                // Exchange each line in range with hold space
+                for i in start_idx..=end_idx.min(lines.len() - 1) {
+                    let temp = lines[i].clone();
+                    // Only exchange if hold space is not empty
+                    if !self.hold_space.is_empty() {
+                        lines[i] = self.hold_space.clone();
+                    }
+                    self.hold_space = temp;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::io::Write;
+    use crate::sed_parser::parse_sed_expression;
+
+    #[test]
+    fn test_streaming_passthrough() {
+        // Create a temporary test file
+        let test_file_path = "/tmp/test_streaming.txt";
+        let original_content = "line 1\nline 2\nline 3\nline 4\nline 5\n";
+
+        {
+            let mut file = fs::File::create(test_file_path)
+                .expect("Failed to create test file");
+            file.write_all(original_content.as_bytes())
+                .expect("Failed to write to test file");
+        }
+
+        // Parse an empty command list (no modifications)
+        let commands = parse_sed_expression("").expect("Failed to parse empty expression");
+        let mut processor = StreamProcessor::new(commands);
+
+        // Process the file
+        let result = processor.process_streaming(Path::new(test_file_path));
+        assert!(result.is_ok(), "Processing should succeed");
+
+        let diff = result.unwrap();
+        assert_eq!(diff.all_lines.len(), 5, "Should have 5 lines");
+
+        // Verify content is unchanged
+        let processed_content = fs::read_to_string(test_file_path)
+            .expect("Failed to read processed file");
+        assert_eq!(processed_content, original_content, "Content should be unchanged");
+
+        // Clean up
+        fs::remove_file(test_file_path).ok();
+    }
+
+    #[test]
+    fn test_streaming_threshold_detection() {
+        // Test that small files use in-memory processing
+        assert!(!StreamProcessor::should_use_streaming(10 * 1024 * 1024)); // 10MB
+        assert!(!StreamProcessor::should_use_streaming(99 * 1024 * 1024)); // 99MB
+
+        // Test that large files use streaming
+        assert!(StreamProcessor::should_use_streaming(100 * 1024 * 1024)); // 100MB
+        assert!(StreamProcessor::should_use_streaming(101 * 1024 * 1024)); // 101MB
+        assert!(StreamProcessor::should_use_streaming(1024 * 1024 * 1024)); // 1GB
+    }
+
+    #[test]
+    fn test_streaming_substitution() {
+        // Test basic substitution
+        let test_file_path = "/tmp/test_substitution.txt";
+        let original_content = "foo bar\nbaz foo\nfoo foo\n";
+
+        {
+            let mut file = fs::File::create(test_file_path)
+                .expect("Failed to create test file");
+            file.write_all(original_content.as_bytes())
+                .expect("Failed to write to test file");
+        }
+
+        // Parse substitution command
+        let commands = parse_sed_expression("s/foo/QUX/")
+            .expect("Failed to parse substitution");
+        let mut processor = StreamProcessor::new(commands);
+
+        // Process the file (force streaming for testing)
+        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        assert!(result.is_ok(), "Processing should succeed");
+
+        let diff = result.unwrap();
+        assert_eq!(diff.all_lines.len(), 3, "Should have 3 lines");
+
+        // Verify content
+        let processed_content = fs::read_to_string(test_file_path)
+            .expect("Failed to read processed file");
+        let expected = "QUX bar\nbaz QUX\nQUX foo\n";
+        assert_eq!(processed_content, expected, "Content should be substituted");
+
+        // Clean up
+        fs::remove_file(test_file_path).ok();
+    }
+
+    #[test]
+    fn test_streaming_global_substitution() {
+        // Test global substitution (g flag)
+        let test_file_path = "/tmp/test_global.txt";
+        let original_content = "foo foo foo\nbar foo bar\n";
+
+        {
+            let mut file = fs::File::create(test_file_path)
+                .expect("Failed to create test file");
+            file.write_all(original_content.as_bytes())
+                .expect("Failed to write to test file");
+        }
+
+        // Parse global substitution command
+        let commands = parse_sed_expression("s/foo/QUX/g")
+            .expect("Failed to parse substitution");
+        let mut processor = StreamProcessor::new(commands);
+
+        // Process the file (force streaming for testing)
+        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        assert!(result.is_ok(), "Processing should succeed");
+
+        // Verify content
+        let processed_content = fs::read_to_string(test_file_path)
+            .expect("Failed to read processed file");
+        let expected = "QUX QUX QUX\nbar QUX bar\n";
+        assert_eq!(processed_content, expected, "All occurrences should be substituted");
+
+        // Clean up
+        fs::remove_file(test_file_path).ok();
+    }
+
+    #[test]
+    fn test_streaming_numbered_substitution() {
+        // Test numbered substitution (s/foo/bar/2)
+        let test_file_path = "/tmp/test_numbered.txt";
+        let original_content = "foo foo foo foo\n";
+
+        {
+            let mut file = fs::File::create(test_file_path)
+                .expect("Failed to create test file");
+            file.write_all(original_content.as_bytes())
+                .expect("Failed to write to test file");
+        }
+
+        // Parse numbered substitution command
+        let commands = parse_sed_expression("s/foo/QUX/2")
+            .expect("Failed to parse substitution");
+        let mut processor = StreamProcessor::new(commands);
+
+        // Process the file (force streaming for testing)
+        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        assert!(result.is_ok(), "Processing should succeed");
+
+        // Verify only 2nd occurrence was replaced
+        let processed_content = fs::read_to_string(test_file_path)
+            .expect("Failed to read processed file");
+        let expected = "foo QUX foo foo\n";
+        assert_eq!(processed_content, expected, "Only 2nd occurrence should be substituted");
+
+        // Clean up
+        fs::remove_file(test_file_path).ok();
+    }
+
+    #[test]
+    fn test_streaming_case_insensitive() {
+        // Test case-insensitive substitution (i flag)
+        let test_file_path = "/tmp/test_case_insensitive.txt";
+        let original_content = "FOO bar Foo baz\n";
+
+        {
+            let mut file = fs::File::create(test_file_path)
+                .expect("Failed to create test file");
+            file.write_all(original_content.as_bytes())
+                .expect("Failed to write to test file");
+        }
+
+        // Parse case-insensitive substitution
+        let commands = parse_sed_expression("s/foo/QUX/gi")
+            .expect("Failed to parse substitution");
+        let mut processor = StreamProcessor::new(commands);
+
+        // Process the file (force streaming for testing)
+        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        assert!(result.is_ok(), "Processing should succeed");
+
+        // Verify all case variants were replaced
+        let processed_content = fs::read_to_string(test_file_path)
+            .expect("Failed to read processed file");
+        let expected = "QUX bar QUX baz\n";
+        assert_eq!(processed_content, expected, "All case variants should be substituted");
+
+        // Clean up
+        fs::remove_file(test_file_path).ok();
+    }
+
+    #[test]
+    fn test_streaming_delete() {
+        // Test delete command (deletes all lines for now)
+        let test_file_path = "/tmp/test_delete.txt";
+        let original_content = "line 1\nline 2\nline 3\n";
+
+        {
+            let mut file = fs::File::create(test_file_path)
+                .expect("Failed to create test file");
+            file.write_all(original_content.as_bytes())
+                .expect("Failed to write to test file");
+        }
+
+        // Parse delete command (1,$d means delete from line 1 to last line)
+        let commands = parse_sed_expression(r"1,$d")
+            .expect("Failed to parse delete");
+        let mut processor = StreamProcessor::new(commands);
+
+        // Process the file (force streaming for testing)
+        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        assert!(result.is_ok(), "Processing should succeed");
+
+        let diff = result.unwrap();
+        assert_eq!(diff.all_lines.len(), 3, "Should track 3 deleted lines");
+
+        // Verify all lines were deleted
+        let processed_content = fs::read_to_string(test_file_path)
+            .expect("Failed to read processed file");
+        assert_eq!(processed_content, "", "All lines should be deleted");
+
+        // Clean up
+        fs::remove_file(test_file_path).ok();
+    }
+
+    #[test]
+    fn test_streaming_delete_with_substitution() {
+        // Test combination of substitution and delete
+        let test_file_path = "/tmp/test_delete_sub.txt";
+        let original_content = "foo\nbar\nbaz\n";
+
+        {
+            let mut file = fs::File::create(test_file_path)
+                .expect("Failed to create test file");
+            file.write_all(original_content.as_bytes())
+                .expect("Failed to write to test file");
+        }
+
+        // Parse substitution then delete (will delete all lines)
+        let commands = parse_sed_expression(r"s/bar/BAR/; 1,$d")
+            .expect("Failed to parse commands");
+        let mut processor = StreamProcessor::new(commands);
+
+        // Process the file (force streaming for testing)
+        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        assert!(result.is_ok(), "Processing should succeed");
+
+        // Verify all lines were deleted
+        let processed_content = fs::read_to_string(test_file_path)
+            .expect("Failed to read processed file");
+        assert_eq!(processed_content, "", "All lines should be deleted");
+
+        // Clean up
+        fs::remove_file(test_file_path).ok();
+    }
+
+    #[test]
+    fn test_streaming_print() {
+        // Test print command (prints to stdout, file unchanged)
+        let test_file_path = "/tmp/test_print.txt";
+        let original_content = "line 1\nline 2\nline 3\n";
+
+        {
+            let mut file = fs::File::create(test_file_path)
+                .expect("Failed to create test file");
+            file.write_all(original_content.as_bytes())
+                .expect("Failed to write to test file");
+        }
+
+        // Parse print command (1,$p means print from line 1 to last line)
+        let commands = parse_sed_expression(r"1,$p")
+            .expect("Failed to parse print");
+        let mut processor = StreamProcessor::new(commands);
+
+        // Process the file (force streaming for testing)
+        // Note: this will print to stdout during test
+        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        assert!(result.is_ok(), "Processing should succeed");
+
+        // Verify file content is unchanged (print doesn't modify file)
+        let processed_content = fs::read_to_string(test_file_path)
+            .expect("Failed to read processed file");
+        assert_eq!(processed_content, original_content, "File should be unchanged");
+
+        // Clean up
+        fs::remove_file(test_file_path).ok();
     }
 }
