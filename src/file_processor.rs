@@ -1,11 +1,36 @@
 use anyhow::{Context, Result};
-use crate::sed_parser::{SedCommand, Address};
+use crate::command::{Command, Address, SubstitutionFlags};
 use regex::{Regex, RegexBuilder};
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::collections::VecDeque;
 use tempfile::NamedTempFile;
+use std::collections::{HashMap, HashSet};
+
+// Chunk 8: Key for tracking mixed range states per command
+#[derive(Clone, Hash, PartialEq, Eq)]
+struct MixedRangeKey {
+    command_index: usize,
+}
+
+// Chunk 8: State for mixed ranges
+#[derive(Clone, PartialEq)]
+enum MixedRangeState {
+    LookingForPattern,
+    InRangeUntilLine { target_line: usize },
+    InRangeUntilPattern { end_pattern: String },
+}
+
+/// Pattern range state for streaming mode (Chunk 8)
+#[derive(Clone, PartialEq)]
+enum PatternRangeState {
+    LookingForStart,   // Looking for start pattern
+    InRange,          // Currently inside /start/,/end/ range
+    // Chunk 8: Mixed range states
+    WaitingForLineNumber { target_line: usize },      // /start/,10 - waiting to reach line 10
+    CountingRelativeLines { remaining: usize },       // /start/,+5 - counting N lines after match
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChangeType {
@@ -41,7 +66,7 @@ pub struct FileChange {
 }
 
 pub struct FileProcessor {
-    commands: Vec<SedCommand>,
+    commands: Vec<Command>,
     printed_lines: Vec<String>,
     hold_space: String,
 }
@@ -56,7 +81,7 @@ enum StreamResult {
 
 /// Processor for streaming large files with constant memory usage
 pub struct StreamProcessor {
-    commands: Vec<SedCommand>,
+    commands: Vec<Command>,
     hold_space: String,
     current_line: usize,
     // Sliding window for diff context (Chunk 7)
@@ -64,10 +89,16 @@ pub struct StreamProcessor {
     context_size: usize,
     // State for reading context after a change
     context_lines_to_read: usize,  // How many more lines to read as context
+    // Pattern range states (Chunk 8): (start_pattern, end_pattern) -> state
+    pattern_range_states: HashMap<(String, String), PatternRangeState>,
+    // Chunk 8: Mixed range states for tracking complex ranges
+    mixed_range_states: HashMap<MixedRangeKey, MixedRangeState>,
+    // Dry run mode: if true, don't persist changes to disk
+    dry_run: bool,
 }
 
 impl StreamProcessor {
-    pub fn new(commands: Vec<SedCommand>) -> Self {
+    pub fn new(commands: Vec<Command>) -> Self {
         Self {
             commands,
             hold_space: String::new(),
@@ -75,12 +106,21 @@ impl StreamProcessor {
             context_buffer: VecDeque::new(),
             context_size: 2, // Default context size (2 lines before/after changes)
             context_lines_to_read: 0,
+            pattern_range_states: HashMap::new(),
+            mixed_range_states: HashMap::new(),
+            dry_run: false,
         }
     }
 
     /// Set context size for diff output (default: 2)
     pub fn with_context_size(mut self, size: usize) -> Self {
         self.context_size = size;
+        self
+    }
+
+    /// Set dry run mode (don't persist changes to disk)
+    pub fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
         self
     }
 
@@ -108,16 +148,11 @@ impl StreamProcessor {
         line: &str,
         pattern: &str,
         replacement: &str,
-        flags: &Vec<char>,
+        flags: &SubstitutionFlags,
     ) -> Result<String> {
-        let global = flags.contains(&'g');
-        let case_insensitive = flags.contains(&'i');
-
-        // Check for numbered substitution (e.g., s/foo/bar/2)
-        let nth_occurrence: Option<usize> = flags.iter()
-            .find(|c| c.is_ascii_digit())
-            .and_then(|c| c.to_digit(10))
-            .map(|d| d as usize);
+        let global = flags.global;
+        let case_insensitive = flags.case_insensitive;
+        let nth_occurrence = flags.nth;
 
         let re = if case_insensitive {
             RegexBuilder::new(pattern)
@@ -155,6 +190,212 @@ impl StreamProcessor {
                 } else {
                     Ok(re.replace(line, replacement).to_string())
                 }
+            }
+        }
+    }
+
+    /// Check if a line is within a pattern range, updating state as needed (Chunk 8)
+    fn check_pattern_range(&mut self, line: &str, start_pat: &str, end_pat: &str) -> Result<bool> {
+        let key = (start_pat.to_string(), end_pat.to_string());
+        let state = self.pattern_range_states.entry(key.clone()).or_insert(PatternRangeState::LookingForStart);
+
+        let start_re = Regex::new(start_pat)
+            .with_context(|| format!("Invalid regex pattern: {}", start_pat))?;
+        let end_re = Regex::new(end_pat)
+            .with_context(|| format!("Invalid regex pattern: {}", end_pat))?;
+
+        let in_range = match state {
+            PatternRangeState::LookingForStart => {
+                if start_re.is_match(line) {
+                    *state = PatternRangeState::InRange;
+                    true
+                } else {
+                    false
+                }
+            }
+            PatternRangeState::InRange => {
+                if end_re.is_match(line) {
+                    *state = PatternRangeState::LookingForStart;
+                    true // Include the end line in the range
+                } else {
+                    true
+                }
+            }
+            // These states should not appear in pattern-to-pattern ranges, but handle them gracefully
+            PatternRangeState::WaitingForLineNumber { .. } | PatternRangeState::CountingRelativeLines { .. } => {
+                false
+            }
+        };
+
+        Ok(in_range)
+    }
+
+    /// Check mixed pattern-to-line range: /start/,10 (Chunk 8)
+    fn check_mixed_pattern_to_line(
+        &mut self,
+        line: &str,
+        start_pat: &str,
+        end_line: usize,
+        command_index: usize,
+    ) -> Result<bool> {
+        let key = MixedRangeKey { command_index };
+        let state = self.mixed_range_states.entry(key).or_insert(MixedRangeState::LookingForPattern);
+
+        let start_re = Regex::new(start_pat)
+            .with_context(|| format!("Invalid regex pattern: {}", start_pat))?;
+
+        let in_range = match state {
+            MixedRangeState::LookingForPattern => {
+                if start_re.is_match(line) {
+                    *state = MixedRangeState::InRangeUntilLine { target_line: end_line };
+                    true
+                } else {
+                    false
+                }
+            }
+            MixedRangeState::InRangeUntilLine { target_line } => {
+                if self.current_line >= *target_line {
+                    *state = MixedRangeState::LookingForPattern; // Reset for next occurrence
+                    true // Include the end line
+                } else {
+                    true
+                }
+            }
+            _ => false,
+        };
+
+        Ok(in_range)
+    }
+
+    /// Check mixed line-to-pattern range: 5,/end/ (Chunk 8)
+    fn check_mixed_line_to_pattern(
+        &mut self,
+        line: &str,
+        start_line: usize,
+        end_pat: &str,
+        command_index: usize,
+    ) -> Result<bool> {
+        let key = MixedRangeKey { command_index };
+        let state = self.mixed_range_states.entry(key).or_insert(MixedRangeState::LookingForPattern);
+
+        let in_range = match state {
+            MixedRangeState::LookingForPattern => {
+                if self.current_line >= start_line {
+                    *state = MixedRangeState::InRangeUntilPattern { end_pattern: end_pat.to_string() };
+                    true
+                } else {
+                    false
+                }
+            }
+            MixedRangeState::InRangeUntilPattern { end_pattern } => {
+                let end_re = Regex::new(end_pattern)
+                    .with_context(|| format!("Invalid regex pattern: {}", end_pattern))?;
+                if end_re.is_match(line) {
+                    *state = MixedRangeState::LookingForPattern; // Reset for next occurrence
+                    true // Include the end line
+                } else {
+                    true
+                }
+            }
+            _ => false,
+        };
+
+        Ok(in_range)
+    }
+
+    /// Check relative range: /start/,+5 (Chunk 8)
+    fn check_relative_range(
+        &mut self,
+        line: &str,
+        pattern: &str,
+        offset: isize,
+        command_index: usize,
+    ) -> Result<bool> {
+        let key = MixedRangeKey { command_index };
+
+        // Remove old state and check fresh each time
+        let pat_re = Regex::new(pattern)
+            .with_context(|| format!("Invalid regex pattern: {}", pattern))?;
+
+        if pat_re.is_match(line) {
+            // Pattern matched - start counting
+            self.mixed_range_states.insert(key, MixedRangeState::InRangeUntilLine {
+                target_line: self.current_line + offset as usize,
+            });
+            Ok(true)
+        } else {
+            // Check if we're in a counting state
+            if let Some(MixedRangeState::InRangeUntilLine { target_line }) = self.mixed_range_states.get(&key) {
+                if self.current_line <= *target_line {
+                    Ok(true)
+                } else {
+                    // Past the target, remove state
+                    self.mixed_range_states.remove(&key);
+                    Ok(false)
+                }
+            } else {
+                Ok(false)
+            }
+        }
+    }
+
+    /// Check stepping address: 1~2 (every 2nd line from line 1) (Chunk 8)
+    fn check_stepping(&self, start: usize, step: usize) -> bool {
+        if self.current_line < start {
+            false
+        } else {
+            (self.current_line - start) % step == 0
+        }
+    }
+
+    /// Check if a command with a pattern range should apply to the current line (Chunk 8)
+    fn should_apply_command_with_range(
+        &mut self,
+        line: &str,
+        range: &(Address, Address),
+        command_index: usize,
+    ) -> Result<bool> {
+        use Address::*;
+
+        match (&range.0, &range.1) {
+            // Pattern-to-pattern: /start/,/end/
+            (Pattern(start_pat), Pattern(end_pat)) => {
+                self.check_pattern_range(line, start_pat, end_pat)
+            }
+
+            // Mixed pattern-to-line: /start/,10
+            (Pattern(start_pat), LineNumber(end_line)) => {
+                self.check_mixed_pattern_to_line(line, start_pat, *end_line, command_index)
+            }
+
+            // Mixed line-to-pattern: 5,/end/
+            (LineNumber(start_line), Pattern(end_pat)) => {
+                self.check_mixed_line_to_pattern(line, *start_line, end_pat, command_index)
+            }
+
+            // Relative range: /start/,+5
+            (Pattern(start_pat), Relative { base: _, offset }) => {
+                self.check_relative_range(line, start_pat, *offset, command_index)
+            }
+
+            // Line range: 5,10
+            (LineNumber(start), LineNumber(end)) => {
+                Ok(self.current_line >= *start && self.current_line <= *end)
+            }
+
+            // All lines: 1,$
+            (LineNumber(1), LastLine) => {
+                Ok(true)
+            }
+
+            // Stepping: 1~2
+            (Step { start, step }, _) | (_, Step { start, step }) => {
+                Ok(self.check_stepping(*start, *step))
+            }
+
+            _ => {
+                // Other range types not supported in streaming - delegate to in-memory
+                Ok(false)
             }
         }
     }
@@ -221,11 +462,18 @@ impl StreamProcessor {
                 let mut append_text: Option<String> = None;  // For append command
                 let mut should_quit_after_line = false;  // For quit command
 
-                for cmd in &self.commands {
+                // Clone commands to avoid borrow checker issues with pattern range state updates
+                let commands = self.commands.clone();
+                for (cmd_index, cmd) in commands.iter().enumerate() {
                     match cmd {
-                        SedCommand::Substitution { pattern, replacement, flags, range } => {
-                            // For now, only handle substitution without range (apply to all lines)
-                            if range.is_none() {
+                        Command::Substitution { pattern, replacement, flags, range } => {
+                            // Check if we should apply this substitution (Chunk 8: pattern range support)
+                            let should_apply = match range {
+                                Some(range) => self.should_apply_command_with_range(&line, range, cmd_index)?,
+                                None => true, // No range means apply to all lines
+                            };
+
+                            if should_apply {
                                 let original_line = processed_line.clone();
                                 processed_line = self.apply_substitution_to_line(
                                     &processed_line,
@@ -234,44 +482,27 @@ impl StreamProcessor {
                                     flags
                                 )?;
                                 line_changed = processed_line != original_line;
-                            } else {
-                                // Ranges not yet supported in streaming - delegate to in-memory
-                                drop(writer);
-                                let mut processor = FileProcessor::new(self.commands.clone());
-                                return processor.process_file_with_context(file_path);
                             }
                         }
-                        SedCommand::Delete { range: (start, end) } => {
-                            // Check if range affects all lines (simple case)
-                            match (start, end) {
-                                (Address::LineNumber(1), Address::LastLine) => {
-                                    // Delete all lines
-                                    skip_line = true;
-                                }
-                                _ => {
-                                    // Complex ranges not yet supported - delegate to in-memory
-                                    drop(writer);
-                                    let mut processor = FileProcessor::new(self.commands.clone());
-                                    return processor.process_file_with_context(file_path);
-                                }
+                        Command::Delete { range: (start, end) } => {
+                            // Check if we should apply this deletion (Chunk 8: unified range support)
+                            let range = (start.clone(), end.clone());
+                            let should_delete = self.should_apply_command_with_range(&line, &range, cmd_index)?;
+
+                            if should_delete {
+                                skip_line = true;
                             }
                         }
-                        SedCommand::Print { range: (start, end) } => {
-                            // Check if range affects all lines (simple case)
-                            match (start, end) {
-                                (Address::LineNumber(1), Address::LastLine) => {
-                                    // Print all lines
-                                    print_line = true;
-                                }
-                                _ => {
-                                    // Complex ranges not yet supported - delegate to in-memory
-                                    drop(writer);
-                                    let mut processor = FileProcessor::new(self.commands.clone());
-                                    return processor.process_file_with_context(file_path);
-                                }
+                        Command::Print { range: (start, end) } => {
+                            // Check if we should print this line (Chunk 8: unified range support)
+                            let range = (start.clone(), end.clone());
+                            let should_print = self.should_apply_command_with_range(&line, &range, cmd_index)?;
+
+                            if should_print {
+                                print_line = true;
                             }
                         }
-                        SedCommand::Insert { text, address } => {
+                        Command::Insert { text, address } => {
                             // Insert text BEFORE the specified line
                             match address {
                                 Address::LineNumber(n) if *n == line_num => {
@@ -297,7 +528,7 @@ impl StreamProcessor {
                                 }
                             }
                         }
-                        SedCommand::Append { text, address } => {
+                        Command::Append { text, address } => {
                             // Append text AFTER the specified line
                             match address {
                                 Address::LineNumber(n) if *n == line_num => {
@@ -315,7 +546,7 @@ impl StreamProcessor {
                                 }
                             }
                         }
-                        SedCommand::Change { text, address } => {
+                        Command::Change { text, address } => {
                             // Change (replace) the specified line with new text
                             match address {
                                 Address::LineNumber(n) if *n == line_num => {
@@ -334,7 +565,7 @@ impl StreamProcessor {
                                 }
                             }
                         }
-                        SedCommand::Quit { address } => {
+                        Command::Quit { address } => {
                             // Stop processing at specified line
                             match address {
                                 None => {
@@ -473,8 +704,12 @@ impl StreamProcessor {
         } // writer dropped here
 
         // Atomic rename: temp file becomes the actual file
-        temp_file.persist(file_path)
-            .with_context(|| format!("Failed to persist temp file to {}", file_path.display()))?;
+        // In dry-run mode, don't persist (temp file will be automatically deleted when dropped)
+        if !self.dry_run {
+            temp_file.persist(file_path)
+                .with_context(|| format!("Failed to persist temp file to {}", file_path.display()))?;
+        }
+        // If dry_run, temp_file is dropped here and automatically deleted
 
         // Build FileDiff result
         // NOTE: In streaming mode, we don't populate all_lines to save memory
@@ -492,7 +727,7 @@ impl StreamProcessor {
 }
 
 impl FileProcessor {
-    pub fn new(commands: Vec<SedCommand>) -> Self {
+    pub fn new(commands: Vec<Command>) -> Self {
         Self {
             commands,
             printed_lines: Vec::new(),
@@ -616,29 +851,29 @@ impl FileProcessor {
         Ok(lines.len())
     }
 
-    fn apply_command(&mut self, lines: &mut Vec<String>, cmd: &SedCommand) -> Result<bool> {
+    pub fn apply_command(&mut self, lines: &mut Vec<String>, cmd: &Command) -> Result<bool> {
         // Returns Ok(true) if processing should continue, Ok(false) if quit was requested
         match cmd {
-            SedCommand::Substitution { pattern, replacement, flags, range } => {
+            Command::Substitution { pattern, replacement, flags, range } => {
                 self.apply_substitution(lines, pattern, replacement, flags, range)?;
             }
-            SedCommand::Delete { range } => {
+            Command::Delete { range } => {
                 self.apply_delete(lines, range)?;
             }
-            SedCommand::Insert { text, address } => {
+            Command::Insert { text, address } => {
                 self.apply_insert(lines, text, address)?;
             }
-            SedCommand::Append { text, address } => {
+            Command::Append { text, address } => {
                 self.apply_append(lines, text, address)?;
             }
-            SedCommand::Change { text, address } => {
+            Command::Change { text, address } => {
                 self.apply_change(lines, text, address)?;
             }
-            SedCommand::Print { range } => {
+            Command::Print { range } => {
                 // Collect lines to print (doesn't modify the file)
                 self.collect_print_lines(lines, range)?;
             }
-            SedCommand::Quit { address } => {
+            Command::Quit { address } => {
                 // Check if we should quit
                 if let Some(addr) = address {
                     let idx = self.resolve_address(addr, lines, 0)?;
@@ -657,34 +892,34 @@ impl FileProcessor {
                 // Always stop processing after quit
                 return Ok(false);
             }
-            SedCommand::Group { range, commands } => {
+            Command::Group { range, commands } => {
                 // Group needs to handle things differently since it's recursive
                 // Reconstruct commands as a vector we can use
                 let commands_vec = commands.to_vec();
                 return self.apply_group(lines, range, &commands_vec);
             }
-            SedCommand::Hold { range } => {
+            Command::Hold { range } => {
                 self.apply_hold(lines, range)?;
             }
-            SedCommand::HoldAppend { range } => {
+            Command::HoldAppend { range } => {
                 self.apply_hold_append(lines, range)?;
             }
-            SedCommand::Get { range } => {
+            Command::Get { range } => {
                 self.apply_get(lines, range)?;
             }
-            SedCommand::GetAppend { range } => {
+            Command::GetAppend { range } => {
                 self.apply_get_append(lines, range)?;
             }
-            SedCommand::Exchange { range } => {
+            Command::Exchange { range } => {
                 self.apply_exchange(lines, range)?;
             }
         }
         Ok(true)
     }
 
-    fn apply_substitution(&self, lines: &mut Vec<String>, pattern: &str, replacement: &str, flags: &Vec<char>, range: &Option<(Address, Address)>) -> Result<()> {
-        let global = flags.contains(&'g');
-        let case_insensitive = flags.contains(&'i');
+    fn apply_substitution(&self, lines: &mut Vec<String>, pattern: &str, replacement: &str, flags: &SubstitutionFlags, range: &Option<(Address, Address)>) -> Result<()> {
+        let global = flags.global;
+        let case_insensitive = flags.case_insensitive;
 
         let re = if case_insensitive {
             RegexBuilder::new(pattern)
@@ -913,7 +1148,7 @@ impl FileProcessor {
         Ok(())
     }
 
-    fn apply_group(&mut self, lines: &mut Vec<String>, range: &Option<(Address, Address)>, commands: &[SedCommand]) -> Result<bool> {
+    fn apply_group(&mut self, lines: &mut Vec<String>, range: &Option<(Address, Address)>, commands: &[Command]) -> Result<bool> {
         let mut should_continue = true;
         match range {
             None => {
@@ -1060,6 +1295,29 @@ impl FileProcessor {
 
                 // For line number negation, skip that specific line
                 Ok(inner_idx + 1)
+            }
+            // Chunk 8: Relative address - resolve base then apply offset
+            Address::Relative { base, offset } => {
+                let base_idx = self.resolve_address(base, lines, default)?;
+                let result = base_idx as isize + *offset;
+                if result < 0 {
+                    Ok(0)
+                } else if result as usize > lines.len() {
+                    Ok(lines.len())
+                } else {
+                    Ok(result as usize)
+                }
+            }
+            // Chunk 8: Step address - find first matching line in the sequence
+            Address::Step { start, step } => {
+                // Find the first line that matches the stepping pattern
+                // start is 1-indexed, so convert to 0-indexed
+                let start_0idx = if *start == 0 { 0 } else { start - 1 };
+                for i in (start_0idx..lines.len()).step_by(*step) {
+                    return Ok(i);
+                }
+                // No more lines match, return end
+                Ok(lines.len())
             }
         }
     }
@@ -1225,7 +1483,8 @@ mod tests {
     use super::*;
     use std::fs;
     use std::io::Write;
-    use crate::sed_parser::parse_sed_expression;
+    use crate::parser::Parser;
+    use crate::cli::RegexFlavor;
 
     #[test]
     fn test_streaming_passthrough() {
@@ -1241,7 +1500,8 @@ mod tests {
         }
 
         // Parse an empty command list (no modifications)
-        let commands = parse_sed_expression("").expect("Failed to parse empty expression");
+        let parser = Parser::new(RegexFlavor::PCRE);
+        let commands = parser.parse("").expect("Failed to parse empty expression");
         let mut processor = StreamProcessor::new(commands);
 
         // Process the file (force streaming for testing)
@@ -1288,7 +1548,8 @@ mod tests {
         }
 
         // Parse substitution command
-        let commands = parse_sed_expression("s/foo/QUX/")
+        let parser = Parser::new(RegexFlavor::PCRE);
+        let commands = parser.parse("s/foo/QUX/")
             .expect("Failed to parse substitution");
         let mut processor = StreamProcessor::new(commands);
 
@@ -1324,7 +1585,8 @@ mod tests {
         }
 
         // Parse global substitution command
-        let commands = parse_sed_expression("s/foo/QUX/g")
+        let parser = Parser::new(RegexFlavor::PCRE);
+        let commands = parser.parse("s/foo/QUX/g")
             .expect("Failed to parse substitution");
         let mut processor = StreamProcessor::new(commands);
 
@@ -1356,7 +1618,8 @@ mod tests {
         }
 
         // Parse numbered substitution command
-        let commands = parse_sed_expression("s/foo/QUX/2")
+        let parser = Parser::new(RegexFlavor::PCRE);
+        let commands = parser.parse("s/foo/QUX/2")
             .expect("Failed to parse substitution");
         let mut processor = StreamProcessor::new(commands);
 
@@ -1388,7 +1651,8 @@ mod tests {
         }
 
         // Parse case-insensitive substitution
-        let commands = parse_sed_expression("s/foo/QUX/gi")
+        let parser = Parser::new(RegexFlavor::PCRE);
+        let commands = parser.parse("s/foo/QUX/gi")
             .expect("Failed to parse substitution");
         let mut processor = StreamProcessor::new(commands);
 
@@ -1420,7 +1684,8 @@ mod tests {
         }
 
         // Parse delete command (1,$d means delete from line 1 to last line)
-        let commands = parse_sed_expression(r"1,$d")
+        let parser = Parser::new(RegexFlavor::PCRE);
+        let commands = parser.parse(r"1,$d")
             .expect("Failed to parse delete");
         let mut processor = StreamProcessor::new(commands);
 
@@ -1455,7 +1720,8 @@ mod tests {
         }
 
         // Parse substitution then delete (will delete all lines)
-        let commands = parse_sed_expression(r"s/bar/BAR/; 1,$d")
+        let parser = Parser::new(RegexFlavor::PCRE);
+        let commands = parser.parse(r"s/bar/BAR/; 1,$d")
             .expect("Failed to parse commands");
         let mut processor = StreamProcessor::new(commands);
 
@@ -1486,7 +1752,8 @@ mod tests {
         }
 
         // Parse print command (1,$p means print from line 1 to last line)
-        let commands = parse_sed_expression(r"1,$p")
+        let parser = Parser::new(RegexFlavor::PCRE);
+        let commands = parser.parse(r"1,$p")
             .expect("Failed to parse print");
         let mut processor = StreamProcessor::new(commands);
 
@@ -1518,7 +1785,8 @@ mod tests {
         }
 
         // Parse insert command (2i\TEXT means insert TEXT before line 2)
-        let commands = parse_sed_expression(r"2i\INSERTED LINE")
+        let parser = Parser::new(RegexFlavor::PCRE);
+        let commands = parser.parse(r"2i\INSERTED LINE")
             .expect("Failed to parse insert");
         let mut processor = StreamProcessor::new(commands);
 
@@ -1550,7 +1818,8 @@ mod tests {
         }
 
         // Parse append command (2a\TEXT means append TEXT after line 2)
-        let commands = parse_sed_expression(r"2a\APPENDED LINE")
+        let parser = Parser::new(RegexFlavor::PCRE);
+        let commands = parser.parse(r"2a\APPENDED LINE")
             .expect("Failed to parse append");
         let mut processor = StreamProcessor::new(commands);
 
@@ -1582,7 +1851,8 @@ mod tests {
         }
 
         // Parse change command (2c\TEXT means change line 2 to TEXT)
-        let commands = parse_sed_expression(r"2c\CHANGED LINE")
+        let parser = Parser::new(RegexFlavor::PCRE);
+        let commands = parser.parse(r"2c\CHANGED LINE")
             .expect("Failed to parse change");
         let mut processor = StreamProcessor::new(commands);
 
@@ -1614,7 +1884,8 @@ mod tests {
         }
 
         // Parse quit command (3q means quit after processing line 3)
-        let commands = parse_sed_expression(r"3q")
+        let parser = Parser::new(RegexFlavor::PCRE);
+        let commands = parser.parse(r"3q")
             .expect("Failed to parse quit");
         let mut processor = StreamProcessor::new(commands);
 
@@ -1646,7 +1917,8 @@ mod tests {
         }
 
         // Parse quit command (q means quit immediately, output nothing)
-        let commands = parse_sed_expression(r"q")
+        let parser = Parser::new(RegexFlavor::PCRE);
+        let commands = parser.parse(r"q")
             .expect("Failed to parse quit");
         let mut processor = StreamProcessor::new(commands);
 
@@ -1677,7 +1949,8 @@ mod tests {
         }
 
         // Parse insert then substitute
-        let commands = parse_sed_expression(r"2i\NEW LINE; s/foo/FOO/")
+        let parser = Parser::new(RegexFlavor::PCRE);
+        let commands = parser.parse(r"2i\NEW LINE; s/foo/FOO/")
             .expect("Failed to parse commands");
         let mut processor = StreamProcessor::new(commands);
 
@@ -1709,7 +1982,8 @@ mod tests {
         }
 
         // Parse substitution command (change line 5)
-        let commands = parse_sed_expression("s/line 5/CHANGED/")
+        let parser = Parser::new(RegexFlavor::PCRE);
+        let commands = parser.parse("s/line 5/CHANGED/")
             .expect("Failed to parse substitution");
         let mut processor = StreamProcessor::new(commands);
 

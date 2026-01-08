@@ -58,6 +58,9 @@ pub enum Address {
     FirstLine, // Special address "0" for first-match substitution
     LastLine,  // Special address "$" for last line
     Negated(Box<Address>),  // Negation: !/pattern/ or !10
+    // Chunk 8: New address types
+    Relative { base: Box<Address>, offset: isize },  // /pattern/,+5 or 10,+3
+    Step { start: usize, step: usize },              // 1~2 (every 2nd line from line 1)
 }
 
 pub fn parse_sed_expression(expr: &str) -> Result<Vec<SedCommand>> {
@@ -110,7 +113,14 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
         return parse_group(cmd);
     }
 
-    // Check for hold space commands (before other single-char commands)
+    // IMPORTANT: Check for substitution commands FIRST
+    // because substitution commands can end with 'g' (global flag), 'p' (print flag), etc.
+    // which would otherwise be misidentified as get/print/hold commands
+    if cmd.contains("s/") || cmd.contains("s#") || cmd.contains("s:") || cmd.contains("s|") {
+        return parse_substitution(cmd);
+    }
+
+    // Check for hold space commands
     // These need to be checked carefully to avoid confusion with substitution patterns
     let last_char = cmd.chars().last().unwrap_or(' ');
 
@@ -153,9 +163,6 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
     } else if cmd.ends_with('p') && !cmd.starts_with('s') {
         // Print command (but not s/pattern/replacement/p which is a flag)
         parse_print(cmd)
-    } else if cmd.contains("s/") || cmd.contains("s#") || cmd.contains("s:") || cmd.contains("s|") {
-        // Substitution command - more specific check
-        parse_substitution(cmd)
     } else if cmd.contains("i\\") {
         // Insert command
         parse_insert(cmd)
@@ -177,10 +184,14 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
             'p' => parse_print(cmd),
             'h' => parse_hold(cmd),
             'H' => parse_hold_append(cmd),
-            'g' => parse_get(cmd),
+            'g' => {
+                parse_get(cmd)
+            }
             'G' => parse_get_append(cmd),
             'x' => parse_exchange(cmd),
-            _ => Err(anyhow!("Unknown sed command: {}", cmd))
+            _ => {
+                Err(anyhow!("Unknown sed command: {}", cmd))
+            }
         }
     }
 }
@@ -243,8 +254,25 @@ fn parse_substitution(cmd: &str) -> Result<SedCommand> {
         let parts: Vec<&str> = address_part.splitn(2, ',').collect();
         if parts.len() == 2 {
             let start = parse_address(parts[0])?;
-            let end = parse_address(parts[1])?;
-            Some((start, end))
+            let end_str = parts[1].trim();
+
+            // Chunk 8: Check if end has relative offset (+N or -N)
+            if end_str.starts_with('+') || end_str.starts_with('-') {
+                // Relative range: /pattern/,+5
+                let offset_str = &end_str[1..];  // Skip +/-
+                let offset: isize = offset_str.parse()
+                    .map_err(|_| anyhow!("Invalid relative offset: {}", end_str))?;
+
+                let end = Address::Relative {
+                    base: Box::new(start.clone()),
+                    offset,
+                };
+                Some((start, end))
+            } else {
+                // Normal range
+                let end = parse_address(end_str)?;
+                Some((start, end))
+            }
         } else {
             None
         }
@@ -520,6 +548,25 @@ fn parse_optional_range(addr_part: &str) -> Result<Option<(Address, Address)>> {
         let start = &addr_part[..comma_pos];
         let end = &addr_part[comma_pos + 1..];
 
+        // Chunk 8: Check if end has relative offset (+N or -N)
+        if end.starts_with('+') || end.starts_with('-') {
+            // Relative range: /pattern/,+5 or 10,+3
+            let start_addr = parse_address(start)?;
+
+            // Parse the offset
+            let offset_str = &end[1..];  // Skip +/-
+            let offset: isize = offset_str.parse()
+                .map_err(|_| anyhow!("Invalid relative offset: {}", end))?;
+
+            let end_addr = Address::Relative {
+                base: Box::new(start_addr.clone()),
+                offset,
+            };
+
+            return Ok(Some((start_addr, end_addr)));
+        }
+
+        // Normal range
         let start_addr = parse_address(start)?;
         let end_addr = parse_address(end)?;
         return Ok(Some((start_addr, end_addr)));
@@ -552,6 +599,23 @@ fn parse_address(addr: &str) -> Result<Address> {
     // Special address: $ (last line)
     if addr == "$" {
         return Ok(Address::LastLine);
+    }
+
+    // Chunk 8: Stepping address: 1~2 (every 2nd line starting from line 1)
+    if let Some(tilde_pos) = addr.find('~') {
+        let start_str = &addr[..tilde_pos];
+        let step_str = &addr[tilde_pos + 1..];
+
+        let start: usize = start_str.parse()
+            .map_err(|_| anyhow!("Invalid step start: {}", start_str))?;
+        let step: usize = step_str.parse()
+            .map_err(|_| anyhow!("Invalid step value: {}", step_str))?;
+
+        if step == 0 {
+            anyhow::bail!("Step value cannot be zero");
+        }
+
+        return Ok(Address::Step { start, step });
     }
 
     // Line number

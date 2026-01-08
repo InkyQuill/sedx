@@ -8,16 +8,16 @@
 
 ## 🎯 Project Vision
 
-SedX is a **hybrid text processing tool** that:
+SedX is a **modern, safe text processing tool** that:
 - Maintains high GNU sed compatibility (~95%)
-- Adds modern convenience features inspired by `sd`
+- Uses **PCRE (modern regex) by default** with optional BRE/ERE modes
 - Provides robust backup management with disk space awareness
 - Uses stream processing for memory efficiency
-- Guides users through compatibility transitions
+- Always uses **sed syntax** (no sd-like simplified syntax)
 
 **Target Users:**
 - System administrators needing safer sed
-- Developers wanting modern text processing
+- Developers wanting modern regex processing
 - DevOps engineers requiring reliable automation
 - Data scientists processing large files
 
@@ -25,14 +25,26 @@ SedX is a **hybrid text processing tool** that:
 
 ## 📊 Current Status (v0.2.0-alpha - neo branch)
 
-**Implemented:** 2,569 lines, 6 modules
+**Implemented:** 3,100+ lines, 11 modules
 - ✅ 10/30 sed commands (33%)
 - ✅ Basic backups (no disk checks)
 - ✅ Dry-run & interactive modes
 - ✅ Hold space operations
+- ✅ **Unified Command System (UCS) parser**
+- ✅ **Regex flavor support (PCRE/ERE/BRE)**
+- ✅ **BRE to ERE auto-conversion**
+- ✅ **Stdin/stdout pipeline support**
 - ❌ In-memory processing (BLOCKS large files)
 - ❌ No disk space checks
 - ❌ Missing critical flags (-n, -e, -f)
+
+**Recent Work (Completed 2025-01-08):**
+- Implemented unified Command enum with all sed command types
+- Added regex flavor flags: `-B` (BRE), `-E` (ERE), default PCRE
+- Created BRE to ERE converter for GNU sed compatibility
+- Ported existing sed_parser to use new Command enum
+- **Added stdin/stdout support for Unix pipelines**
+- All 99 tests passing (unit + regression)
 
 ---
 
@@ -166,28 +178,31 @@ $ sedx config
 
 ---
 
-### Phase 3: Enhanced Substitution System 🔄
+### Phase 3: Enhanced Regex & Substitution Features 🔄
 
 **Duration:** 3 weeks
 **Target Release:** v0.3.0
 **Priority:** MEDIUM (User requirement #4)
 
 #### Goals
-- Support both sed and simplified syntax
-- Add convenience features from `sd`
-- Maintain full compatibility
+- Leverage modern PCRE regex capabilities
+- Add convenience features while maintaining sed compatibility
+- Enhance substitution flags and options
+- Improve regex error messages and validation
 
 #### Tasks
 
-**Week 1: Simplified Syntax**
-- [ ] Add command parser for `sedx 'pattern' 'replacement' files...`
-- [ ] Implement `-F`/`--fixed-strings` flag (string-literal mode)
-- [ ] Default to global replacement in simplified mode
-- [ ] Add regex flags:
-  - `-i`/`--case-insensitive`
-  - `-m`/`--multi-line`
-  - `-s`/`--dot-newline`
-- [ ] Detect and warn about simplified syntax usage
+**Week 1: PCRE Enhancements**
+- [ ] Implement PCRE-specific features:
+  - Named capture groups: `(?P<name>...)`
+  - Non-capturing groups: `(?:...)`
+  - Lookaheads: `(?=...)`, `(?!...)`
+  - Lookbehinds: `(?<=...)`, `(?<!...)`
+  - Atomic groups: `(?>...)`
+  - Possessive quantifiers: `?+`, `*+`, `++`
+- [ ] Add regex flag overrides in patterns: `(?i)`, `(?m)`, `(?s)`
+- [ ] Implement `-X`/`--pcre-only` flag (require PCRE syntax only)
+- [ ] Add regex validation and helpful error messages
 
 **Week 2: Enhanced Features**
 - [ ] Implement `--max-count`/`--max-replacements` flag
@@ -198,46 +213,43 @@ $ sedx config
   - Validate capture group references
   - Helpful error messages
 - [ ] Support modern capture syntax (`$1`, `$2`, `${name}`)
-- [ ] Keep `\1`, `\2` for sed compatibility (convert internally)
+- [ ] Keep `\1`, `\2` for sed compatibility (convert internally when using `-B`)
 
 **Week 3: Escape Sequences & Testing**
 - [ ] Add escape sequences in replacements:
   - `\n`, `\t`, `\r`, `\\`
-  - `\xHH`, `\uHHHH`
-- [ ] Implement `--compat` modes:
-  - `--compat=strict` (sed-only, error on simplified)
-  - `--compat=extended` (both syntaxes, warn on simplified) [default]
-  - `--compat=permissive` (both syntaxes, no warnings)
+  - `\xHH`, `\uHHHH`, `\U{HHHHHH}`
+- [ ] Add escape sequences in patterns (PCRE mode):
+  - `\a`, `\b`, `\f`, `\v`
+  - `\e` (escape), `\0` (null)
 - [ ] Comprehensive testing:
-  - Regression tests vs GNU sed
-  - Regression tests vs `sd`
+  - Regression tests vs GNU sed (BRE/ERE modes)
+  - PCRE feature tests
   - Unit tests for parser
   - Integration tests
 
 #### Success Criteria
-- [ ] All `sd` test cases pass
-- [ ] Backward compatible with sed syntax
-- [ ] Clear error messages for ambiguous patterns
-- [ ] Compatibility warnings work correctly
+- [ ] All PCRE features work correctly
+- [ ] Backward compatible with GNU sed in BRE/ERE modes
+- [ ] Clear error messages for invalid regex patterns
+- [ ] Capture group validation prevents common errors
 
 #### Example Usage
 ```bash
-# Simplified syntax (with warning)
-$ sedx 'foo' 'bar' file.txt
-warning: Using simplified syntax (not sed-compatible)
-sed equivalent: sed 's/foo/bar/g' file.txt
-hint: Use --compat=strict or --compat=permissive to suppress this warning
+# Modern PCRE features (default)
+$ sedx 's/(?P<word>\w+)/<\1>/g' file.txt  # Named groups
+$ sedx 's/foo(?=bar)/FOO/g' file.txt     # Lookahead
 
-# String-literal mode
-$ sedx -F 'C:\Users' 'D:\Backup' file.txt
+# BRE mode (GNU sed compatible)
+$ sedx -B 's/\(foo\|bar\)/BAZ/g' file.txt  # Auto-converts to (foo|bar)
 
-# Case-insensitive with limit
-$ sedx -i --max-count=5 'error' 'ERROR' log.txt
+# ERE mode (sed -E compatible)
+$ sedx -E 's/(foo|bar)/BAZ/g' file.txt
 
 # Numbered substitution
-sedx 's/foo/bar/2' file.txt  # Replace only 2nd occurrence
+$ sedx 's/foo/bar/2' file.txt  # Replace only 2nd occurrence
 
-# Ambiguous capture detection
+# Capture group validation
 $ sedx 's/(\d+)/$1user/' file.txt
 error: Ambiguous capture reference: $1user
 hint: Use ${1}user to disambiguate: s/(\d+)/${1}user/
@@ -484,13 +496,12 @@ $ sedx '=' file.txt | sedx 'N; n'
 
 ### Functionality
 - [ ] 95% compatibility with GNU sed for common operations
-- [ ] 100% `sd` compatibility for simplified syntax
+- [ ] Full PCRE support with modern regex features
 - [ ] Stream processing handles 100GB+ files with <100MB RAM
 - [ ] Backup system prevents all silent data loss
 
 ### Performance
 - [ ] Within 2x speed of GNU sed for typical operations
-- [ ] Within 1.5x speed of `sd` for simple replacements
 - [ ] Memory usage constant regardless of file size
 - [ ] No memory leaks in long-running processes
 
@@ -613,7 +624,7 @@ This roadmap delivers a **production-ready SedX** in ~5-6 months through increme
 
 1. **Stream processing** (foundation for large files)
 2. **Backup management** (safety first)
-3. **Enhanced substitution** (usability from `sd`)
+3. **Enhanced regex features** (modern PCRE with sed compatibility)
 4. **Sed compatibility** (Tier 1 + Tier 2 commands)
 5. **Flow control** (complex scripts)
 6. **Advanced features** (addressing, polish)
@@ -623,8 +634,9 @@ This roadmap delivers a **production-ready SedX** in ~5-6 months through increme
 - ✅ Stream processing first (architectural foundation)
 - ✅ Incremental releases (regular feedback)
 - ✅ Comprehensive testing (per sprint)
-- ✅ Hybrid approach (sed + modern)
+- ✅ Modern regex by default (PCRE) with sed compatibility modes
+- ✅ Unified command system (clean internal architecture)
 - ✅ Safety features (backups, disk checks)
 - ✅ Clear communication (warnings, docs)
 
-The result: a **modern, safe, powerful** text processing tool that combines the best of GNU sed and `sd`.
+The result: a **modern, safe, powerful** text processing tool that maintains GNU sed compatibility while providing modern regex capabilities.

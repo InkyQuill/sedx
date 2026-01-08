@@ -1,0 +1,366 @@
+//! Streaming Capability Checks
+//!
+//! This module provides functions to determine whether commands can be executed
+//! in streaming mode or require full file buffering.
+
+use crate::command::{Command, Address};
+
+/// Check if a list of commands can be executed in streaming mode
+///
+/// # Streaming Limitations
+///
+/// Some commands require full file buffering and cannot run in streaming mode:
+/// - Command groups with ranges
+/// - Hold space operations (h, H, g, G, x)
+/// - Negated addresses in ranges
+/// - Complex mixed ranges (pattern to negated pattern, etc.)
+///
+/// # Examples
+///
+/// ```
+/// use crate::command::Command;
+///
+/// // Streamable: simple substitution
+/// assert!(can_stream(&[Command::Substitution { ... }]));
+///
+/// // Not streamable: hold space
+/// assert!(!can_stream(&[Command::Hold { ... }]));
+/// ```
+pub fn can_stream(commands: &[Command]) -> bool {
+    for cmd in commands {
+        match cmd {
+            Command::Substitution { range, .. } => {
+                if let Some(range) = range {
+                    if !is_range_streamable(range) {
+                        return false;
+                    }
+                }
+            }
+            Command::Delete { range } | Command::Print { range } => {
+                if !is_range_streamable(range) {
+                    return false;
+                }
+            }
+            Command::Insert { .. } | Command::Append { .. } | Command::Change { .. } => {
+                // Insert/Append/Change are streamable for single-line addresses
+                // but not for ranges
+                return true;
+            }
+            Command::Group { range, commands: inner_cmds } => {
+                // Groups with ranges are not streamable
+                if range.is_some() {
+                    return false;
+                }
+                // Check inner commands
+                if !can_stream(inner_cmds) {
+                    return false;
+                }
+            }
+            Command::Hold { .. } | Command::HoldAppend { .. }
+            | Command::Get { .. } | Command::GetAppend { .. }
+            | Command::Exchange { .. } => {
+                // Hold space operations require full buffering
+                return false;
+            }
+            Command::Quit { .. } => {
+                // Quit is streamable
+                continue;
+            }
+        }
+    }
+    true
+}
+
+/// Check if a specific address range type is supported in streaming mode
+///
+/// # Streamable Ranges
+///
+/// - Line number to line number: `1,10`
+/// - First to last: `1,$`
+/// - Pattern to pattern: `/start/,/end/`
+/// - Pattern to line number: `/start/,10`
+/// - Line number to pattern: `5,/end/`
+/// - Pattern with relative offset: `/start/,+5`
+/// - Stepping addresses: `1~2`
+///
+/// # Non-Streamable Ranges
+///
+/// - Negated addresses: `!/pattern/`
+/// - Complex mixed negated ranges
+fn is_range_streamable(range: &(Address, Address)) -> bool {
+    use Address::*;
+
+    match (&range.0, &range.1) {
+        // Line number to line number - streamable
+        (LineNumber(_), LineNumber(_)) => true,
+
+        // First to last - streamable
+        (LineNumber(1), LastLine) => true,
+
+        // Pattern to pattern - streamable (uses state machine)
+        (Pattern(_), Pattern(_)) => true,
+
+        // Pattern to line number - streamable (mixed)
+        (Pattern(_), LineNumber(_)) => true,
+
+        // Line number to pattern - streamable (mixed)
+        (LineNumber(_), Pattern(_)) => true,
+
+        // Pattern to relative offset - streamable
+        (Pattern(_), Relative { .. }) => true,
+
+        // Line number to relative offset - streamable
+        (LineNumber(_), Relative { .. }) => true,
+
+        // Stepping addresses - streamable
+        (Step { .. }, _) | (_, Step { .. }) => true,
+
+        // Negated addresses - not streamable
+        (Negated(_), _) | (_, Negated(_)) => false,
+
+        // Relative offsets as start address - not streamable
+        (Relative { .. }, _) => false,
+
+        // First line as start - streamable with most end addresses
+        (FirstLine, LineNumber(_)) => true,
+        (FirstLine, LastLine) => true,
+        (FirstLine, Pattern(_)) => true,
+
+        // Last line as start - not streamable (need to know where end is)
+        (LastLine, _) => false,
+
+        // Default: conservative - not streamable
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::command::SubstitutionFlags;
+
+    #[test]
+    fn test_can_stream_simple_substitution() {
+        let cmd = Command::Substitution {
+            pattern: "foo".to_string(),
+            replacement: "bar".to_string(),
+            flags: SubstitutionFlags::default(),
+            range: None,
+        };
+        assert!(can_stream(&[cmd]));
+    }
+
+    #[test]
+    fn test_can_stream_substitution_with_line_range() {
+        let cmd = Command::Substitution {
+            pattern: "foo".to_string(),
+            replacement: "bar".to_string(),
+            flags: SubstitutionFlags::default(),
+            range: Some((Address::LineNumber(1), Address::LineNumber(10))),
+        };
+        assert!(can_stream(&[cmd]));
+    }
+
+    #[test]
+    fn test_can_stream_substitution_with_pattern_range() {
+        let cmd = Command::Substitution {
+            pattern: "foo".to_string(),
+            replacement: "bar".to_string(),
+            flags: SubstitutionFlags::default(),
+            range: Some((Address::Pattern("start".to_string()), Address::Pattern("end".to_string()))),
+        };
+        assert!(can_stream(&[cmd]));
+    }
+
+    #[test]
+    fn test_cannot_stream_hold() {
+        let cmd = Command::Hold {
+            range: None,
+        };
+        assert!(!can_stream(&[cmd]));
+    }
+
+    #[test]
+    fn test_cannot_stream_hold_append() {
+        let cmd = Command::HoldAppend {
+            range: None,
+        };
+        assert!(!can_stream(&[cmd]));
+    }
+
+    #[test]
+    fn test_cannot_stream_get() {
+        let cmd = Command::Get {
+            range: None,
+        };
+        assert!(!can_stream(&[cmd]));
+    }
+
+    #[test]
+    fn test_cannot_stream_exchange() {
+        let cmd = Command::Exchange {
+            range: None,
+        };
+        assert!(!can_stream(&[cmd]));
+    }
+
+    #[test]
+    fn test_can_stream_delete() {
+        let cmd = Command::Delete {
+            range: (Address::LineNumber(1), Address::LineNumber(10)),
+        };
+        assert!(can_stream(&[cmd]));
+    }
+
+    #[test]
+    fn test_can_stream_print() {
+        let cmd = Command::Print {
+            range: (Address::LineNumber(1), Address::LineNumber(10)),
+        };
+        assert!(can_stream(&[cmd]));
+    }
+
+    #[test]
+    fn test_can_stream_quit() {
+        let cmd = Command::Quit {
+            address: Some(Address::LineNumber(10)),
+        };
+        assert!(can_stream(&[cmd]));
+    }
+
+    #[test]
+    fn test_can_stream_insert() {
+        let cmd = Command::Insert {
+            text: "new line".to_string(),
+            address: Address::LineNumber(5),
+        };
+        assert!(can_stream(&[cmd]));
+    }
+
+    #[test]
+    fn test_cannot_stream_group_with_range() {
+        let cmd = Command::Group {
+            commands: vec![
+                Command::Substitution {
+                    pattern: "foo".to_string(),
+                    replacement: "bar".to_string(),
+                    flags: SubstitutionFlags::default(),
+                    range: None,
+                },
+            ],
+            range: Some((Address::LineNumber(1), Address::LineNumber(10))),
+        };
+        assert!(!can_stream(&[cmd]));
+    }
+
+    #[test]
+    fn test_can_stream_group_without_range() {
+        let cmd = Command::Group {
+            commands: vec![
+                Command::Substitution {
+                    pattern: "foo".to_string(),
+                    replacement: "bar".to_string(),
+                    flags: SubstitutionFlags::default(),
+                    range: None,
+                },
+            ],
+            range: None,
+        };
+        assert!(can_stream(&[cmd]));
+    }
+
+    #[test]
+    fn test_is_range_streamable_line_to_line() {
+        let range = (Address::LineNumber(1), Address::LineNumber(10));
+        assert!(is_range_streamable(&range));
+    }
+
+    #[test]
+    fn test_is_range_streamable_first_to_last() {
+        let range = (Address::LineNumber(1), Address::LastLine);
+        assert!(is_range_streamable(&range));
+    }
+
+    #[test]
+    fn test_is_range_streamable_pattern_to_pattern() {
+        let range = (Address::Pattern("start".to_string()), Address::Pattern("end".to_string()));
+        assert!(is_range_streamable(&range));
+    }
+
+    #[test]
+    fn test_is_range_streamable_pattern_to_line() {
+        let range = (Address::Pattern("start".to_string()), Address::LineNumber(10));
+        assert!(is_range_streamable(&range));
+    }
+
+    #[test]
+    fn test_is_range_streamable_line_to_pattern() {
+        let range = (Address::LineNumber(5), Address::Pattern("end".to_string()));
+        assert!(is_range_streamable(&range));
+    }
+
+    #[test]
+    fn test_is_range_streamable_pattern_to_relative() {
+        let range = (
+            Address::Pattern("start".to_string()),
+            Address::Relative {
+                base: Box::new(Address::Pattern("start".to_string())),
+                offset: 5,
+            },
+        );
+        assert!(is_range_streamable(&range));
+    }
+
+    #[test]
+    fn test_is_range_streamable_stepping() {
+        let range = (Address::Step { start: 1, step: 2 }, Address::LineNumber(10));
+        assert!(is_range_streamable(&range));
+    }
+
+    #[test]
+    fn test_is_range_not_streamable_negated() {
+        let range = (
+            Address::Negated(Box::new(Address::Pattern("foo".to_string()))),
+            Address::LineNumber(10),
+        );
+        assert!(!is_range_streamable(&range));
+    }
+
+    #[test]
+    fn test_is_range_not_streamable_last_line_start() {
+        let range = (Address::LastLine, Address::LineNumber(10));
+        assert!(!is_range_streamable(&range));
+    }
+
+    #[test]
+    fn test_cannot_stream_multiple_commands_with_hold() {
+        let cmds = vec![
+            Command::Substitution {
+                pattern: "foo".to_string(),
+                replacement: "bar".to_string(),
+                flags: SubstitutionFlags::default(),
+                range: None,
+            },
+            Command::Hold {
+                range: None,
+            },
+        ];
+        assert!(!can_stream(&cmds));
+    }
+
+    #[test]
+    fn test_can_stream_multiple_streamable_commands() {
+        let cmds = vec![
+            Command::Substitution {
+                pattern: "foo".to_string(),
+                replacement: "bar".to_string(),
+                flags: SubstitutionFlags::default(),
+                range: None,
+            },
+            Command::Delete {
+                range: (Address::LineNumber(5), Address::LineNumber(10)),
+            },
+        ];
+        assert!(can_stream(&cmds));
+    }
+}

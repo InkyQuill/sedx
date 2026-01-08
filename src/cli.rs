@@ -24,15 +24,32 @@ FEATURES:
   • Dry-run mode to preview changes
   • Easy rollback with one command
   • Colored diff output
-  • Extended regex by default
+  • PCRE (modern regex) by default
+  • Optional BRE/ERE mode for GNU sed compatibility
   • ~90% GNU sed compatibility
+
+REGEX MODES:
+  PCRE (default) - Modern Perl-compatible regex
+  -E, --ere      - Extended Regular Expressions (like sed -E)
+  -B, --bre      - Basic Regular Expressions (like GNU sed)
+
+STDIN/STDOUT:
+  When no files are specified, sedx reads from stdin and writes to stdout.
+  This makes it compatible with pipelines like: cat file.txt | sedx 's/foo/bar/'
+
+  Backups, diffs, and rollback are disabled in stdin mode.
 
 EXAMPLES:
   sedx 's/foo/bar/g' file.txt              Replace all occurrences
-  sedx '/error/s/test/fix/' file.txt        Only in lines matching 'error'
-  sedx '5,10d' file.txt                     Delete lines 5-10
-  sedx '{s/a/A/g; s/b/B/g}' file.txt       Multiple commands
-  sedx --rollback file.txt.backup.TIMESTAMP Undo last change")]
+  cat file.txt | sedx 's/foo/bar/g'        Read from stdin, write to stdout
+  echo 'test' | sedx 's/test/TEST/'        Pipe input
+  sedx 's/(foo|baz)/bar/g' file.txt        PCRE: alternation (default)
+  sedx -E 's/(foo|baz)/bar/g' file.txt     ERE: alternation
+  sedx -B 's/\\(foo\\|baz\\)/bar/g' file.txt BRE: escaped metacharacters
+  sedx '/error/s/test/fix/' file.txt       Only in lines matching 'error'
+  sedx '5,10d' file.txt                    Delete lines 5-10
+  sedx '{s/a/A/g; s/b/B/g}' file.txt      Multiple commands
+  sedx --rollback backup.ID                Undo last change")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(long_version = LONG_VERSION)]
 #[command(propagate_version = true)]
@@ -64,6 +81,26 @@ struct Cli {
     #[arg(long = "no-context", alias = "nc")]
     #[arg(help = "Show only changed lines without context\nEquivalent to --context=0")]
     no_context: bool,
+
+    /// Enable streaming mode for large files (>=100MB)
+    #[arg(long, alias = "force-streaming")]
+    #[arg(help = "Enable streaming mode for large files (auto-detects at 100MB)\nUse --no-streaming to disable")]
+    streaming: bool,
+
+    /// Disable streaming mode
+    #[arg(long = "no-streaming")]
+    #[arg(help = "Disable auto-detection and force in-memory processing")]
+    no_streaming: bool,
+
+    /// Use Basic Regular Expressions (BRE) - GNU sed compatible
+    #[arg(short = 'B', long, conflicts_with = "ere")]
+    #[arg(help = "Use Basic Regular Expressions (BRE)\nLike GNU sed: \\( \\), \\{ \\}, \\+, \\?, \\|")]
+    bre: bool,
+
+    /// Use Extended Regular Expressions (ERE)
+    #[arg(short = 'E', long, conflicts_with = "bre")]
+    #[arg(help = "Use Extended Regular Expressions (ERE)\nLike sed -E: ( ), { }, +, ?, |")]
+    ere: bool,
 
     /// Subcommands
     #[command(subcommand)]
@@ -122,9 +159,7 @@ pub fn parse_args() -> Result<Args> {
                 .expression
                 .context("Missing sed expression. Usage: sedx 's/old/new/g' file.txt")?;
 
-            if cli.files.is_empty() {
-                anyhow::bail!("No files specified. Usage: sedx 's/old/new/g' file.txt");
-            }
+            // Note: Empty files vector means read from stdin (like sed)
 
             // Determine context size
             let context = if cli.no_context {
@@ -135,15 +170,45 @@ pub fn parse_args() -> Result<Args> {
                 2 // Default
             };
 
+            // Determine streaming mode (auto-detect at 100MB)
+            let streaming = if cli.no_streaming {
+                false  // Explicitly disabled
+            } else if cli.streaming {
+                true   // Explicitly enabled
+            } else {
+                false  // Auto-detect (will check file size in main.rs)
+            };
+
+            // Determine regex flavor
+            let regex_flavor = if cli.bre {
+                RegexFlavor::BRE
+            } else if cli.ere {
+                RegexFlavor::ERE
+            } else {
+                RegexFlavor::PCRE  // Default
+            };
+
             Ok(Args::Execute {
                 expression,
                 files: cli.files,
                 dry_run: cli.dry_run,
                 interactive: cli.interactive,
                 context,
+                streaming,
+                regex_flavor,
             })
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegexFlavor {
+    /// Basic Regular Expressions (GNU sed compatible)
+    BRE,
+    /// Extended Regular Expressions (sed -E compatible)
+    ERE,
+    /// Perl-Compatible Regular Expressions (modern, default)
+    PCRE,
 }
 
 #[derive(Debug)]
@@ -154,6 +219,8 @@ pub enum Args {
         dry_run: bool,
         interactive: bool,
         context: usize,
+        streaming: bool,
+        regex_flavor: RegexFlavor,
     },
     Rollback {
         id: Option<String>,

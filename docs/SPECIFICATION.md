@@ -2,14 +2,14 @@
 
 **Version:** 1.0.0 (Target)
 **Current Version:** 0.2.0-alpha (neo branch)
-**Last Updated:** 2025-01-07
+**Last Updated:** 2025-01-08
 
 ---
 
 ## Table of Contents
 
 1. [Overview & Vision](#1-overview--vision)
-2. [Modes of Operation](#2-modes-of-operation)
+2. [Regex Flavor System](#2-regex-flavor-system)
 3. [CLI Reference](#3-cli-reference)
 4. [Sed Commands Reference](#4-sed-commands-reference)
 5. [Substitution System](#5-substitution-system)
@@ -25,23 +25,26 @@
 
 ### Project Mission
 
-SedX is a **safe, modern text processing tool** that combines the power of GNU sed with enhanced usability and safety features.
+SedX is a **safe, modern text processing tool** that combines the power of GNU sed with modern regex capabilities and enhanced safety features.
 
 ### Core Principles
 
 1. **Safety First**: Automatic backups, disk space awareness, clear warnings
-2. **Hybrid Compatibility**: Support both traditional sed and modern simplified syntax
-3. **Stream Processing**: Handle files of any size with minimal memory
-4. **User Guidance**: Clear communication about compatibility and operations
-5. **Pragmatic Design**: 95% sed compatibility for 90% of use cases
+2. **Modern Regex**: PCRE (Perl-Compatible Regular Expressions) by default
+3. **Sed Compatibility**: BRE/ERE modes for GNU sed compatibility
+4. **Stream Processing**: Handle files of any size with minimal memory
+5. **User Guidance**: Clear communication about operations and features
+6. **Pragmatic Design**: 95% sed compatibility for 90% of use cases
 
 ### Design Philosophy
 
-> **"Make safe text processing accessible without sacrificing power"**
+> **"Make safe text processing accessible with modern regex capabilities"**
 
-- Default to safe behavior (backups on)
-- Warn about potential issues (disk space, incompatibilities)
-- Provide escape hatches (`--no-backup --force`, `--compat=permissive`)
+- Default to modern PCRE regex syntax (most powerful)
+- Support BRE/ERE modes for GNU sed compatibility
+- Default to safe behavior (backups on, dry-run first)
+- Warn about potential issues (disk space, compatibility)
+- Provide escape hatches (`--no-backup --force`, `-B`/`-E` flags)
 - Educate users through helpful messages
 - Maintain predictability for sed users
 
@@ -54,101 +57,174 @@ SedX is a **safe, modern text processing tool** that combines the power of GNU s
 | **DevOps Automation** | CI/CD text transformations | `--no-backup`, reliable |
 | **Data Processing** | ETL on text files | Pipe-friendly, fast |
 | **System Administration** | Safe bulk edits | Dry-run, interactive, diffs |
-| **Development** | Quick find-replace | Simplified syntax like `sd` |
+| **Development** | Modern regex patterns | PCRE features: lookaheads, named groups |
 
 ---
 
-## 2. Modes of Operation
+## 2. Regex Flavor System
 
-SedX operates in **three compatibility modes**, controlled by `--compat` flag:
+SedX supports **three regex flavors** to provide both modern capabilities and GNU sed compatibility.
 
-### 2.1 Strict Mode (`--compat=strict`)
+### 2.1 PCRE Mode (Default)
+
+**Goal:** Modern, powerful regex processing
+
+**Behavior:**
+- Perl-Compatible Regular Expressions
+- Most advanced features available
+- Best for: New projects, developers familiar with modern regex
+
+**Features:**
+- Extended syntax: `()`, `{}`, `+`, `?`, `|` without escaping
+- Named capture groups: `(?P<name>...)`
+- Non-capturing groups: `(?:...)`
+- Lookaheads: `(?=...)`, `(?!...)`
+- Lookbehinds: `(?<=...)`, `(?<!...)`
+- Atomic groups: `(?>...)`
+- Possessive quantifiers: `?+`, `*+`, `++`
+- Inline flags: `(?i)`, `(?m)`, `(?s)`
+
+**Example:**
+```bash
+# Modern syntax (default)
+$ sedx 's/(foo|bar)/baz/g' file.txt  # No backslash needed
+
+# Named groups
+$ sedx 's/(?P<word>\w+)/<\1>/g' file.txt
+
+# Lookahead
+$ sedx 's/foo(?=bar)/FOO/g' file.txt  # Match "foo" only before "bar"
+```
+
+---
+
+### 2.2 BRE Mode (`-B` flag)
 
 **Goal:** 100% GNU sed compatibility
 
 **Behavior:**
-- Accepts only traditional sed syntax
-- Rejects simplified syntax with error
-- No warnings about compatibility
-- Best for: Drop-in sed replacement
+- Basic Regular Expressions
+- Escaped metacharacters: `\(`, `\)`, `\{`, `\}`, `\+`, `\?`, `\|`
+- Automatic conversion to PCRE for processing
+- Best for: Drop-in GNU sed replacement
+
+**Internal Conversion:**
+All BRE patterns are automatically converted to PCRE before compilation:
+- `\(` → `(`
+- `\)` → `)`
+- `\+` → `+`
+- `\?` → `?`
+- `\|` → `|`
+- `\1` → `$1` (in replacement)
+- `\&` → `$&` (in replacement)
 
 **Example:**
 ```bash
-$ sedx --compat=strict 'foo' 'bar' file.txt
-error: Invalid sed syntax
-hint: Use simplified syntax: sedx 'foo' 'bar' file.txt
-       or use --compat=extended for both syntaxes
+# BRE mode (GNU sed compatible)
+$ sedx -B 's/\(foo\|bar\)/baz/g' file.txt  # Escaped metacharacters
+# Internally converts to: s/(foo|bar)/baz/g
+# Compiled as PCRE for execution
 
-$ sedx --compat=strict 's/foo/bar/g' file.txt  # OK
+# Backreferences (BRE style)
+$ sedx -B 's/\(foo\)\(bar\)/\2\1/' file.txt  # "foobar" → "barfoo"
+# Internally converts \1, \2 to $1, $2
+# Compiled as PCRE for execution
 ```
-
-**Valid Syntax:**
-- `s/old/new/g` - Substitution
-- `5,10d` - Delete lines
-- `/pattern/p` - Print matching lines
-- All traditional sed commands
-
-**Invalid Syntax:**
-- `'pattern' 'replacement'` - Simplified syntax
-- `-F` flag - String-literal mode
-- Any non-sed extension
 
 ---
 
-### 2.2 Extended Mode (`--compat=extended`) [DEFAULT]
+### 2.3 ERE Mode (`-E` flag)
 
-**Goal:** Balance sed compatibility with modern features
+**Goal:** `sed -E` compatibility
 
 **Behavior:**
-- Accepts both sed and simplified syntax
-- Warns when using simplified syntax
-- Most flexible for mixed environments
-- Best for: General use, migration from sed
+- Extended Regular Expressions
+- Automatic conversion of backreferences to PCRE format for processing
+- Best for: Scripts written for `sed -E`
+
+**Internal Conversion:**
+ERE patterns are already PCRE-compatible in syntax, but backreferences in replacements are converted:
+- `\1` → `$1` (in replacement)
+- Pattern syntax: `()`, `{}`, `+`, `?`, `|` all pass through unchanged
 
 **Example:**
 ```bash
-$ sedx 'foo' 'bar' file.txt
-warning: Using simplified syntax (not sed-compatible)
-sed equivalent: sed 's/foo/bar/g' file.txt
-hint: Use --compat=strict to disable this syntax
-       or --compat=permissive to suppress warnings
-# [output produced]
+# ERE mode (sed -E compatible)
+$ sedx -E 's/(foo|bar)/baz/g' file.txt  # Extended syntax
+# Pattern passes through unchanged (already PCRE-compatible)
+# Compiled as PCRE for execution
 
-$ sedx --compat=extended 's/foo/bar/g' file.txt  # OK, no warning
+# Same as GNU sed -E
+$ sed -E 's/(foo|bar)+/baz/g' file.txt
+$ sedx -E 's/(foo|bar)+/baz/g' file.txt  # Same result
 ```
 
-**Valid Syntax:**
-- All sed syntax (strict mode)
-- Simplified syntax: `'pattern' 'replacement'`
-- Regex flags: `-i`, `-m`, `-s`
-- Replacement limiting: `--max-count`
+**ERE Syntax:**
+- Extended metacharacters: `()`, `{}`, `+`, `?`, `|` (no escaping needed)
+- Basic POSIX ERE features
+- Backreferences: Uses `\1` in replacements (converted to `$1` internally)
 
----
+### 2.4 Pipeline/Stdin Mode
 
-### 2.3 Permissive Mode (`--compat=permissive`)
-
-**Goal:** Maximum flexibility, no warnings
+**Goal:** Unix pipeline compatibility for stream processing
 
 **Behavior:**
-- Accepts both syntaxes silently
-- No compatibility warnings
-- Best for: Scripts, automated workflows
-- Risk: Silent incompatibility with sed
+- When no files are specified, reads from stdin and writes to stdout
+- Fully compatible with Unix pipes (`|`) and redirections (`>`, `<`)
+- No backups, diffs, or rollback in pipeline mode (stream-only)
+- All regex flavors work in pipeline mode
 
-**Example:**
+**Activation:**
 ```bash
-$ sedx --compat=permissive 'foo' 'bar' file.txt
-# [output produced, no warning]
-
-$ sedx --compat=permissive 's/foo/bar/g' file.txt
-# [output produced, no warning]
+# No files = stdin mode
+echo "hello" | sedx 's/hello/HELLO/'
+cat file.txt | sedx 's/foo/bar/g'
+find . -name "*.log" | xargs cat | sedx 's/error/ERROR/gi'
 ```
+
+**Characteristics:**
+| Feature | File Mode | Pipeline Mode |
+|---------|-----------|---------------|
+| **Input** | From file(s) | From stdin |
+| **Output** | To file(s) + diff | To stdout only |
+| **Backups** | ✅ Created | ❌ Not created |
+| **Diffs** | ✅ Shown | ❌ Not shown |
+| **Rollback** | ✅ Available | ❌ Not available |
+| **Dry-run** | ✅ Supported | N/A (use file mode) |
+| **Regex flavors** | All | All |
+| **All commands** | All | All |
 
 **Use Cases:**
-- CI/CD pipelines (warnings create noise)
-- Scripts where you know the syntax
-- Migration from `sd`
-- Personal workflows
+```bash
+# Log filtering
+docker logs nginx 2>/dev/null | sedx '/error/d' | tail -100
+
+# Data transformation pipeline
+cat data.csv | sedx 's/,/\t/g' | sort | uniq
+
+# Config extraction
+cat ~/.bashrc | sedx '/^export/p' | sedx 's/export //'
+
+# Multi-file processing
+find . -name "*.txt" -exec cat {} \; | sedx 's/old/new/g'
+
+# Integration with other tools
+ps aux | sedx '1d' | awk '{print $2}' | xargs kill -9
+
+# Real-time monitoring
+tail -f /var/log/syslog | sedx 's/error/ERROR/gi' | grep ERROR
+```
+
+**Exit Status:**
+- `0`: Success, transformations applied
+- `1`: Error in expression or processing
+- `2`: File I/O error (file mode only)
+
+**Limitations:**
+- Cannot create backups (no file to backup)
+- No diff output (stdout is the output stream)
+- No rollback (stream is consumed)
+- Dry-run mode not available (use file mode for previews)
 
 ---
 
@@ -181,12 +257,13 @@ sedx [OPTIONS] [SUBCOMMAND] [EXPRESSION] [FILES...]
 | `--no-context` | `--nc` | Show only changed lines | `false` |
 | `--color` | | Color output: always, never, auto | `auto` |
 
-#### Compatibility Flags
+#### Regex Flavor Flags
 
-| Flag | Description | Values | Default |
-|------|-------------|--------|---------|
-| `--compat` | Compatibility mode | `strict`, `extended`, `permissive` | `extended` |
-| `--sed-compatible` | Alias for `--compat=strict` | - | - |
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-B` / `--bre` | Use Basic Regular Expressions (GNU sed compatible) | PCRE |
+| `-E` / `--ere` | Use Extended Regular Expressions (sed -E compatible) | PCRE |
+| (no flag) | Use PCRE (modern regex) | **PCRE** |
 
 #### Backup Flags
 
@@ -200,12 +277,11 @@ sedx [OPTIONS] [SUBCOMMAND] [EXPRESSION] [FILES...]
 
 | Flag | Short | Description | Default |
 |------|-------|-------------|---------|
-| `--fixed-strings` | `-F` | Treat patterns as literal strings, not regex | `false` |
 | `--case-insensitive` | `-i` | Case-insensitive matching | `false` |
-| `--multi-line` | `-m` | Multi-line mode (^/$ match per line) | `false` |
-| `--dot-newline` | `-s` | Dot (`.`) matches newline | `false` |
 | `--max-count` | | Maximum replacements per file | `unlimited` |
 | `--max-replacements` | | Alias for `--max-count` | - |
+
+**Note:** In-substitution flags (`g`, `i`, `p`, `1-9`) are specified in the expression itself, not as CLI flags.
 
 #### Processing Flags
 
@@ -724,9 +800,9 @@ sedx '5,10w excerpt.txt' file.txt
 
 ## 5. Substitution System
 
-### 5.1 Syntax Modes
+### 5.1 Syntax
 
-#### Traditional Sed Syntax
+SedX uses **traditional sed syntax** for all operations:
 
 ```bash
 sedx 's/pattern/replacement/[flags]' file.txt
@@ -734,75 +810,80 @@ sedx 's/pattern/replacement/[flags]' file.txt
 
 **Characteristics:**
 - Uses delimiter (typically `/`)
-- Explicit flags: `g` for global
-- Backreferences: `\1`, `\2`
-- Compatible with GNU sed
+- Explicit flags: `g` for global, `i` for case-insensitive, etc.
+- Modern backreferences: `$1`, `$2` (or `\1`, `\2` in BRE mode)
+- Compatible with GNU sed syntax
 
-#### Simplified Syntax (Extended/Permissive Mode)
-
+**Examples:**
 ```bash
-sedx 'pattern' 'replacement' file.txt
-```
+# Basic substitution
+sedx 's/foo/bar/' file.txt
 
-**Characteristics:**
-- Space-separated arguments
-- Global replacement by default
-- Modern backreferences: `$1`, `$2`
-- Inspired by `sd`
+# Global substitution
+sedx 's/foo/bar/g' file.txt
 
-**Compatibility Warning:**
-```bash
-$ sedx 'foo' 'bar' file.txt
-warning: Using simplified syntax (not sed-compatible)
-sed equivalent: sed 's/foo/bar/g' file.txt
+# With address range
+sedx '1,10s/foo/bar/g' file.txt
+
+# With pattern address
+sedx '/error/s/test/fix/' file.txt
 ```
 
 ---
 
-### 5.2 String-Literal Mode (`-F`)
+### 5.2 Regex Flavor Impact on Syntax
 
-Treat patterns as literal strings, not regex.
+The regex flavor affects pattern syntax and backreference style:
 
+**PCRE Mode (Default):**
 ```bash
-sedx -F 'C:\Users' 'D:\Backup' file.txt
-sedx -F '$$$' 'money' prices.txt
+sedx 's/(foo|bar)/baz/g' file.txt           # Extended syntax
+sedx 's/(?P<name>\w+)/hello_\1/' file.txt  # Named groups
+sedx 's/(foo)(bar)/$2$1/' file.txt         # Modern backreferences
 ```
 
-**Use Cases:**
-- Windows paths
-- Special regex characters (`.`, `*`, `$`, etc.)
-- Fixed string search/replace
+**BRE Mode (-B flag):**
+```bash
+sedx -B 's/\(foo\|bar\)/baz/g' file.txt     # Escaped metacharacters
+sedx -B 's/\(foo\)\(bar\)/\2\1/' file.txt  # BRE backreferences (\1, \2)
+# Automatically converts to: s/(foo)(bar)/$2$1/
+```
+
+**ERE Mode (-E flag):**
+```bash
+sedx -E 's/(foo|bar)/baz/g' file.txt        # Extended syntax (no PCRE features)
+sedx -E 's/(foo)(bar)/\2\1/' file.txt      # Uses $1, $2 internally
+```
 
 ---
 
 ### 5.3 Substitution Flags
 
-#### In Traditional Syntax
-
+**In-Expression Flags:**
 ```bash
-sedx 's/foo/bar/g' file.txt      # Global
+sedx 's/foo/bar/g' file.txt      # Global (all occurrences in line)
 sedx 's/foo/bar/i' file.txt      # Case-insensitive
-sedx 's/foo/bar/gi' file.txt     # Both
-sedx 's/foo/bar/2' file.txt      # 2nd occurrence only
-sedx 's/foo/bar/p' file.txt      # Print if substituted
+sedx 's/foo/bar/gi' file.txt     # Both global and case-insensitive
+sedx 's/foo/bar/2' file.txt      # Replace only 2nd occurrence
+sedx 's/foo/bar/p' file.txt      # Print line if substitution made
 ```
 
-#### With Simplified Syntax
-
-```bash
-sedx -i 'foo' 'bar' file.txt     # Case-insensitive
-sedx --max-count=5 'foo' 'bar' file.txt  # Limit replacements
-```
+**Available Flags:**
+- `g` - Global replacement (all occurrences in line)
+- `i` / `I` - Case-insensitive matching
+- `p` - Print line if substitution made
+- `1`-`9` - Replace only Nth occurrence
 
 ---
 
-### 5.4 Regex Flags
+### 5.4 CLI-Level Flags
 
 | Flag | Description | Example |
 |------|-------------|---------|
-| `-i` / `--case-insensitive` | Case-insensitive matching | `sedx -i 'foo' 'bar'` |
-| `-m` / `--multi-line` | Multi-line mode (^/$ match per line) | `sedx -m '^foo' 'bar'` |
-| `-s` / `--dot-newline` | Dot matches newline | `sedx -s 'foo.*bar' 'baz'` |
+| `-i` / `--case-insensitive` | Case-insensitive matching (all patterns) | `sedx -i 's/foo/bar/'` |
+| `--max-count=N` | Maximum replacements per file | `sedx --max-count=5 's/foo/bar/g'` |
+| `-B` | BRE mode (GNU sed compatible) | `sedx -B 's/\(foo\)/bar/'` |
+| `-E` | ERE mode (sed -E compatible) | `sedx -E 's/(foo|bar)/baz/'` |
 
 ---
 
@@ -810,21 +891,24 @@ sedx --max-count=5 'foo' 'bar' file.txt  # Limit replacements
 
 #### Syntax Support
 
-SedX supports both traditional and modern capture syntax:
+SedX supports modern capture syntax with PCRE and traditional syntax with BRE:
 
-**Traditional (sed-compatible):**
+**PCRE Mode (Default):**
 ```bash
-sedx 's/\(foo\)\(bar\)/\2\1/' file.txt  # "foobar" → "barfoo"
+sedx 's/(foo)(bar)/$2$1/' file.txt              # "foobar" → "barfoo"
+sedx 's/(?P<word>\w+)/<$1>/' file.txt          # Named capture (future)
+sedx 's/(?:non-capturing)/(captured)/' file.txt  # Non-capturing group (future)
 ```
 
-**Modern (simplified):**
+**BRE Mode (-B flag):**
 ```bash
-sedx 's/(foo)(bar)/$2$1/' file.txt  # "foobar" → "barfoo"
+sedx -B 's/\(foo\)\(bar\)/\2\1/' file.txt  # "foobar" → "barfoo"
+# Automatically converts \1, \2 to $1, $2
 ```
 
-**Named captures (future):**
+**ERE Mode (-E flag):**
 ```bash
-sedx 's/(?P<name>foo)/hello_$name/' file.txt
+sedx -E 's/(foo)(bar)/$2$1/' file.txt  # Uses $1, $2 internally
 ```
 
 ---
@@ -866,8 +950,8 @@ Supported in replacement strings:
 Limit total replacements per file:
 
 ```bash
-sedx --max-count=5 'foo' 'bar' file.txt  # Max 5 replacements per file
-sedx --max-replacements=10 'error' 'ERROR' log.txt
+sedx --max-count=5 's/foo/bar/g' file.txt  # Max 5 replacements per file
+sedx --max-replacements=10 's/error/ERROR/g' log.txt
 ```
 
 **Use Cases:**
@@ -1303,7 +1387,8 @@ sedx --color=never 's/foo/bar/g' file.txt | less
 | `sed -n '1,10p' file` | `sedx -n '1,10p' file` | Same |
 | `sed -e 's/a/b/' -e 's/c/d/' file` | `sedx -e 's/a/b/' -e 's/c/d/' file` | Same |
 | `sed -f script.sed file` | `sedx -f script.sed file` | Same (v0.4.0+) |
-| `sd 'foo' 'bar' file` | `sedx 'foo' 'bar' file` | SedX supports simplified syntax |
+| `sed -E 's/(foo|bar)/baz/' file` | `sedx 's/(foo|bar)/baz/' file` | SedX default is ERE |
+| `sed 's/\(foo\|bar\)/baz/' file` | `sedx -B 's/\(foo\|bar\)/baz/' file` | Use `-B` for BRE |
 
 ---
 
@@ -1317,8 +1402,7 @@ sed 's/foo/bar/g' file.txt
 
 **SedX:**
 ```bash
-sedx 's/foo/bar/g' file.txt        # Traditional
-sedx 'foo' 'bar' file.txt           # Simplified
+sedx 's/foo/bar/g' file.txt        # Same syntax
 ```
 
 ---
@@ -1392,17 +1476,23 @@ sedx -f script.sed file.txt         # Same (v0.4.0+)
 
 ### 9.3 Incompatibilities
 
-#### Simplified Syntax Warning
+#### Default Regex Behavior
 
-**SedX:** Warns about non-sed syntax
+**GNU sed:** Uses BRE by default
+**SedX:** Uses PCRE by default
 
 ```bash
-$ sedx 'foo' 'bar' file.txt
-warning: Using simplified syntax (not sed-compatible)
-sed equivalent: sed 's/foo/bar/g' file.txt
+# GNU sed (BRE)
+sed 's/\(foo\|bar\)/baz/' file.txt
+
+# SedX (PCRE - more powerful)
+sedx 's/(foo|bar)/baz/' file.txt
+
+# SedX (BRE mode - GNU sed compatible)
+sedx -B 's/\(foo\|bar\)/baz/' file.txt
 ```
 
-**Solution:** Use `--compat=permissive` to suppress warnings
+**Solution:** Use `-B` flag for BRE compatibility
 
 ---
 
@@ -1443,18 +1533,18 @@ sedx --no-backup --force 's/foo/bar/' file.txt
 
 ### 9.4 Feature Comparison
 
-| Feature | GNU sed | `sd` | SedX | Notes |
-|---------|---------|------|------|-------|
-| **Basic substitution** | ✅ | ✅ | ✅ | All support |
-| **Extended regex** | `-E` | Default | Default | SedX like `sed -E` |
-| **Simplified syntax** | ❌ | ✅ | ✅ | SedX warns |
-| **Stream processing** | ✅ | ✅ | ✅ (v0.2.0) | All support |
-| **In-place editing** | `-i` | Default | `--execute` | Different UX |
-| **Backups** | Optional | ❌ | Automatic | SedX default |
-| **Dry-run mode** | Manual | `-p` | Default | SedX default |
-| **Diff preview** | ❌ | ❌ | ✅ | SedX feature |
-| **Rollback** | ❌ | ❌ | ✅ | SedX feature |
-| **Disk space checks** | ❌ | ❌ | ✅ (v0.2.1) | SedX feature |
+| Feature | GNU sed | SedX | Notes |
+|---------|---------|------|-------|
+| **Basic substitution** | ✅ | ✅ | Same syntax |
+| **PCRE regex** | ❌ | ✅ (default) | Modern features |
+| **BRE/ERE modes** | ✅ | ✅ | `-B`/`-E` flags |
+| **Stream processing** | ✅ | ✅ (v0.2.0) | All support |
+| **In-place editing** | `-i` | `--execute` | Different UX |
+| **Backups** | Optional | Automatic | SedX default |
+| **Dry-run mode** | Manual | Default | SedX default |
+| **Diff preview** | ❌ | ✅ | SedX feature |
+| **Rollback** | ❌ | ✅ | SedX feature |
+| **Disk space checks** | ❌ | ✅ (v0.2.1) | SedX feature |
 
 ---
 
@@ -1484,10 +1574,10 @@ max_disk_usage_percent = 60                  # Error if backup uses > this %
 compression = false                          # Compress backups (future)
 auto_prune = true                            # Auto-cleanup old backups
 
-# Compatibility settings
-[compatibility]
-mode = "extended"                            # strict | extended | permissive
-show_warnings = true                         # Show compatibility warnings
+# Regex settings
+[regex]
+default_flavor = "pcre"                     # pcre | ere | bre
+show_warnings = true                         # Show regex compatibility warnings
 
 # Processing settings
 [processing]
@@ -1504,7 +1594,6 @@ pager = "less"                               # Pager for long output
 
 # Advanced settings
 [advanced]
-regex_engine = "rust"                        # rust | pcre (future)
 locale = "en_US.UTF-8"                       # Locale for multibyte
 timeout_sec = 300                            # Operation timeout
 ```
@@ -1544,7 +1633,7 @@ SedX respects these environment variables:
 
 | Variable | Purpose | Example |
 |----------|---------|---------|
-| `SEDX_COMPAT` | Default compatibility mode | `export SEDX_COMPAT=extended` |
+| `SEDX_REGEX_FLAVOR` | Default regex mode | `export SEDX_REGEX_FLAVOR=pcre` |
 | `SEDX_BACKUP_DIR` | Backup location | `export SEDX_BACKUP_DIR=/mnt/backups` |
 | `SEDX_CONFIG` | Custom config file | `export SEDX_CONFIG=~/.sedx.toml` |
 | `NO_COLOR` | Disable colors | `export NO_COLOR=1` |
@@ -1567,8 +1656,8 @@ SedX looks for config in this order:
 [backup]
 enabled = false              # Disable backups in CI/CD
 
-[compatibility]
-mode = "strict"              # Enforce sed compatibility
+[regex]
+default_flavor = "ere"       # Use ERE for this project
 
 [processing]
 max_memory_mb = 50           # Lower memory limit
@@ -1625,7 +1714,7 @@ Target performance (v1.0.0):
 
 | Operation | Target | Notes |
 |-----------|--------|-------|
-| **Simple substitution** | Within 1.5x of `sd` | For simple cases |
+| **Simple substitution** | Within 1.5x of GNU sed | For simple cases |
 | **Complex scripts** | Within 2x of GNU sed | For complex patterns |
 | **Memory usage** | <100MB for 100GB file | Constant regardless of file size |
 | **Startup time** | <50ms | CLI overhead |
@@ -1648,6 +1737,7 @@ Target performance (v1.0.0):
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.0.0-draft-update | 2025-01-08 | **Major architecture update**: Removed simplified syntax (sd-like), added PCRE/ERE/BRE regex flavor system, updated all references |
 | 1.0.0-draft | 2025-01-07 | Initial specification |
 
 ---
