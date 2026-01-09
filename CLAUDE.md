@@ -8,6 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Key difference from GNU sed**: SedX uses **PCRE (Perl-Compatible Regular Expressions)** by default, which is the most modern and powerful regex flavor. For compatibility, SedX also supports ERE (with `-E`) and BRE (with `-B`) modes.
 
+**Streaming Architecture (Phase 1 - In Progress)**: SedX is implementing constant-memory streaming processing for large files (100GB+ with <100MB RAM). See "Streaming Implementation" section below for details.
+
 ## Regex Flavor System
 
 SedX supports three regex flavors, selectable via command-line flags:
@@ -173,13 +175,13 @@ The release binary is required for accurate testing:
 
 - **main.rs** - Entry point, command routing (execute/rollback/history/status)
 - **cli.rs** - Command-line argument parsing, defines `Args` and `RegexFlavor` enums
-- **command.rs** - Unified `Command` and `Address` enums (NEW)
-- **parser.rs** - Unified parser with regex flavor support (NEW)
-- **bre_converter.rs** - Converts BRE patterns to PCRE for compilation (NEW)
-- **ere_converter.rs** - Converts ERE backreferences to PCRE format (NEW)
-- **capability.rs** - Streaming capability checks (NEW)
+- **command.rs** - Unified `Command` and `Address` enums (core data structures)
+- **parser.rs** - Unified parser with regex flavor support (PCRE/ERE/BRE)
+- **bre_converter.rs** - Converts BRE patterns to PCRE for compilation
+- **ere_converter.rs** - Converts ERE backreferences to PCRE format
+- **capability.rs** - Streaming capability checks (determines if commands can stream)
 - **sed_parser.rs** - Legacy sed parser (DEPRECATED - being migrated to parser.rs)
-- **file_processor.rs** - Applies sed commands to file contents, generates diffs
+- **file_processor.rs** - Dual-mode processor: in-memory (`FileProcessor`) and streaming (`StreamProcessor`)
 - **diff_formatter.rs** - Formats output (diffs, history, dry-run headers)
 - **backup_manager.rs** - Creates/restores backups using JSON metadata
 
@@ -323,6 +325,35 @@ The `resolve_address()` method in `file_processor.rs` converts addresses to line
 
 ## File Processing Pipeline
 
+### Processing Modes
+
+SedX automatically chooses between in-memory and streaming processing based on file size:
+
+**In-Memory Mode** (files < 100MB):
+- Loads entire file into `Vec<String>`
+- Processes with random access to all lines
+- Generates full diff with context
+- Fast for small files
+
+**Streaming Mode** (files ≥ 100MB):
+- Processes line-by-line using `BufReader`
+- Constant memory usage regardless of file size
+- Sliding window for diff context
+- Falls back to in-memory for unsupported commands
+
+**Capability Checking** (`capability.rs`):
+- `can_stream(commands)` - Checks if commands support streaming
+- Returns `false` for: hold space ops, complex groups, negated ranges
+- Forces in-memory processing when streaming not possible
+
+**Streaming State Machine** (Chunk 8 - In Progress):
+- Pattern ranges `/start/,/end/` use `PatternRangeState` enum
+- States: `LookingForStart`, `InRange`, `WaitingForLineNumber`, `CountingRelativeLines`
+- Tracked per-command using `HashMap<(String, String), PatternRangeState>`
+- Supports mixed ranges: `/start/,10`, `5,/end/`, `/start/,+5`
+
+### Preview vs Execute vs Interactive
+
 **Preview mode** (`--dry-run`):
 1. Parse expression
 2. Process file to generate diff
@@ -340,6 +371,77 @@ The `resolve_address()` method in `file_processor.rs` converts addresses to line
 1. Preview changes
 2. Prompt user for confirmation
 3. Create backup and apply if confirmed
+
+### Streaming Implementation Details
+
+**StreamProcessor struct** (`file_processor.rs`):
+```rust
+pub struct StreamProcessor {
+    commands: Vec<Command>,
+    hold_space: String,
+    current_line: usize,
+    context_buffer: VecDeque<(usize, String, ChangeType)>,  // Sliding window
+    context_size: usize,                                    // Default: 2
+    context_lines_to_read: usize,                           // Context after changes
+    pattern_range_states: HashMap<(String, String), PatternRangeState>,
+    mixed_range_states: HashMap<MixedRangeKey, MixedRangeState>,
+    dry_run: bool,
+}
+```
+
+**Sliding Window Diff** (Chunk 7):
+- Unchanged lines accumulate in `context_buffer` (VecDeque)
+- When change detected: flush buffer + add changed line + read next `context_size` lines
+- Prevents memory blowup on large files while showing context
+
+**Atomic File Writes**:
+```rust
+let temp_file = NamedTempFile::new_in(parent_dir)?;
+// Write to temp file
+temp_file.persist(file_path)?;  // Atomic rename
+```
+
+**Pattern Range Logic** (Chunk 8):
+- `/start/,/end/` → State machine toggles between `LookingForStart` and `InRange`
+- `/start/,10` → MixedRangeState: `InRangeUntilLine { target_line: 10 }`
+- `5,/end/` → MixedRangeState: `InRangeUntilPattern { end_pattern }`
+- `/start/,+5` → Counting state for N lines after pattern match
+
+### Chunk-Based Implementation Approach
+
+The streaming feature is implemented in small, testable chunks:
+
+**Completed Chunks**:
+- Chunk 1: Basic streaming infrastructure (BufReader/BufWriter, temp files)
+- Chunk 2: Substitution command (s) with flags (g, i, numbered)
+- Chunk 3: Delete (d) and Print (p) commands
+- Chunk 4-5: Insert (i), Append (a), Change (c), Quit (q) commands
+- Chunk 6: Simple diff generation (changed lines only, no full file storage)
+- Chunk 7: Sliding window diff with context (VecDeque buffer)
+- Chunk 8: Pattern ranges (/start/,/end/) with state machine (IN PROGRESS)
+
+**Remaining Chunks**:
+- Chunk 9: Hold space operations (h, H, g, G, x)
+- Chunk 10: Command grouping with ranges ({...})
+- Chunk 11: Testing & optimization (large file tests, memory profiling)
+
+**Each chunk follows this pattern**:
+1. Add state/data structures to StreamProcessor
+2. Implement command handling in streaming loop
+3. Add state machine logic for ranges (if needed)
+4. Write unit tests using `process_streaming_forced()`
+5. Test with actual large file (≥100MB)
+6. Commit to neo branch
+
+**Testing incrementally**:
+```bash
+# After each chunk, run tests
+cargo test
+./tests/regression_tests.sh
+
+# Force streaming on small files for testing
+./target/release/sedx 's/foo/bar/g' /tmp/small_test.txt
+```
 
 ## Backup System
 
@@ -377,30 +479,96 @@ sedx rollback <backup-id>
 
 ## Important Constraints
 
-- Uses **Extended Regular Expressions (ERE)**, not BRE like GNU sed
-- Pattern substitution applies to ALL matching lines (not just first)
-- Backreferences in replacements use `$1`, `$2` (converted from `\1`, `\2`)
-- State machine semantics for pattern ranges (start, then end)
-- File paths are absolute - shell globs expanded before reaching SedX
-- Always processes entire file into memory (line-by-line vector)
+- **Regex**: Uses PCRE by default (not ERE/BRE like GNU sed)
+- **Pattern substitution**: Applies to ALL matching lines (not just first)
+- **Backreferences**: Use `$1`, `$2` internally (converted from `\1`, `\2`)
+- **Pattern ranges**: State machine semantics (start pattern → in range → end pattern)
+- **File processing**: Auto-detects streaming vs in-memory based on file size (100MB threshold)
+- **Streaming limitations**: Hold space, complex groups, and negated ranges force in-memory mode
 
 ## Common Patterns
 
-**Adding new sed command support**:
-1. Add variant to `SedCommand` enum in `sed_parser.rs`
-2. Add parsing function `parse_*()`
-3. Add application method `apply_*()` in `file_processor.rs`
-4. Update `apply_command()` match statement
-5. Add unit tests for parser
-6. Add integration tests in bash scripts
+### Adding New Sed Commands
 
-**Debugging parsing issues**:
-- Add parser tests to `sed_parser.rs` `#[cfg(test)]` module
-- Use `parse_single_command()` to test individual commands
-- Check delimiter detection in substitution parsing
+**In-Memory Implementation** (easiest):
+1. Add variant to `Command` enum in `command.rs`
+2. Add parsing in `parser.rs` or `sed_parser.rs`
+3. Add `apply_*()` method in `FileProcessor` (in-memory section)
+4. Update `apply_command()` match statement in FileProcessor
+5. Add unit tests in `sed_parser.rs` `#[cfg(test)]` module
+6. Add integration tests in bash scripts under `tests/`
 
-**Debugging application issues**:
-- Test address resolution with `resolve_address()`
-- Check pattern matching with regex directly
-- Verify range calculation (start_idx, end_idx)
-- Test against GNU sed output
+**Streaming Implementation** (for large file support):
+1. Update `capability.rs::can_stream()` to check if command supports streaming
+2. Add command handling in `StreamProcessor::process_streaming_internal()` loop
+3. For pattern ranges, add state tracking in `pattern_range_states` HashMap
+4. Update `should_apply_command_with_range()` if command uses ranges
+5. Add unit test using `process_streaming_forced()` for small files
+6. Test with actual large file (≥100MB) to verify constant memory usage
+
+### Debugging Streaming Issues
+
+**Capability checking fails** (falls back to in-memory):
+- Check `capability.rs::can_stream()` - is your command marked as streamable?
+- Verify the command isn't using unsupported features (hold space, complex groups)
+- Add debug prints: `println!("can_stream: {}", capability::can_stream(&commands));`
+
+**Pattern ranges not working**:
+- Check state initialization in `pattern_range_states` HashMap
+- Verify `check_pattern_range()` or `check_mixed_*()` methods are being called
+- Ensure command loop clones commands before iterating: `let commands = self.commands.clone()`
+- Use `process_streaming_forced()` to test streaming on small files
+
+**Diff context issues**:
+- Adjust `context_size` (default: 2 lines before/after changes)
+- Check `flush_buffer_to_changes()` is called before adding changed lines
+- Verify `context_lines_to_read` counter decrements correctly
+- Remember: Chunk 6 streaming mode shows only changed lines (no full context)
+
+**Memory profiling**:
+```bash
+# Test memory usage with large file
+/usr/bin/time -v ./target/release/sedx 's/foo/bar/g' large_file.txt
+
+# Expected: Peak RSS < 100MB for 100GB file
+```
+
+### Adding Address Types
+
+**New address** (e.g., stepping `1~2`):
+1. Add variant to `Address` enum in `command.rs`
+2. Update parser to recognize new syntax
+3. Add `resolve_address()` case in `FileProcessor`
+4. For streaming: Add `should_apply_command_with_range()` handling
+5. Test with both in-memory and streaming modes
+
+### Testing Streaming Functionality
+
+**Force streaming mode for testing**:
+```rust
+let mut processor = StreamProcessor::new(commands);
+let result = processor.process_streaming_forced(Path::new(test_file_path));
+```
+
+**Verify memory efficiency**:
+```bash
+# Generate 1GB test file
+dd if=/dev/zero of=/tmp/test_1gb.dat bs=1M count=1024
+
+# Process with memory monitoring
+/usr/bin/time -v ./target/release/sedx 's/foo/bar/g' /tmp/test_1gb.dat
+
+# Check peak RSS in output - should be <100MB
+```
+
+**Compare output correctness**:
+```bash
+# Verify streaming matches in-memory processing
+./target/release/sedx 's/foo/bar/g' small_file.txt > /tmp/out1.txt
+# Force streaming with 1MB threshold
+# (modify threshold in code or create large test file)
+
+# Compare with GNU sed
+sed 's/foo/bar/g' small_file.txt > /tmp/out2.txt
+diff /tmp/out1.txt /tmp/out2.txt
+```

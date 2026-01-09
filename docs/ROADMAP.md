@@ -25,26 +25,37 @@ SedX is a **modern, safe text processing tool** that:
 
 ## 📊 Current Status (v0.2.0-alpha - neo branch)
 
-**Implemented:** 3,100+ lines, 11 modules
+**Implemented:** 3,300+ lines, 11 modules
 - ✅ 10/30 sed commands (33%)
 - ✅ Basic backups (no disk checks)
 - ✅ Dry-run & interactive modes
-- ✅ Hold space operations
+- ✅ Hold space operations (in-memory)
 - ✅ **Unified Command System (UCS) parser**
 - ✅ **Regex flavor support (PCRE/ERE/BRE)**
 - ✅ **BRE to ERE auto-conversion**
 - ✅ **Stdin/stdout pipeline support**
-- ❌ In-memory processing (BLOCKS large files)
+- ✅ **Streaming processing (chunks 1-8 completed)**
+  - ✅ Basic infrastructure + atomic writes
+  - ✅ Commands: s, d, p, a, i, c, q
+  - ✅ Sliding window diff with context
+  - ✅ Pattern ranges with state machine
+- ⏳ Hold space in streaming (chunk 9)
 - ❌ No disk space checks
 - ❌ Missing critical flags (-n, -e, -f)
 
-**Recent Work (Completed 2025-01-08):**
-- Implemented unified Command enum with all sed command types
-- Added regex flavor flags: `-B` (BRE), `-E` (ERE), default PCRE
-- Created BRE to ERE converter for GNU sed compatibility
-- Ported existing sed_parser to use new Command enum
-- **Added stdin/stdout support for Unix pipelines**
-- All 99 tests passing (unit + regression)
+**Recent Work (Completed 2025-01-09):**
+- **Chunk 8 completed**: Pattern ranges in streaming mode
+  - Added PatternRangeState enum with state machine
+  - Implemented /start/,/end/ pattern range tracking
+  - Added mixed ranges: /start/,10, 5,/end/, /start/,+5
+  - Added stepping addresses: 1~2 (every 2nd line)
+  - All 101 tests passing (99 + 2 new pattern range tests)
+
+**Streaming Progress:**
+- Chunks 1-7: ✅ Completed (basic streaming through sliding window diff)
+- Chunk 8: ✅ Completed (pattern ranges with state machine)
+- Chunk 9: ⏳ In Progress (hold space operations in streaming)
+- Chunk 10-11: Pending (grouping, testing & optimization)
 
 ---
 
@@ -479,8 +490,8 @@ $ sedx '=' file.txt | sedx 'N; n'
 | Version | Date | Features | Stability |
 |---------|------|----------|-----------|
 | **v0.1.0** | Past | Basic sed commands, in-memory | Alpha |
-| **v0.2.0-alpha** | Current | **Stream processing (chunks 1-3)** | Alpha |
-| **v0.2.0** | Week 4 | **Stream processing** | Beta |
+| **v0.2.0-alpha** | Current | **Stream processing (chunks 1-8)** | Alpha |
+| **v0.2.0** | Week 5 | **Stream processing (all chunks)** | Beta |
 | **v0.2.1** | Week 6 | Backup disk management | Beta |
 | **v0.3.0** | Week 9 | Enhanced substitution | Beta |
 | **v0.4.0** | Week 13 | Essential sed compatibility | Beta |

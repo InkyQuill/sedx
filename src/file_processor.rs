@@ -2021,4 +2021,83 @@ mod tests {
         // Clean up
         fs::remove_file(test_file_path).ok();
     }
+
+    #[test]
+    fn test_streaming_pattern_range_substitution() {
+        // Test pattern range /start/,/end/ with state machine (Chunk 8)
+        let test_file_path = "/tmp/test_pattern_range.txt";
+        let original_content = "line 1\nSTART\nline 3\nline 4\nEND\nline 6\n";
+
+        {
+            let mut file = fs::File::create(test_file_path)
+                .expect("Failed to create test file");
+            file.write_all(original_content.as_bytes())
+                .expect("Failed to write to test file");
+        }
+
+        // Parse pattern range substitution
+        let parser = Parser::new(RegexFlavor::PCRE);
+        let commands = parser.parse("/START/,/END/s/line/CHANGED/")
+            .expect("Failed to parse pattern range substitution");
+        let mut processor = StreamProcessor::new(commands);
+
+        // Process the file (force streaming for testing)
+        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        assert!(result.is_ok(), "Processing should succeed");
+
+        let diff = result.unwrap();
+
+        // Verify changes: lines 3 and 4 should be changed (between START and END)
+        assert!(diff.changes.len() >= 2, "Should have at least 2 changes");
+
+        let processed_content = fs::read_to_string(test_file_path)
+            .expect("Failed to read processed file");
+        assert!(processed_content.contains("CHANGED 3"), "Line 3 should be changed");
+        assert!(processed_content.contains("CHANGED 4"), "Line 4 should be changed");
+        assert!(processed_content.contains("START"), "START marker should remain");
+        assert!(processed_content.contains("END"), "END marker should remain");
+        assert!(processed_content.contains("line 1"), "Line 1 before range should be unchanged");
+        assert!(processed_content.contains("line 6"), "Line 6 after range should be unchanged");
+
+        // Clean up
+        fs::remove_file(test_file_path).ok();
+    }
+
+    #[test]
+    fn test_streaming_pattern_range_delete() {
+        // Test pattern range deletion /start/,/end/d
+        let test_file_path = "/tmp/test_pattern_range_delete.txt";
+        let original_content = "line 1\nSTART\nto delete\nto delete too\nEND\nline 6\n";
+
+        {
+            let mut file = fs::File::create(test_file_path)
+                .expect("Failed to create test file");
+            file.write_all(original_content.as_bytes())
+                .expect("Failed to write to test file");
+        }
+
+        // Parse pattern range delete
+        let parser = Parser::new(RegexFlavor::PCRE);
+        let commands = parser.parse("/START/,/END/d")
+            .expect("Failed to parse pattern range delete");
+        let mut processor = StreamProcessor::new(commands);
+
+        // Process the file (force streaming for testing)
+        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        assert!(result.is_ok(), "Processing should succeed");
+
+        let diff = result.unwrap();
+
+        // Verify deletion: lines between START and END (inclusive) should be deleted
+        let processed_content = fs::read_to_string(test_file_path)
+            .expect("Failed to read processed file");
+        assert!(processed_content.contains("line 1"), "Line 1 should remain");
+        assert!(!processed_content.contains("START"), "START should be deleted");
+        assert!(!processed_content.contains("to delete"), "Lines in range should be deleted");
+        assert!(!processed_content.contains("END"), "END should be deleted");
+        assert!(processed_content.contains("line 6"), "Line 6 should remain");
+
+        // Clean up
+        fs::remove_file(test_file_path).ok();
+    }
 }
