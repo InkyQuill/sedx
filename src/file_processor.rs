@@ -659,6 +659,117 @@ impl StreamProcessor {
                                 line_changed = true;
                             }
                         }
+                        // Chunk 10: Command grouping in streaming mode
+                        Command::Group { range, commands: group_commands } => {
+                            // Check if we're in the group's range
+                            let should_apply = match &range {
+                                None => true, // No range means apply to all lines
+                                Some((start, end)) => {
+                                    self.should_apply_command_with_range(&line, &(start.clone(), end.clone()), cmd_index)?
+                                }
+                            };
+
+                            if should_apply {
+                                // Apply each command in the group to the current line
+                                // We need to handle the streaming semantics carefully here
+                                for group_cmd in group_commands {
+                                    match group_cmd {
+                                        Command::Substitution { pattern, replacement, flags, range } => {
+                                            let should_apply_sub = match range {
+                                                None => true,
+                                                Some(r) => self.should_apply_command_with_range(&line, &r, cmd_index)?,
+                                            };
+                                            if should_apply_sub {
+                                                let original = processed_line.clone();
+                                                processed_line = self.apply_substitution_to_line(
+                                                    &processed_line,
+                                                    pattern,
+                                                    replacement,
+                                                    flags
+                                                )?;
+                                                line_changed = line_changed || (processed_line != original);
+                                            }
+                                        }
+                                        Command::Delete { range: (start, end) } => {
+                                            let range = (start.clone(), end.clone());
+                                            let should_delete = self.should_apply_command_with_range(&line, &range, cmd_index)?;
+                                            if should_delete {
+                                                skip_line = true;
+                                                break; // Stop processing group commands
+                                            }
+                                        }
+                                        Command::Print { range: (start, end) } => {
+                                            let range = (start.clone(), end.clone());
+                                            let should_print = self.should_apply_command_with_range(&line, &range, cmd_index)?;
+                                            if should_print {
+                                                print_line = true;
+                                            }
+                                        }
+                                        Command::Hold { range } => {
+                                            let should_apply = match &range {
+                                                None => true,
+                                                Some((start, end)) => self.should_apply_command_with_range(&line, &(start.clone(), end.clone()), cmd_index)?,
+                                            };
+                                            if should_apply {
+                                                self.hold_space = processed_line.clone();
+                                            }
+                                        }
+                                        Command::HoldAppend { range } => {
+                                            let should_apply = match &range {
+                                                None => true,
+                                                Some((start, end)) => self.should_apply_command_with_range(&line, &(start.clone(), end.clone()), cmd_index)?,
+                                            };
+                                            if should_apply {
+                                                if !self.hold_space.is_empty() {
+                                                    self.hold_space.push('\n');
+                                                }
+                                                self.hold_space.push_str(&processed_line);
+                                            }
+                                        }
+                                        Command::Get { range } => {
+                                            let should_apply = match &range {
+                                                None => true,
+                                                Some((start, end)) => self.should_apply_command_with_range(&line, &(start.clone(), end.clone()), cmd_index)?,
+                                            };
+                                            if should_apply && !self.hold_space.is_empty() {
+                                                processed_line = self.hold_space.clone();
+                                                line_changed = true;
+                                            }
+                                        }
+                                        Command::GetAppend { range } => {
+                                            let should_apply = match &range {
+                                                None => true,
+                                                Some((start, end)) => self.should_apply_command_with_range(&line, &(start.clone(), end.clone()), cmd_index)?,
+                                            };
+                                            if should_apply && !self.hold_space.is_empty() {
+                                                processed_line.push('\n');
+                                                processed_line.push_str(&self.hold_space);
+                                                line_changed = true;
+                                            }
+                                        }
+                                        Command::Exchange { range } => {
+                                            let should_apply = match &range {
+                                                None => true,
+                                                Some((start, end)) => self.should_apply_command_with_range(&line, &(start.clone(), end.clone()), cmd_index)?,
+                                            };
+                                            if should_apply {
+                                                std::mem::swap(&mut processed_line, &mut self.hold_space);
+                                                line_changed = true;
+                                            }
+                                        }
+                                        // Other commands in groups (a, i, c, q, nested groups) delegate to in-memory
+                                        _ => {
+                                            // Delegate entire file to in-memory processing
+                                            drop(writer);
+                                            let mut processor = FileProcessor::new(self.commands.clone());
+                                            return processor.process_file_with_context(file_path);
+                                        }
+                                    }
+                                }
+                            }
+                            // After processing the group, continue to next command in the loop
+                            continue;
+                        }
                         // Other commands not yet supported - delegate to in-memory
                         _ => {
                             drop(writer);

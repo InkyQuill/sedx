@@ -319,6 +319,13 @@ fn parse_print(cmd: &str) -> Result<SedCommand> {
 
     let addr_part = &cmd[..cmd.len() - 1]; // Remove 'p'
 
+    // Empty address means print all lines (1 to $)
+    if addr_part.trim().is_empty() {
+        return Ok(SedCommand::Print {
+            range: (Address::LineNumber(1), Address::LastLine),
+        });
+    }
+
     // Check for range: start,endp
     if let Some(comma_pos) = addr_part.find(',') {
         let start = &addr_part[..comma_pos];

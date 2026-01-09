@@ -50,9 +50,11 @@ pub fn can_stream(commands: &[Command]) -> bool {
                 return true;
             }
             Command::Group { range, commands: inner_cmds } => {
-                // Groups with ranges are not streamable
-                if range.is_some() {
-                    return false;
+                // Chunk 10: Groups are streamable if range is streamable and inner commands are streamable
+                if let Some(r) = range {
+                    if !is_range_streamable(r) {
+                        return false;
+                    }
                 }
                 // Check inner commands
                 if !can_stream(inner_cmds) {
@@ -252,7 +254,8 @@ mod tests {
     }
 
     #[test]
-    fn test_cannot_stream_group_with_range() {
+    fn test_can_stream_group_with_range() {
+        // Chunk 10: Groups with streamable ranges ARE streamable
         let cmd = Command::Group {
             commands: vec![
                 Command::Substitution {
@@ -264,7 +267,7 @@ mod tests {
             ],
             range: Some((Address::LineNumber(1), Address::LineNumber(10))),
         };
-        assert!(!can_stream(&[cmd]));
+        assert!(can_stream(&[cmd]));
     }
 
     #[test]
