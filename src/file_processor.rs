@@ -591,6 +591,74 @@ impl StreamProcessor {
                                 }
                             }
                         }
+                        // Chunk 9: Hold space operations in streaming mode
+                        Command::Hold { range } => {
+                            // h - Copy current line to hold space (overwrite)
+                            let should_apply = match &range {
+                                None => true, // No range means apply to all lines
+                                Some((start, end)) => {
+                                    self.should_apply_command_with_range(&line, &(start.clone(), end.clone()), cmd_index)?
+                                }
+                            };
+                            if should_apply {
+                                self.hold_space = processed_line.clone();
+                            }
+                        }
+                        Command::HoldAppend { range } => {
+                            // H - Append current line to hold space
+                            let should_apply = match &range {
+                                None => true, // No range means apply to all lines
+                                Some((start, end)) => {
+                                    self.should_apply_command_with_range(&line, &(start.clone(), end.clone()), cmd_index)?
+                                }
+                            };
+                            if should_apply {
+                                if !self.hold_space.is_empty() {
+                                    self.hold_space.push('\n');
+                                }
+                                self.hold_space.push_str(&processed_line);
+                            }
+                        }
+                        Command::Get { range } => {
+                            // g - Replace current line with hold space
+                            let should_apply = match &range {
+                                None => true, // No range means apply to all lines
+                                Some((start, end)) => {
+                                    self.should_apply_command_with_range(&line, &(start.clone(), end.clone()), cmd_index)?
+                                }
+                            };
+                            if should_apply && !self.hold_space.is_empty() {
+                                processed_line = self.hold_space.clone();
+                                line_changed = true;
+                            }
+                        }
+                        Command::GetAppend { range } => {
+                            // G - Append hold space to current line
+                            let should_apply = match &range {
+                                None => true, // No range means apply to all lines
+                                Some((start, end)) => {
+                                    self.should_apply_command_with_range(&line, &(start.clone(), end.clone()), cmd_index)?
+                                }
+                            };
+                            if should_apply && !self.hold_space.is_empty() {
+                                processed_line.push('\n');
+                                processed_line.push_str(&self.hold_space);
+                                line_changed = true;
+                            }
+                        }
+                        Command::Exchange { range } => {
+                            // x - Swap current line with hold space
+                            let should_apply = match &range {
+                                None => true, // No range means apply to all lines
+                                Some((start, end)) => {
+                                    self.should_apply_command_with_range(&line, &(start.clone(), end.clone()), cmd_index)?
+                                }
+                            };
+                            if should_apply {
+                                std::mem::swap(&mut processed_line, &mut self.hold_space);
+                                line_changed = true;
+                            }
+                        }
                         // Other commands not yet supported - delegate to in-memory
                         _ => {
                             drop(writer);

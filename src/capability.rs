@@ -11,7 +11,7 @@ use crate::command::{Command, Address};
 ///
 /// Some commands require full file buffering and cannot run in streaming mode:
 /// - Command groups with ranges
-/// - Hold space operations (h, H, g, G, x)
+/// - Hold space operations with non-streamable ranges (e.g., negated addresses)
 /// - Negated addresses in ranges
 /// - Complex mixed ranges (pattern to negated pattern, etc.)
 ///
@@ -23,8 +23,11 @@ use crate::command::{Command, Address};
 /// // Streamable: simple substitution
 /// assert!(can_stream(&[Command::Substitution { ... }]));
 ///
-/// // Not streamable: hold space
-/// assert!(!can_stream(&[Command::Hold { ... }]));
+/// // Streamable: hold space without range
+/// assert!(can_stream(&[Command::Hold { range: None }]));
+///
+/// // Not streamable: hold space with negated address range
+/// assert!(!can_stream(&[Command::Hold { range: Some((Address::Negated(...), ...)) }]));
 /// ```
 pub fn can_stream(commands: &[Command]) -> bool {
     for cmd in commands {
@@ -56,11 +59,18 @@ pub fn can_stream(commands: &[Command]) -> bool {
                     return false;
                 }
             }
-            Command::Hold { .. } | Command::HoldAppend { .. }
-            | Command::Get { .. } | Command::GetAppend { .. }
-            | Command::Exchange { .. } => {
-                // Hold space operations require full buffering
-                return false;
+            Command::Hold { range }
+            | Command::HoldAppend { range }
+            | Command::Get { range }
+            | Command::GetAppend { range }
+            | Command::Exchange { range } => {
+                // Chunk 9: Hold space operations are streamable
+                // Check if range is streamable
+                if let Some(r) = range {
+                    if !is_range_streamable(r) {
+                        return false;
+                    }
+                }
             }
             Command::Quit { .. } => {
                 // Quit is streamable
@@ -173,35 +183,39 @@ mod tests {
     }
 
     #[test]
-    fn test_cannot_stream_hold() {
+    fn test_can_stream_hold() {
+        // Chunk 9: Hold space operations ARE streamable
         let cmd = Command::Hold {
             range: None,
         };
-        assert!(!can_stream(&[cmd]));
+        assert!(can_stream(&[cmd]));
     }
 
     #[test]
-    fn test_cannot_stream_hold_append() {
+    fn test_can_stream_hold_append() {
+        // Chunk 9: Hold space operations ARE streamable
         let cmd = Command::HoldAppend {
             range: None,
         };
-        assert!(!can_stream(&[cmd]));
+        assert!(can_stream(&[cmd]));
     }
 
     #[test]
-    fn test_cannot_stream_get() {
+    fn test_can_stream_get() {
+        // Chunk 9: Hold space operations ARE streamable
         let cmd = Command::Get {
             range: None,
         };
-        assert!(!can_stream(&[cmd]));
+        assert!(can_stream(&[cmd]));
     }
 
     #[test]
-    fn test_cannot_stream_exchange() {
+    fn test_can_stream_exchange() {
+        // Chunk 9: Hold space operations ARE streamable
         let cmd = Command::Exchange {
             range: None,
         };
-        assert!(!can_stream(&[cmd]));
+        assert!(can_stream(&[cmd]));
     }
 
     #[test]
@@ -333,7 +347,8 @@ mod tests {
     }
 
     #[test]
-    fn test_cannot_stream_multiple_commands_with_hold() {
+    fn test_can_stream_multiple_commands_with_hold() {
+        // Chunk 9: Hold space operations ARE streamable with other commands
         let cmds = vec![
             Command::Substitution {
                 pattern: "foo".to_string(),
@@ -345,7 +360,7 @@ mod tests {
                 range: None,
             },
         ];
-        assert!(!can_stream(&cmds));
+        assert!(can_stream(&cmds));
     }
 
     #[test]
