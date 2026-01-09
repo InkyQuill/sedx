@@ -2279,4 +2279,86 @@ mod tests {
         // Clean up
         fs::remove_file(test_file_path).ok();
     }
+
+    #[test]
+    fn test_streaming_group_with_range() {
+        // Create test file with a pattern that only appears on specific lines
+        let test_file_path = "/tmp/test_group_range.txt";
+        let original_content = "keep\nfoo\nfoo\nfoo\nkeep\n";
+        fs::write(test_file_path, original_content)
+            .expect("Failed to write test file");
+
+        // Parse group with range: 2,3{s/foo/bar/}
+        // This should ONLY change lines 2 and 3, not lines 1, 4, or 5
+        let parser = Parser::new(RegexFlavor::PCRE);
+        let commands = parser.parse("2,3{s/foo/bar/}")
+            .expect("Failed to parse group with range");
+        let mut processor = StreamProcessor::new(commands);
+
+        // Process the file (force streaming for testing)
+        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        assert!(result.is_ok(), "Processing should succeed");
+
+        // Verify: only lines 2 and 3 should be changed
+        let processed_content = fs::read_to_string(test_file_path)
+            .expect("Failed to read processed file");
+
+        println!("Processed content:\n{}", processed_content);
+
+        // Line 1 should still be "keep" (not "bar")
+        assert!(processed_content.starts_with("keep\n"), "Line 1 should NOT be changed");
+
+        // Lines 2 and 3 should be "bar"
+        let lines: Vec<&str> = processed_content.lines().collect();
+        assert_eq!(lines[0], "keep", "Line 1 should be 'keep'");
+        assert_eq!(lines[1], "bar", "Line 2 should be changed to 'bar'");
+        assert_eq!(lines[2], "bar", "Line 3 should be changed to 'bar'");
+        assert_eq!(lines[3], "foo", "Line 4 should still be 'foo' (not in range)");
+        assert_eq!(lines[4], "keep", "Line 5 should be 'keep'");
+
+        // Count: should have exactly 2 "bar" (lines 2 and 3)
+        let bar_count = processed_content.matches("bar").count();
+        assert_eq!(bar_count, 2, "Should have exactly 2 'bar' (lines 2,3)");
+
+        // Count: should still have 2 "keep" (lines 1 and 5)
+        let keep_count = processed_content.matches("keep").count();
+        assert_eq!(keep_count, 2, "Should have exactly 2 'keep' (lines 1,5)");
+
+        // Count: should have 1 "foo" remaining (line 4)
+        let foo_count = processed_content.matches("foo").count();
+        assert_eq!(foo_count, 1, "Should have exactly 1 'foo' (line 4)");
+
+        // Clean up
+        fs::remove_file(test_file_path).ok();
+    }
+
+    #[test]
+    fn test_group_parsing() {
+        // Test that group commands are parsed correctly
+        let parser = Parser::new(RegexFlavor::PCRE);
+        let commands = parser.parse("2,3{s/foo/bar/}").expect("Failed to parse");
+
+        println!("Parsed {} commands:", commands.len());
+        for (i, cmd) in commands.iter().enumerate() {
+            println!("  Command {}: {:?}", i, cmd);
+        }
+
+        // Should parse as exactly ONE command (a Group)
+        assert_eq!(commands.len(), 1, "Should parse as 1 command");
+
+        // That one command should be a Group
+        match &commands[0] {
+            Command::Group { range, commands: inner_commands } => {
+                println!("Group range: {:?}", range);
+                println!("Inner commands: {}", inner_commands.len());
+
+                // Should have a range of (LineNumber(2), LineNumber(3))
+                assert!(range.is_some(), "Group should have a range");
+
+                // Should have exactly 1 inner command
+                assert_eq!(inner_commands.len(), 1, "Group should have 1 inner command");
+            }
+            _ => panic!("First command should be a Group"),
+        }
+    }
 }

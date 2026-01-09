@@ -89,9 +89,22 @@ fn can_use_streaming(commands: &[Command]) -> bool {
 
     for cmd in commands {
         match cmd {
-            Group { .. } => return false,  // Groups delegate to in-memory
+            // Chunk 10: Groups SHOULD use streaming mode to avoid in-memory bugs
+            // The in-memory group implementation has issues with nested command ranges
+            Group { .. } => {
+                // Force streaming mode for groups
+                // The streaming group handler is correct, in-memory has bugs
+                return true;
+            }
+            // Chunk 9: Hold space operations ARE streamable
             Hold { .. } | HoldAppend { .. } | Get { .. } | GetAppend { .. } | Exchange { .. } => {
-                return false;  // Hold space ops delegate to in-memory
+                // These are now supported in streaming mode
+                // But need to check address types
+                if let Some(range) = get_command_range_option(cmd) {
+                    if !is_range_supported_in_streaming(&range) {
+                        return false;
+                    }
+                }
             }
             _ => {
                 // s, d, p, a, i, c, q are supported
@@ -157,14 +170,16 @@ fn is_range_supported_in_streaming(range: &(Address, Address)) -> bool {
     use Address::*;
 
     match (&range.0, &range.1) {
-        // Currently supported:
+        // Chunk 8: Supported ranges
         (Pattern(_), Pattern(_)) => true,  // /start/,/end/
         (LineNumber(1), LastLine) => true,  // 1,$
         (LineNumber(_), LineNumber(_)) => true,  // 5,10
+        (Pattern(_), LineNumber(_)) => true,  // /start/,10 (Chunk 8)
+        (LineNumber(_), Pattern(_)) => true,  // 5,/end/ (Chunk 8)
+        (Pattern(_), Relative { base: _, offset: _ }) => true,  // /start/,+5 (Chunk 8)
 
-        // Not yet supported (delegate to in-memory for now):
-        // (Pattern(_), LineNumber(_)) => false,  // /start/,10 - TODO: Chunk 8
-        // (LineNumber(_), Pattern(_)) => false,  // 5,/end/ - TODO: Chunk 8
+        // Stepping addresses (Chunk 8)
+        (Step { .. }, _) | (_, Step { .. }) => true,  // 1~2
 
         // Not supported (delegate to in-memory):
         (Negated(_), _) | (_, Negated(_)) => false,  // /pattern/!s/foo/bar/
@@ -207,7 +222,7 @@ fn execute_command(
 
         let file_size_mb = metadata.len() / 1024 / 1024;
 
-        // Decide: use streaming if (streaming flag OR file >= 100MB) AND commands support streaming
+        // Decide: use streaming if (streaming flag OR file >= 100MB OR commands support it)
         let use_streaming = if !supports_streaming {
             false  // Commands don't support streaming
         } else if streaming {
@@ -217,7 +232,9 @@ fn execute_command(
             eprintln!("📊 Streaming mode activated for {} ({} MB)", file_path.display(), file_size_mb);
             true
         } else {
-            false  // Small file, use in-memory
+            // Chunk 10: Use streaming for small files too if commands support it
+            // This ensures groups and hold space operations work correctly
+            true
         };
 
         // Track which files should use streaming
