@@ -96,6 +96,7 @@ fn execute_stdin(expression: &str, regex_flavor: RegexFlavor, quiet: bool) -> Re
 
     // Apply all commands to the lines
     let mut processor = file_processor::FileProcessor::new(commands.clone());
+    processor.set_no_default_output(quiet);  // Wire up -n flag
 
     for cmd in &commands {
         let should_continue = processor.apply_command(&mut result_lines, cmd)?;
@@ -307,6 +308,7 @@ fn execute_command(
         } else {
             // Use in-memory processor (preview is built-in)
             let mut processor = file_processor::FileProcessor::new(commands.clone());
+            processor.set_no_default_output(quiet);  // Wire up -n flag
             processor.process_file_with_context(file_path)
         };
 
@@ -397,6 +399,7 @@ fn execute_command(
         } else {
             // In-memory files: Apply using apply_to_file()
             let mut processor = file_processor::FileProcessor::new(commands.clone());
+            processor.set_no_default_output(quiet);  // Wire up -n flag
             match processor.apply_to_file(file_path) {
                 Ok(_) => {},
                 Err(e) => {

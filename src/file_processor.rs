@@ -1415,6 +1415,47 @@ impl FileProcessor {
                 Ok(CycleResult::Continue)
             }
 
+            // s command: substitution (matches execute.c:1384-1457)
+            Command::Substitution { pattern, replacement, flags, range: _ } => {
+                self.apply_substitution_cycle(state, pattern, replacement, flags)
+            }
+
+            // h command: copy pattern space to hold space (matches execute.c:1522)
+            Command::Hold { range: _ } => {
+                state.hold_space = state.pattern_space.clone();
+                Ok(CycleResult::Continue)
+            }
+
+            // H command: append pattern space to hold space (matches execute.c:1524)
+            Command::HoldAppend { range: _ } => {
+                if !state.hold_space.is_empty() {
+                    state.hold_space.push('\n');
+                }
+                state.hold_space.push_str(&state.pattern_space);
+                Ok(CycleResult::Continue)
+            }
+
+            // g command: copy hold space to pattern space (matches execute.c:1528)
+            Command::Get { range: _ } => {
+                state.pattern_space = state.hold_space.clone();
+                Ok(CycleResult::Continue)
+            }
+
+            // G command: append hold space to pattern space (matches execute.c:1530)
+            Command::GetAppend { range: _ } => {
+                if !state.pattern_space.is_empty() {
+                    state.pattern_space.push('\n');
+                }
+                state.pattern_space.push_str(&state.hold_space);
+                Ok(CycleResult::Continue)
+            }
+
+            // x command: exchange pattern and hold spaces (matches execute.c:1532)
+            Command::Exchange { range: _ } => {
+                std::mem::swap(&mut state.pattern_space, &mut state.hold_space);
+                Ok(CycleResult::Continue)
+            }
+
             // q/Q commands: quit (matches execute.c:1504, 1511)
             Command::Quit { .. } => Ok(CycleResult::Quit(0)),
             Command::QuitWithoutPrint { .. } => Ok(CycleResult::Quit(0)),
@@ -1488,6 +1529,74 @@ impl FileProcessor {
             // No newline: delete entire pattern space
             Ok(CycleResult::DeleteLine)
         }
+    }
+
+    /// s command: substitution
+    /// Matches execute.c:1384-1457
+    fn apply_substitution_cycle(
+        &self,
+        state: &mut CycleState,
+        pattern: &str,
+        replacement: &str,
+        flags: &SubstitutionFlags,
+    ) -> Result<CycleResult> {
+        let global = flags.global;
+        let case_insensitive = flags.case_insensitive;
+        let print_flag = flags.print;
+        let nth_occurrence = flags.nth;
+
+        // Compile regex
+        let re = if case_insensitive {
+            RegexBuilder::new(pattern)
+                .case_insensitive(true)
+                .build()
+                .with_context(|| format!("Invalid regex pattern: {}", pattern))?
+        } else {
+            Regex::new(pattern)
+                .with_context(|| format!("Invalid regex pattern: {}", pattern))?
+        };
+
+        // Save original for print flag comparison
+        let original = state.pattern_space.clone();
+
+        // Apply substitution
+        if let Some(n) = nth_occurrence {
+            // Replace only the Nth occurrence (1-indexed)
+            let mut count = 0;
+            let mut result = state.pattern_space.clone();
+            let mut found = false;
+
+            for mat in re.find_iter(&state.pattern_space) {
+                count += 1;
+                if count == n {
+                    result = format!(
+                        "{}{}{}",
+                        &state.pattern_space[..mat.start()],
+                        replacement,
+                        &state.pattern_space[mat.end()..]
+                    );
+                    found = true;
+                    break;
+                }
+            }
+
+            if found {
+                state.pattern_space = result;
+            }
+        } else if global {
+            // Replace all occurrences
+            state.pattern_space = re.replace_all(&state.pattern_space, replacement).to_string();
+        } else {
+            // Replace first occurrence only
+            state.pattern_space = re.replace(&state.pattern_space, replacement).to_string();
+        }
+
+        // Handle print flag (p flag in s///p)
+        if print_flag && state.pattern_space != original {
+            state.side_effects.push(state.pattern_space.clone());
+        }
+
+        Ok(CycleResult::Continue)
     }
 
     // ============================================================================
@@ -3032,12 +3141,158 @@ mod cycle_tests {
         // Test n command alone (should print all lines)
         let commands = parse_simple("n");
         let mut processor = FileProcessor::new(commands);
-        
+
         let input = vec!["a".to_string(), "b".to_string(), "c".to_string()];
         let result = processor.process_cycle_based(input).unwrap();
-        
+
         // n outputs current line, reads next, continues
         // Since there are no more commands, it should output all lines
         assert_eq!(result, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_substitution_basic() {
+        // Test basic substitution: s/foo/bar/
+        let commands = vec![
+            Command::Substitution {
+                pattern: "foo".to_string(),
+                replacement: "bar".to_string(),
+                flags: SubstitutionFlags {
+                    global: false,
+                    case_insensitive: false,
+                    print: false,
+                    nth: None,
+                },
+                range: None,  // No range - applies to all lines
+            },
+        ];
+        let mut processor = FileProcessor::new(commands);
+
+        let input = vec!["foo".to_string(), "baz".to_string(), "foo".to_string()];
+        let result = processor.process_cycle_based(input).unwrap();
+
+        // Each line gets first "foo" occurrence replaced (no global flag)
+        assert_eq!(result, vec!["bar", "baz", "bar"]);
+    }
+
+    #[test]
+    fn test_substitution_global() {
+        // Test global substitution: s/foo/bar/g
+        let commands = vec![
+            Command::Substitution {
+                pattern: "foo".to_string(),
+                replacement: "bar".to_string(),
+                flags: SubstitutionFlags {
+                    global: true,
+                    case_insensitive: false,
+                    print: false,
+                    nth: None,
+                },
+                range: None,
+            },
+        ];
+        let mut processor = FileProcessor::new(commands);
+
+        let input = vec!["foo foo".to_string(), "baz".to_string()];
+        let result = processor.process_cycle_based(input).unwrap();
+
+        // All "foo" occurrences replaced
+        assert_eq!(result, vec!["bar bar", "baz"]);
+    }
+
+    #[test]
+    fn test_substitution_with_print_flag() {
+        // Test s command with print flag: s/foo/bar/p
+        let commands = vec![
+            Command::Substitution {
+                pattern: "foo".to_string(),
+                replacement: "bar".to_string(),
+                flags: SubstitutionFlags {
+                    global: false,
+                    case_insensitive: false,
+                    print: true,  // p flag
+                    nth: None,
+                },
+                range: None,
+            },
+        ];
+        let mut processor = FileProcessor::new(commands);
+
+        let input = vec!["foo".to_string(), "baz".to_string()];
+        let result = processor.process_cycle_based(input).unwrap();
+
+        // Should print "bar" twice: once from print flag, once from default output
+        assert_eq!(result, vec!["bar", "bar", "baz"]);
+    }
+
+    #[test]
+    fn test_hold_space_h_g() {
+        // Test h and g commands (copy to/from hold space)
+        // NOTE: This test doesn't use ranges - range checking not yet implemented
+        let commands = vec![
+            // h: copy pattern space to hold space
+            Command::Hold { range: None },
+            // g: copy hold space to pattern space
+            Command::Get { range: None },
+        ];
+        let mut processor = FileProcessor::new(commands);
+
+        let input = vec!["first".to_string()];
+        let result = processor.process_cycle_based(input).unwrap();
+
+        // h copies "first" to hold space
+        // g copies "first" back to pattern space (no change visible)
+        assert_eq!(result, vec!["first"]);
+    }
+
+    #[test]
+    fn test_hold_space_x() {
+        // Test x command (exchange pattern and hold spaces)
+        // NOTE: This test doesn't use ranges - range checking not yet implemented
+        let commands = vec![
+            // h: copy pattern space to hold space
+            Command::Hold { range: None },
+            // x: exchange pattern and hold spaces
+            Command::Exchange { range: None },
+        ];
+        let mut processor = FileProcessor::new(commands);
+
+        let input = vec!["line1".to_string()];
+        let result = processor.process_cycle_based(input).unwrap();
+
+        // h copies "line1" to hold space (both hold and pattern are "line1")
+        // x swaps them (no visible change since both are "line1")
+        assert_eq!(result, vec!["line1"]);
+    }
+
+    #[test]
+    fn test_substitution_and_hold() {
+        // Test combination of substitution and hold space
+        // NOTE: This test doesn't use ranges - range checking not yet implemented
+        let commands = vec![
+            // s/foo/bar/ - substitution
+            Command::Substitution {
+                pattern: "foo".to_string(),
+                replacement: "bar".to_string(),
+                flags: SubstitutionFlags {
+                    global: false,
+                    case_insensitive: false,
+                    print: false,
+                    nth: None,
+                },
+                range: None,  // Applies to all lines when None
+            },
+            // h: store modified pattern space in hold space
+            Command::Hold { range: None },
+            // g: copy hold space to pattern space (redundant after h, but tests the commands)
+            Command::Get { range: None },
+        ];
+        let mut processor = FileProcessor::new(commands);
+
+        let input = vec!["foo baz".to_string()];
+        let result = processor.process_cycle_based(input).unwrap();
+
+        // "foo baz" -> s -> "bar baz" -> h (hold="bar baz") -> g (pattern="bar baz")
+        assert_eq!(result, vec!["bar baz"]);
     }
 }
