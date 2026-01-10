@@ -217,4 +217,12 @@ impl BackupManager {
 
         Ok(())
     }
+
+    /// Remove a backup by its ID (used for cleanup when no changes are made)
+    pub fn remove_backup_by_id(&self, backup_id: &str) -> Result<()> {
+        let backup_dir = self.backups_dir.join(backup_id);
+        fs::remove_dir_all(&backup_dir)
+            .with_context(|| format!("Failed to remove backup: {}", backup_dir.display()))?;
+        Ok(())
+    }
 }

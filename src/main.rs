@@ -246,6 +246,10 @@ fn execute_command(
     let parser = Parser::new(regex_flavor);
     let commands = parser.parse(expression)?;
 
+    // Check if commands can modify files
+    // Commands like 'p', 'n', 'q', 'Q', '=', 'l' only read/print, don't modify
+    let can_modify_files = commands_can_modify_files(&commands);
+
     // Check if commands support streaming mode
     let supports_streaming = can_use_streaming(&commands);
 
@@ -359,6 +363,10 @@ fn execute_command(
         // Skip backup creation
         println!("⚠️  Skipping backup (changes cannot be undone)");
         None
+    } else if !can_modify_files {
+        // Skip backup if commands don't modify files (optimization)
+        println!("ℹ️  No backup needed (read-only command)");
+        None
     } else {
         // Create backup with custom or default directory
         let mut backup_manager = if let Some(dir) = backup_dir {
@@ -416,6 +424,33 @@ fn execute_command(
     }
 
     Ok(())
+}
+
+/// Check if any command in the list can modify files
+/// Returns true if any command modifies file content (s, d, a, i, c, etc.)
+/// Returns false if commands only read/print (p, n, q, Q, =, l, etc.)
+fn commands_can_modify_files(commands: &[crate::command::Command]) -> bool {
+    use crate::command::Command;
+
+    for cmd in commands {
+        match cmd {
+            // Commands that DON'T modify files
+            Command::Print { .. } | Command::Quit { .. } | Command::QuitWithoutPrint { .. }
+            | Command::Next { .. } | Command::NextAppend { .. } | Command::PrintFirstLine { .. }
+            => return false,  // These commands only read/print, don't modify
+
+            // Commands that MIGHT modify files
+            Command::Substitution { .. } | Command::Delete { .. }
+            | Command::Insert { .. } | Command::Append { .. } | Command::Change { .. }
+            | Command::Hold { .. } | Command::HoldAppend { .. } | Command::Get { .. }
+            | Command::GetAppend { .. } | Command::Exchange { .. }
+            | Command::Group { .. } | Command::DeleteFirstLine { .. }
+            => return true,  // These can modify files
+        }
+    }
+
+    // If we get here, no commands were found (empty command list)
+    false
 }
 
 fn rollback(id: Option<String>) -> Result<()> {
