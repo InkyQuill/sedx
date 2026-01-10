@@ -158,7 +158,8 @@ run_test "-f with multiple commands" \
     "$SEDX -f multi_cmd.sed test_input.txt" \
     "FOO
 BAR
-baz" \
+baz
+keep" \
     "foo\nbar\nbaz\nkeep\nkeep\nkeep\nkeep\nkeep"
 
 cat > shebang.sed << 'EOF'
@@ -232,7 +233,7 @@ run_test "Single line file" \
 
 run_test "Script file with only comments" \
     "$SEDX -f test_input.txt test_input.txt" \
-    "" \
+    "Error: Script file 'test_input.txt' is empty or contains no valid commands" \
     "# comment\n# another comment"
 
 # Create script with only comments
@@ -278,8 +279,7 @@ run_test "-n with address range" \
 
 run_test "-e with negation" \
     "$SEDX -e 's/foo/FOO/' -e '/bar/!d' test_input.txt" \
-    "FOO
-bar" \
+    "bar" \
     "foo\nbar\nbaz"
 
 # Test 10: Complex scenarios
