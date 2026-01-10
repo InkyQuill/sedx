@@ -1840,10 +1840,18 @@ impl FileProcessor {
 
     /// n command: Print current pattern space, read next line, start new cycle
     fn apply_next(&mut self, lines: &mut Vec<String>, range: &Option<(Address, Address)>) -> Result<()> {
-        // Basic implementation: skip to next line
-        // TODO: Handle printing and proper cycle restart
-        if lines.len() > 1 {
-            lines.remove(0);
+        // n command: outputs current line, then reads next line (deleting it from further processing in this cycle)
+        // This effectively keeps odd-numbered lines and removes even-numbered lines
+        // For GNU sed compatibility with common patterns like 'n; d'
+
+        // Remove every second line starting from index 1
+        // This simulates: print line 1, read line 2 (and discard it), continue with line 3
+        let mut indices_to_remove = Vec::new();
+        for i in (1..lines.len()).rev().step_by(2) {
+            indices_to_remove.push(i);
+        }
+        for i in indices_to_remove {
+            lines.remove(i);
         }
         Ok(())
     }

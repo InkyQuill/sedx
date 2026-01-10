@@ -351,6 +351,13 @@ fn parse_delete(cmd: &str) -> Result<SedCommand> {
 
     let addr_part = &cmd[..cmd.len() - 1]; // Remove 'd'
 
+    // Empty address means delete all lines (1 to $)
+    if addr_part.trim().is_empty() {
+        return Ok(SedCommand::Delete {
+            range: (Address::LineNumber(1), Address::LastLine),
+        });
+    }
+
     // Check for range: start,endd
     if let Some(comma_pos) = addr_part.find(',') {
         let start = &addr_part[..comma_pos];

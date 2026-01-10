@@ -437,7 +437,7 @@ fn commands_can_modify_files(commands: &[crate::command::Command]) -> bool {
             // Commands that DON'T modify files
             Command::Print { .. } | Command::Quit { .. } | Command::QuitWithoutPrint { .. }
             | Command::Next { .. } | Command::NextAppend { .. } | Command::PrintFirstLine { .. }
-            => return false,  // These commands only read/print, don't modify
+            => continue,  // Skip read-only commands, keep checking
 
             // Commands that MIGHT modify files
             Command::Substitution { .. } | Command::Delete { .. }
@@ -445,11 +445,11 @@ fn commands_can_modify_files(commands: &[crate::command::Command]) -> bool {
             | Command::Hold { .. } | Command::HoldAppend { .. } | Command::Get { .. }
             | Command::GetAppend { .. } | Command::Exchange { .. }
             | Command::Group { .. } | Command::DeleteFirstLine { .. }
-            => return true,  // These can modify files
+            => return true,  // Found a modifying command
         }
     }
 
-    // If we get here, no commands were found (empty command list)
+    // If we get here, no modifying commands were found
     false
 }
 
