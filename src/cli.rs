@@ -398,16 +398,19 @@ pub fn parse_args() -> Result<Args> {
                 (expr, files)
             } else if !cli.expressions.is_empty() {
                 // -e flags were provided, combine them with semicolons
-                let mut exprs = cli.expressions.clone();
-
-                // If positional expression is also provided, add it first (before -e expressions)
-                if let Some(pos_expr) = &cli.expression {
-                    exprs.insert(0, pos_expr.clone());
-                }
+                let exprs = cli.expressions.clone();
 
                 // Join with semicolons (sed syntax for multiple commands)
                 let expr = exprs.join("; ");
-                (expr, cli.files.clone())
+
+                // If a positional expression was provided, treat it as a file (not an expression)
+                // This handles: sedx -e 's/foo/BAR/' file.txt
+                let mut files = cli.files.clone();
+                if let Some(pos_expr) = &cli.expression {
+                    files.push(pos_expr.clone());
+                }
+
+                (expr, files)
             } else {
                 // No -e or -f flags, use positional expression
                 let expr = cli.expression
