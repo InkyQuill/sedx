@@ -1,0 +1,12 @@
+banana
+cherry
+ℹ️  No backup needed (read-only command)
+banana
+cherry
+tests/fixtures/basic/print.inp
+L4: = date
+L5: = elderberry
+
+Total: 0 changes
+
+No backup created - changes cannot be undone

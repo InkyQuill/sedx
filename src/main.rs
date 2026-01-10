@@ -90,32 +90,16 @@ fn execute_stdin(expression: &str, regex_flavor: RegexFlavor, quiet: bool) -> Re
     let mut input = String::new();
     io::stdin().read_to_string(&mut input)?;
 
-    // Process the input using in-memory processing
+    // Process the input using cycle-based or batch processing
     let lines: Vec<String> = input.lines().map(|s| s.to_string()).collect();
-    let mut result_lines = lines.clone();
-
-    // Apply all commands to the lines
     let mut processor = file_processor::FileProcessor::new(commands.clone());
     processor.set_no_default_output(quiet);  // Wire up -n flag
 
-    for cmd in &commands {
-        let should_continue = processor.apply_command(&mut result_lines, cmd)?;
-        if !should_continue {
-            break; // Quit command encountered
-        }
-    }
+    let result_lines = processor.apply_cycle_based(lines)?;
 
     // Write output to stdout
-    if quiet {
-        // In quiet mode, only print lines explicitly marked by print command
-        for line in processor.get_printed_lines() {
-            println!("{}", line);
-        }
-    } else {
-        // Normal mode: print all lines
-        for line in result_lines {
-            println!("{}", line);
-        }
+    for line in result_lines {
+        println!("{}", line);
     }
 
     Ok(())

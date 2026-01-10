@@ -1157,6 +1157,31 @@ impl FileProcessor {
         &self.printed_lines
     }
 
+    /// Check if all commands support cycle-based processing
+    fn supports_cycle_based_processing(commands: &[Command]) -> bool {
+        use Command::*;
+
+        for cmd in commands {
+            match cmd {
+                // Supported commands
+                Substitution { .. } | Delete { .. } | Print { .. } |
+                Quit { .. } | QuitWithoutPrint { .. } |
+                Next { .. } | NextAppend { .. } |
+                PrintFirstLine { .. } | DeleteFirstLine { .. } |
+                Hold { .. } | HoldAppend { .. } |
+                Get { .. } | GetAppend { .. } | Exchange { .. } => {
+                    // Supported
+                }
+                // Unsupported commands (fall back to batch processing)
+                Insert { .. } | Append { .. } | Change { .. } | Group { .. } => {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
     /// Legacy method - returns simple changes (for backward compatibility)
     pub fn process_file(&mut self, file_path: &Path) -> Result<Vec<FileChange>> {
         let diff = self.process_file_with_context(file_path)?;
@@ -1177,7 +1202,7 @@ impl FileProcessor {
             .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
 
         let original_lines: Vec<&str> = content.lines().collect();
-        let mut modified_lines: Vec<String> = original_lines.iter().map(|s| s.to_string()).collect();
+        let input_lines: Vec<String> = original_lines.iter().map(|s| s.to_string()).collect();
 
         // Clear printed lines from previous run
         self.printed_lines.clear();
@@ -1187,14 +1212,24 @@ impl FileProcessor {
         self.pattern_space = None;
         self.current_line_index = 0;
 
-        // Apply all sed commands (stop if quit is encountered)
-        let commands = self.commands.clone();
-        for cmd in &commands {
-            let should_continue = self.apply_command(&mut modified_lines, cmd)?;
-            if !should_continue {
-                break; // Quit command encountered
+        // Choose processing method based on command support
+        let use_cycle_based = Self::supports_cycle_based_processing(&self.commands);
+
+        let modified_lines = if use_cycle_based {
+            // Use cycle-based processing (supports multi-line commands like n, N, P, D)
+            self.apply_cycle_based(input_lines)?
+        } else {
+            // Fall back to batch processing (for i, a, c, { } commands)
+            let mut lines = input_lines.clone();
+            let commands = self.commands.clone();
+            for cmd in &commands {
+                let should_continue = self.apply_command(&mut lines, cmd)?;
+                if !should_continue {
+                    break; // Quit command encountered
+                }
             }
-        }
+            lines
+        };
 
         // Clone modified_lines for diff generation (to avoid borrow issues)
         let modified_lines_clone = modified_lines.clone();
@@ -1284,7 +1319,7 @@ impl FileProcessor {
     /// This method preserves all SedX advantages: backups, diffs, PCRE support
     ///
     /// Matches GNU sed execute.c:1685 (main loop) + execute_program (command loop)
-    fn process_cycle_based(&mut self, lines: Vec<String>) -> Result<Vec<String>> {
+    pub fn apply_cycle_based(&mut self, lines: Vec<String>) -> Result<Vec<String>> {
         let mut state = CycleState::new(self.hold_space.clone(), lines);
         let mut output = Vec::new();
 
@@ -1319,7 +1354,12 @@ impl FileProcessor {
                     }
                     CycleResult::Quit(_code) => {
                         // Add side effects before quitting
-                        output.extend(state.side_effects.drain(..));
+                        for side_effect in state.side_effects.drain(..) {
+                            output.push(side_effect.clone());
+                            self.printed_lines.push(side_effect);
+                        }
+                        // Update hold space from final state
+                        self.hold_space = state.hold_space.clone();
                         // Return output early (quit program)
                         return Ok(output);
                     }
@@ -1327,7 +1367,10 @@ impl FileProcessor {
             }
 
             // Add side effects (P, p, n commands) - these are printed immediately
-            output.extend(state.side_effects.drain(..));
+            for side_effect in state.side_effects.drain(..) {
+                output.push(side_effect.clone());
+                self.printed_lines.push(side_effect);
+            }
 
             // Add pattern space to output (unless deleted or in quiet mode)
             if !state.deleted && !self.no_default_output {
@@ -1337,6 +1380,9 @@ impl FileProcessor {
             // Reset deletion flag for next cycle
             state.deleted = false;
         }
+
+        // Update hold space from final state
+        self.hold_space = state.hold_space.clone();
 
         Ok(output)
     }
@@ -3130,7 +3176,7 @@ mod cycle_tests {
         let mut processor = FileProcessor::new(commands);
         
         let input = vec!["1".to_string(), "2".to_string(), "3".to_string(), "4".to_string()];
-        let result = processor.process_cycle_based(input).unwrap();
+        let result = processor.apply_cycle_based(input).unwrap();
         
         // Should output odd lines: "1", "3"
         assert_eq!(result, vec!["1", "3"]);
@@ -3143,7 +3189,7 @@ mod cycle_tests {
         let mut processor = FileProcessor::new(commands);
 
         let input = vec!["a".to_string(), "b".to_string(), "c".to_string()];
-        let result = processor.process_cycle_based(input).unwrap();
+        let result = processor.apply_cycle_based(input).unwrap();
 
         // n outputs current line, reads next, continues
         // Since there are no more commands, it should output all lines
@@ -3169,7 +3215,7 @@ mod cycle_tests {
         let mut processor = FileProcessor::new(commands);
 
         let input = vec!["foo".to_string(), "baz".to_string(), "foo".to_string()];
-        let result = processor.process_cycle_based(input).unwrap();
+        let result = processor.apply_cycle_based(input).unwrap();
 
         // Each line gets first "foo" occurrence replaced (no global flag)
         assert_eq!(result, vec!["bar", "baz", "bar"]);
@@ -3194,7 +3240,7 @@ mod cycle_tests {
         let mut processor = FileProcessor::new(commands);
 
         let input = vec!["foo foo".to_string(), "baz".to_string()];
-        let result = processor.process_cycle_based(input).unwrap();
+        let result = processor.apply_cycle_based(input).unwrap();
 
         // All "foo" occurrences replaced
         assert_eq!(result, vec!["bar bar", "baz"]);
@@ -3219,7 +3265,7 @@ mod cycle_tests {
         let mut processor = FileProcessor::new(commands);
 
         let input = vec!["foo".to_string(), "baz".to_string()];
-        let result = processor.process_cycle_based(input).unwrap();
+        let result = processor.apply_cycle_based(input).unwrap();
 
         // Should print "bar" twice: once from print flag, once from default output
         assert_eq!(result, vec!["bar", "bar", "baz"]);
@@ -3238,7 +3284,7 @@ mod cycle_tests {
         let mut processor = FileProcessor::new(commands);
 
         let input = vec!["first".to_string()];
-        let result = processor.process_cycle_based(input).unwrap();
+        let result = processor.apply_cycle_based(input).unwrap();
 
         // h copies "first" to hold space
         // g copies "first" back to pattern space (no change visible)
@@ -3258,7 +3304,7 @@ mod cycle_tests {
         let mut processor = FileProcessor::new(commands);
 
         let input = vec!["line1".to_string()];
-        let result = processor.process_cycle_based(input).unwrap();
+        let result = processor.apply_cycle_based(input).unwrap();
 
         // h copies "line1" to hold space (both hold and pattern are "line1")
         // x swaps them (no visible change since both are "line1")
@@ -3290,7 +3336,7 @@ mod cycle_tests {
         let mut processor = FileProcessor::new(commands);
 
         let input = vec!["foo baz".to_string()];
-        let result = processor.process_cycle_based(input).unwrap();
+        let result = processor.apply_cycle_based(input).unwrap();
 
         // "foo baz" -> s -> "bar baz" -> h (hold="bar baz") -> g (pattern="bar baz")
         assert_eq!(result, vec!["bar baz"]);
