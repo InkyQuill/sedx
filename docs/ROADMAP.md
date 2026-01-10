@@ -433,7 +433,6 @@ $ sedx '=' file.txt | sedx 'N; n'
 #### Goals
 - Add advanced addressing modes
 - Implement remaining commands
-- Performance optimization
 
 #### Tasks
 
@@ -443,24 +442,103 @@ $ sedx '=' file.txt | sedx 'N; n'
 - [ ] Implement special address `0` (first line)
 - [ ] Add address validation
 
-**Week 2: Additional Commands**
+**Week 2-3: Additional Commands**
 - [ ] Implement `y` command (translate characters)
 - [ ] Implement `l` command (list with escapes)
 - [ ] Add `-l N` flag (line length for `l`)
 - [ ] Implement `e` command (execute shell) with sandbox
-
-**Week 3: Optimization & Polish**
-- [ ] Regex caching and optimization
-- [ ] Memory-mapped files for binary
-- [ ] Parallel processing with Rayon (multi-file)
-- [ ] Performance benchmarks
 - [ ] Documentation completion
 
 #### Success Criteria
 - [ ] All addressing modes work
 - [ ] Tier 3 commands implemented
-- [ ] Within 2x speed of GNU sed
 - [ ] Documentation complete
+
+---
+
+### Phase 6.5: Performance Optimization ⚡ (NEW)
+
+**Duration:** 2 weeks
+**Target Release:** v0.6.5
+**Priority:** MEDIUM (deferrable to post-1.0 if needed)
+
+#### Goals
+- Close the speed gap with GNU sed
+- Optimize hot paths in streaming mode
+- Reduce overhead of backups and diffs
+
+#### Context
+Current performance: 30-126x slower than GNU sed
+- This is acceptable for v1.0 due to safety features
+- Optimization can be deferred if needed for timeline
+- Focus on common use cases: simple substitutions and deletions
+
+#### Tasks
+
+**Week 1: Core Optimizations**
+- [ ] Profile and identify bottlenecks (use flamegraph/perf)
+- [ ] Optimize backup creation:
+  - [ ] Use hard links when possible (same filesystem)
+  - [ ] Lazy backup compression (compress in background)
+  - [ ] Optional: `--no-backup` flag for trusted operations
+- [ ] Optimize regex compilation:
+  - [ ] Cache compiled regex objects
+  - [ ] Lazy regex compilation (only when used)
+- [ ] Reduce diff overhead:
+  - [ ] Make diff generation optional (`--no-diff` flag)
+  - [ ] Stream diff to temp file instead of memory
+  - [ ] Lazy diff formatting (only on error or request)
+
+**Week 2: Advanced Optimizations**
+- [ ] Parallel file processing (Rayon):
+  - [ ] Process multiple files in parallel
+  - [ ] Parallel chunk processing for large files
+- [ ] I/O optimizations:
+  - [ ] Use `mmap` for large files when safe
+  - [ ] Optimize buffer sizes for streaming
+  - [ ] Batch writes to reduce syscalls
+- [ ] Regex engine optimizations:
+  - [ ] Consider regex crate alternatives (fancy-regex, pcre2)
+  - [ ] JIT compilation for frequently used patterns
+- [ ] Benchmark and iterate:
+  - [ ] Re-run benchmarks after each optimization
+  - [ ] Target: Within 5-10x of GNU sed (realistic goal)
+  - [ ] Document trade-offs
+
+#### Success Criteria
+- [ ] Within 5-10x of GNU sed for common operations
+- [ ] No regressions in functionality or safety
+- [ ] Memory usage remains constant
+- [ ] Benchmark suite documenting performance
+
+#### Optimization Targets (Priority Order)
+1. **Backup overhead** - biggest win for large files
+   - Current: Copies entire file to ~/.sedx/backups/
+   - Target: Hard links or compression
+   - Expected speedup: 2-5x
+
+2. **Regex compilation** - helps scripts with many patterns
+   - Current: Compiles regex on every use
+   - Target: Cache compiled regex
+   - Expected speedup: 1.5-3x for pattern-heavy scripts
+
+3. **Diff generation** - helps when output is large
+   - Current: Builds full diff in memory
+   - Target: Stream or disable diff
+   - Expected speedup: 1.2-2x for large outputs
+
+4. **I/O operations** - marginal gains
+   - Current: Standard BufRead/BufWriter
+   - Target: mmap or larger buffers
+   - Expected speedup: 1.1-1.5x
+
+#### Risk Mitigation
+- **Risk:** Optimizations introduce bugs
+  - **Mitigation:** Comprehensive test suite before optimization
+- **Risk:** Complex optimizations delay v1.0
+  - **Mitigation:** Mark as deferrable; deliver v1.0 with current speed
+- **Risk:** Optimizations reduce safety
+  - **Mitigation:** Keep safety features; add opt-out flags
 
 ---
 
@@ -506,16 +584,17 @@ $ sedx '=' file.txt | sedx 'N; n'
 | Version | Date | Features | Stability |
 |---------|------|----------|-----------|
 | **v0.1.0** | Past | Basic sed commands, in-memory | Alpha |
-| **v0.2.0-alpha** | Current | **Stream processing (chunks 1-8)** | Alpha |
-| **v0.2.0** | Week 5 | **Stream processing (all chunks)** | Beta |
-| **v0.2.1** | Week 6 | Backup disk management | Beta |
-| **v0.3.0** | Week 9 | Enhanced substitution | Beta |
-| **v0.4.0** | Week 13 | Essential sed compatibility | Beta |
-| **v0.5.0** | Week 17 | Flow control & file I/O | Beta |
-| **v0.6.0** | Week 20 | Advanced addressing & polish | RC |
-| **v1.0.0** | Week 22 | Production-ready | Stable |
+| **v0.2.0-alpha** | 2026-01-10 | **Stream processing (Phase 1 complete)** | Alpha |
+| **v0.2.0** | Current | Complete streaming + all tests | Beta |
+| **v0.2.1** | Next | Backup disk management | Beta |
+| **v0.3.0** | +3 weeks | Enhanced substitution | Beta |
+| **v0.4.0** | +7 weeks | Essential sed compatibility | Beta |
+| **v0.5.0** | +11 weeks | Flow control & file I/O | Beta |
+| **v0.6.0** | +14 weeks | Advanced addressing & polish | RC |
+| **v0.6.5** | +16 weeks | **Performance optimization** ⚡ | RC (optional) |
+| **v1.0.0** | +18 weeks | Production-ready | Stable |
 
-**Total Duration:** ~5-6 months (22 weeks)
+**Total Duration:** ~4-5 months (18 weeks with opt. Phase 6.5)
 
 ---
 
