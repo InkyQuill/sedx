@@ -1181,6 +1181,9 @@ impl FileProcessor {
                 // e.g., ":loop s/foo/bar/" - "loop" labels the s command
                 if idx + 1 < commands.len() {
                     registry.insert(name.clone(), idx + 1);
+                } else {
+                    // Label at end of script: branch to end
+                    registry.insert(name.clone(), commands.len());
                 }
             }
         }
@@ -1204,18 +1207,18 @@ impl FileProcessor {
 
         for cmd in commands {
             match cmd {
-                // Supported commands
+                // Supported commands (Phase 5: flow control commands now supported)
                 Substitution { .. } | Delete { .. } | Print { .. } |
                 Quit { .. } | QuitWithoutPrint { .. } |
                 Next { .. } | NextAppend { .. } |
                 PrintFirstLine { .. } | DeleteFirstLine { .. } |
                 Hold { .. } | HoldAppend { .. } |
-                Get { .. } | GetAppend { .. } | Exchange { .. } => {
-                    // Supported
+                Get { .. } | GetAppend { .. } | Exchange { .. } |
+                Group { .. } | Label { .. } | Branch { .. } | Test { .. } | TestFalse { .. } => {
+                    // Supported (Phase 5: flow control commands added)
                 }
                 // Unsupported commands (fall back to batch processing)
-                Insert { .. } | Append { .. } | Change { .. } | Group { .. } |
-                Label { .. } | Branch { .. } | Test { .. } | TestFalse { .. } => {
+                Insert { .. } | Append { .. } | Change { .. } => {
                     return false;
                 }
             }
@@ -1518,8 +1521,14 @@ impl FileProcessor {
             }
 
             Command::Group { range, .. } => {
-                // Groups don't support cycle-based yet (fall back to batch)
-                false
+                // Phase 5: Groups now support cycle-based processing for flow control
+                match range {
+                    None => true,  // No range - applies to all lines
+                    Some((start, end)) => {
+                        // Check if current line is within the range
+                        self.check_range_inclusive(state, start, end)
+                    }
+                }
             }
 
             // Commands with required range (tuple, not Option)
@@ -1789,8 +1798,8 @@ impl FileProcessor {
                         if let Some(&target_pc) = self.label_registry.get(label_name) {
                             Ok(CycleResult::Branch(target_pc))
                         } else {
-                            // GNU sed: undefined label is treated as branch to end
-                            Ok(CycleResult::Branch(self.commands.len()))
+                            // GNU sed: undefined label is an error
+                            anyhow::bail!("Undefined label: {}", label_name)
                         }
                     }
                     None => {
@@ -1808,8 +1817,8 @@ impl FileProcessor {
                             if let Some(&target_pc) = self.label_registry.get(label_name) {
                                 Ok(CycleResult::Branch(target_pc))
                             } else {
-                                // Undefined label: branch to end
-                                Ok(CycleResult::Branch(self.commands.len()))
+                                // GNU sed: undefined label is an error
+                                anyhow::bail!("Undefined label: {}", label_name)
                             }
                         }
                         None => {
@@ -1831,8 +1840,8 @@ impl FileProcessor {
                             if let Some(&target_pc) = self.label_registry.get(label_name) {
                                 Ok(CycleResult::Branch(target_pc))
                             } else {
-                                // Undefined label: branch to end
-                                Ok(CycleResult::Branch(self.commands.len()))
+                                // GNU sed: undefined label is an error
+                                anyhow::bail!("Undefined label: {}", label_name)
                             }
                         }
                         None => {
@@ -1844,6 +1853,39 @@ impl FileProcessor {
                     // Substitution was made: continue to next command
                     Ok(CycleResult::Continue)
                 }
+            }
+
+            // Group command: execute inner commands (Phase 5)
+            Command::Group { range: _, commands: group_commands } => {
+                // Execute each command in the group in sequence
+                for group_cmd in group_commands {
+                    let result = self.apply_command_to_cycle(group_cmd, state)?;
+
+                    // Handle flow control results within the group
+                    match result {
+                        CycleResult::Continue => {
+                            // Continue to next command in group
+                        }
+                        CycleResult::Branch(target_pc) => {
+                            // Branch jumps to target command (may exit the group)
+                            return Ok(CycleResult::Branch(target_pc));
+                        }
+                        CycleResult::DeleteLine => {
+                            // Delete line and end cycle
+                            return Ok(CycleResult::DeleteLine);
+                        }
+                        CycleResult::RestartCycle => {
+                            // Restart cycle from beginning
+                            return Ok(CycleResult::RestartCycle);
+                        }
+                        CycleResult::Quit(code) => {
+                            // Quit program
+                            return Ok(CycleResult::Quit(code));
+                        }
+                    }
+                }
+                // All group commands executed successfully
+                Ok(CycleResult::Continue)
             }
 
             // For now, delegate other commands to existing implementation
