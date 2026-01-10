@@ -78,6 +78,13 @@ pub fn can_stream(commands: &[Command]) -> bool {
                 // Quit is streamable
                 continue;
             }
+            // Phase 4: Multi-line pattern space commands are NOT streamable (require full file access)
+            Command::Next { .. }
+            | Command::NextAppend { .. }
+            | Command::PrintFirstLine { .. }
+            | Command::DeleteFirstLine { .. } => {
+                return false;
+            }
         }
     }
     true

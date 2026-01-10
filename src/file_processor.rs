@@ -69,6 +69,9 @@ pub struct FileProcessor {
     commands: Vec<Command>,
     printed_lines: Vec<String>,
     hold_space: String,
+    // Multi-line pattern space support (Phase 4)
+    pattern_space: Option<String>,  // Multi-line pattern space (None = normal single-line mode)
+    current_line_index: usize,       // Current line index in input (for n/N commands)
 }
 
 /// Result of applying a command in streaming mode
@@ -1020,6 +1023,8 @@ impl FileProcessor {
             commands,
             printed_lines: Vec::new(),
             hold_space: String::new(),
+            pattern_space: None,
+            current_line_index: 0,
         }
     }
 
@@ -1054,6 +1059,9 @@ impl FileProcessor {
         self.printed_lines.clear();
         // Reset hold space for each file
         self.hold_space.clear();
+        // Reset pattern space for each file
+        self.pattern_space = None;
+        self.current_line_index = 0;
 
         // Apply all sed commands (stop if quit is encountered)
         let commands = self.commands.clone();
@@ -1205,6 +1213,19 @@ impl FileProcessor {
             }
             Command::Exchange { range } => {
                 self.apply_exchange(lines, range)?;
+            }
+            // Phase 4: Multi-line pattern space commands
+            Command::Next { range } => {
+                self.apply_next(lines, range)?;
+            }
+            Command::NextAppend { range } => {
+                self.apply_next_append(lines, range)?;
+            }
+            Command::PrintFirstLine { range } => {
+                self.apply_print_first_line(lines, range)?;
+            }
+            Command::DeleteFirstLine { range } => {
+                self.apply_delete_first_line(lines, range)?;
             }
         }
         Ok(true)
@@ -1791,6 +1812,57 @@ impl FileProcessor {
                     }
                     self.hold_space = temp;
                 }
+            }
+        }
+        Ok(())
+    }
+
+    // Phase 4: Multi-line pattern space commands
+
+    /// n command: Print current pattern space, read next line, start new cycle
+    fn apply_next(&mut self, lines: &mut Vec<String>, range: &Option<(Address, Address)>) -> Result<()> {
+        // Basic implementation: skip to next line
+        // TODO: Handle printing and proper cycle restart
+        if lines.len() > 1 {
+            lines.remove(0);
+        }
+        Ok(())
+    }
+
+    /// N command: Read next line and append to pattern space with newline
+    fn apply_next_append(&mut self, lines: &mut Vec<String>, range: &Option<(Address, Address)>) -> Result<()> {
+        if lines.len() > 1 {
+            let first = lines[0].clone();
+            lines[0] = format!("{}\n{}", first, lines[1]);
+            lines.remove(1);
+        }
+        // TODO: If at end of file, don't append and exit with error code
+        Ok(())
+    }
+
+    /// P command: Print first line of pattern space (up to first \n)
+    fn apply_print_first_line(&mut self, lines: &mut Vec<String>, range: &Option<(Address, Address)>) -> Result<()> {
+        if !lines.is_empty() {
+            if let Some(pos) = lines[0].find('\n') {
+                let first_line = &lines[0][..pos];
+                self.printed_lines.push(first_line.to_string());
+            } else {
+                self.printed_lines.push(lines[0].clone());
+            }
+        }
+        Ok(())
+    }
+
+    /// D command: Delete first line of pattern space, restart cycle
+    fn apply_delete_first_line(&mut self, lines: &mut Vec<String>, range: &Option<(Address, Address)>) -> Result<()> {
+        if !lines.is_empty() {
+            if let Some(pos) = lines[0].find('\n') {
+                // Remove first line (up to and including newline)
+                lines[0] = lines[0][pos + 1..].to_string();
+                // TODO: Restart cycle with remaining pattern space (don't read next line)
+            } else {
+                // No newline - delete entire pattern space and start new cycle
+                lines.remove(0);
             }
         }
         Ok(())

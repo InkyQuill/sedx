@@ -79,6 +79,26 @@ pub enum Command {
     Exchange {
         range: Option<(Address, Address)>,
     },
+
+    /// Next: print current pattern space, read next line, start new cycle (Phase 4)
+    Next {
+        range: Option<(Address, Address)>,
+    },
+
+    /// Next with append: read next line and append to pattern space (Phase 4)
+    NextAppend {
+        range: Option<(Address, Address)>,
+    },
+
+    /// Print first line: print up to first newline in pattern space (Phase 4)
+    PrintFirstLine {
+        range: Option<(Address, Address)>,
+    },
+
+    /// Delete first line: delete up to first newline, restart cycle (Phase 4)
+    DeleteFirstLine {
+        range: Option<(Address, Address)>,
+    },
 }
 
 /// Substitution flags (unified across sed and sd)

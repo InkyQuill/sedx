@@ -135,6 +135,34 @@ impl Parser {
                     }),
                 })
             }
+            LegacySedCommand::Next { range } => {
+                Ok(Command::Next {
+                    range: range.map(|(a, b)| {
+                        (self.convert_address(a), self.convert_address(b))
+                    }),
+                })
+            }
+            LegacySedCommand::NextAppend { range } => {
+                Ok(Command::NextAppend {
+                    range: range.map(|(a, b)| {
+                        (self.convert_address(a), self.convert_address(b))
+                    }),
+                })
+            }
+            LegacySedCommand::PrintFirstLine { range } => {
+                Ok(Command::PrintFirstLine {
+                    range: range.map(|(a, b)| {
+                        (self.convert_address(a), self.convert_address(b))
+                    }),
+                })
+            }
+            LegacySedCommand::DeleteFirstLine { range } => {
+                Ok(Command::DeleteFirstLine {
+                    range: range.map(|(a, b)| {
+                        (self.convert_address(a), self.convert_address(b))
+                    }),
+                })
+            }
         }
     }
 

@@ -49,6 +49,19 @@ pub enum SedCommand {
     Exchange {
         range: Option<(Address, Address)>, // x command - exchange buffers
     },
+    // Phase 4: Multi-line pattern space commands
+    Next {
+        range: Option<(Address, Address)>, // n command - next line
+    },
+    NextAppend {
+        range: Option<(Address, Address)>, // N command - append next line
+    },
+    PrintFirstLine {
+        range: Option<(Address, Address)>, // P command - print first line
+    },
+    DeleteFirstLine {
+        range: Option<(Address, Address)>, // D command - delete first line
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -153,6 +166,35 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
         }
     }
 
+    // Phase 4: Multi-line pattern space commands
+    if last_char == 'n' && !cmd.starts_with('s') {
+        // Next command - check it's not part of a substitution
+        if cmd.chars().filter(|&c| c == 's').count() <= 1 {
+            return parse_next(cmd);
+        }
+    }
+
+    if last_char == 'N' && !cmd.starts_with('s') {
+        // Next append command
+        if cmd.chars().filter(|&c| c == 's').count() <= 1 {
+            return parse_next_append(cmd);
+        }
+    }
+
+    if last_char == 'P' && !cmd.starts_with('s') {
+        // Print first line command
+        if cmd.chars().filter(|&c| c == 's').count() <= 1 {
+            return parse_print_first_line(cmd);
+        }
+    }
+
+    if last_char == 'D' && !cmd.starts_with('s') {
+        // Delete first line command
+        if cmd.chars().filter(|&c| c == 's').count() <= 1 {
+            return parse_delete_first_line(cmd);
+        }
+    }
+
     // Determine command type by looking at the last character or special patterns
     if cmd.ends_with('q') && !cmd.starts_with('s') {
         // Quit command
@@ -189,6 +231,10 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
             }
             'G' => parse_get_append(cmd),
             'x' => parse_exchange(cmd),
+            'n' => parse_next(cmd),
+            'N' => parse_next_append(cmd),
+            'P' => parse_print_first_line(cmd),
+            'D' => parse_delete_first_line(cmd),
             _ => {
                 Err(anyhow!("Unknown sed command: {}", cmd))
             }
@@ -538,6 +584,48 @@ fn parse_exchange(cmd: &str) -> Result<SedCommand> {
     let range = parse_optional_range(addr_part)?;
 
     Ok(SedCommand::Exchange { range })
+}
+
+// Phase 4: Multi-line pattern space command parsing functions
+
+fn parse_next(cmd: &str) -> Result<SedCommand> {
+    // n or addr n
+    let cmd = cmd.trim();
+    let addr_part = &cmd[..cmd.len() - 1]; // Remove 'n'
+
+    let range = parse_optional_range(addr_part)?;
+
+    Ok(SedCommand::Next { range })
+}
+
+fn parse_next_append(cmd: &str) -> Result<SedCommand> {
+    // N or addr N
+    let cmd = cmd.trim();
+    let addr_part = &cmd[..cmd.len() - 1]; // Remove 'N'
+
+    let range = parse_optional_range(addr_part)?;
+
+    Ok(SedCommand::NextAppend { range })
+}
+
+fn parse_print_first_line(cmd: &str) -> Result<SedCommand> {
+    // P or addr P
+    let cmd = cmd.trim();
+    let addr_part = &cmd[..cmd.len() - 1]; // Remove 'P'
+
+    let range = parse_optional_range(addr_part)?;
+
+    Ok(SedCommand::PrintFirstLine { range })
+}
+
+fn parse_delete_first_line(cmd: &str) -> Result<SedCommand> {
+    // D or addr D
+    let cmd = cmd.trim();
+    let addr_part = &cmd[..cmd.len() - 1]; // Remove 'D'
+
+    let range = parse_optional_range(addr_part)?;
+
+    Ok(SedCommand::DeleteFirstLine { range })
 }
 
 /// Helper function to parse optional ranges for hold space commands
