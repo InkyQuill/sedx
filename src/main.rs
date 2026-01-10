@@ -4,6 +4,7 @@ mod capability;
 mod cli;
 mod command;
 mod diff_formatter;
+mod disk_space;
 mod ere_converter;
 mod file_processor;
 mod parser;

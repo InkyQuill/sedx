@@ -38,6 +38,43 @@ impl BackupManager {
     }
 
     pub fn create_backup(&mut self, expression: &str, files: &[PathBuf]) -> Result<String> {
+        // Calculate total backup size and check disk space
+        let mut total_size = 0u64;
+        for file_path in files {
+            if file_path.exists() {
+                total_size += file_path.metadata()
+                    .with_context(|| format!("Failed to get file metadata: {}", file_path.display()))?
+                    .len();
+            }
+        }
+
+        // Check disk space before creating backup
+        // Default: warn if backup > 2GB or > 40% of free space
+        // Error if backup > 60% of free space
+        const MAX_BACKUP_SIZE_GB: u64 = 2;
+        const WARN_PERCENT: f64 = 40.0;
+        const ERROR_PERCENT: f64 = 60.0;
+
+        // Warn if backup is very large
+        if total_size > MAX_BACKUP_SIZE_GB * 1024 * 1024 * 1024 {
+            eprintln!("⚠️  Warning: This operation will create a large backup ({})",
+                crate::disk_space::DiskSpaceInfo::bytes_to_human(total_size));
+            eprintln!("Consider using --no-backup if you have a recent backup");
+        }
+
+        // Check disk space with error threshold
+        if let Err(e) = crate::disk_space::check_disk_space_for_backup(
+            &self.backups_dir,
+            total_size,
+            ERROR_PERCENT,
+        ) {
+            // Provide helpful error message
+            return Err(e.context(format!(
+                "Cannot create backup. Files size: {}",
+                crate::disk_space::DiskSpaceInfo::bytes_to_human(total_size)
+            )));
+        }
+
         // Generate unique backup ID
         let id = format!("{}-{}", Utc::now().format("%Y%m%d-%H%M%S"), Uuid::new_v4().to_string().split_at(8).0);
         let backup_dir = self.backups_dir.join(&id);
