@@ -138,88 +138,135 @@ run_stdin_test \
     "FOO\nBAR\nFOO"
 
 echo ""
-echo "--- Week 3: File I/O Command Parsing (r, w, R, W) ---"
-echo "NOTE: File I/O commands are currently stubs (no-op implementation)"
+echo "--- Week 3: File I/O Commands (r, w, R, W) ---"
 echo ""
 
-# Test 13-18: File I/O parsing tests (commands are stubs that produce no output)
+# Test 13: Read file command
+echo -e "inserted\nline" > /tmp/test_r.txt
 run_stdin_test \
-    "Read file command (stub - no output)" \
-    'r /tmp/nonexistent.txt' \
+    "Read file command" \
+    '2r /tmp/test_r.txt' \
     "line1\nline2" \
-    ""
+    "line1\nline2\ninserted\nline"
+rm -f /tmp/test_r.txt
 
-run_stdin_test \
-    "Write file command (stub - no output)" \
-    'w /tmp/output.txt' \
-    "line1\nline2" \
-    ""
+# Test 14: Write file command (check file contents separately)
+echo -e "line1\nline2" | $SEDX_BIN 'w /tmp/test_w.txt' >/dev/null 2>&1
+if [ "$(cat /tmp/test_w.txt)" = "line1
+line2" ]; then
+    echo -e "Testing: Write file command ... ${GREEN}PASSED${NC}"
+    ((TESTS_PASSED++))
+else
+    echo -e "Testing: Write file command ... ${RED}FAILED${NC}"
+    echo "  Expected file contents: 'line1\nline2'"
+    echo "  Got: '$(cat /tmp/test_w.txt)'"
+    ((TESTS_FAILED++))
+fi
+rm -f /tmp/test_w.txt
 
+# Test 15: Read line command
+echo -e "extra" > /tmp/test_R.txt
 run_stdin_test \
-    "Read line command (stub - no output)" \
-    'R /tmp/nonexistent.txt' \
+    "Read line command" \
+    'R /tmp/test_R.txt' \
     "line1\nline2" \
-    ""
+    "line1
+extra
+line2"
+rm -f /tmp/test_R.txt
 
-run_stdin_test \
-    "Write first line command (stub - no output)" \
-    'W /tmp/output.txt' \
-    "line1\nline2" \
-    ""
+# Test 16: Write first line command (check file contents separately)
+echo -e "line1\nline2\nline3" | $SEDX_BIN 'W /tmp/test_W.txt' >/dev/null 2>&1
+if [ "$(cat /tmp/test_W.txt)" = "line1
+line2
+line3" ]; then
+    echo -e "Testing: Write first line command ... ${GREEN}PASSED${NC}"
+    ((TESTS_PASSED++))
+else
+    echo -e "Testing: Write first line command ... ${RED}FAILED${NC}"
+    echo "  Expected file contents: 'line1\nline2\nline3'"
+    echo "  Got: '$(cat /tmp/test_W.txt)'"
+    ((TESTS_FAILED++))
+fi
+rm -f /tmp/test_W.txt
 
-# Test 17-18: File I/O with addresses
+# Test 17: Read file with line address
+echo -e "appended\nline" > /tmp/test_r2.txt
 run_stdin_test \
-    "Read file with address (stub - no output)" \
-    '5r /tmp/nonexistent.txt' \
+    "Read file with address" \
+    '1r /tmp/test_r2.txt' \
     "line1\nline2" \
-    ""
+    "line1\nappended\nline\nline2"
+rm -f /tmp/test_r2.txt
 
-run_stdin_test \
-    "Write file with pattern address (stub - no output)" \
-    '/line2/w /tmp/output.txt' \
-    "line1\nline2" \
-    ""
+# Test 18: Write file with pattern address (check file contents separately)
+echo -e "foo\nbar\nbaz" | $SEDX_BIN '/bar/w /tmp/test_w_pattern.txt' >/dev/null 2>&1
+if [ "$(cat /tmp/test_w_pattern.txt)" = "bar" ]; then
+    echo -e "Testing: Write file with pattern address ... ${GREEN}PASSED${NC}"
+    ((TESTS_PASSED++))
+else
+    echo -e "Testing: Write file with pattern address ... ${RED}FAILED${NC}"
+    echo "  Expected file contents: 'bar'"
+    echo "  Got: '$(cat /tmp/test_w_pattern.txt)'"
+    ((TESTS_FAILED++))
+fi
+rm -f /tmp/test_w_pattern.txt
 
 echo ""
 echo "--- Week 4: Additional Commands (=, F, z) ---"
 echo ""
 
-# Test 19-24: Additional commands (parsing only - stubs)
+# Test 19: Print line number
 run_stdin_test \
-    "Print line number (parsing)" \
+    "Print line number" \
     '=' \
     "line1\nline2" \
-    "line1\nline2"
+    "1
+line1
+2
+line2"
 
+# Test 20: Print line number with address
 run_stdin_test \
     "Print line number with address" \
     '2=' \
     "line1\nline2" \
-    "line1\nline2"
+    "line1
+2
+line2"
 
+# Test 21: Print filename (stdin shows as "(stdin)")
 run_stdin_test \
-    "Print filename (parsing)" \
+    "Print filename" \
     'F' \
     "line1\nline2" \
-    "line1\nline2"
+    "(stdin)
+line1
+(stdin)
+line2"
 
+# Test 22: Print filename with pattern
 run_stdin_test \
     "Print filename with pattern" \
     '/line2/F' \
     "line1\nline2" \
-    "line1\nline2"
+    "line1
+(stdin)
+line2"
 
+# Test 23: Clear pattern space (z command clears all lines)
 run_stdin_test \
-    "Clear pattern space (parsing)" \
+    "Clear pattern space" \
     'z' \
     "line1\nline2" \
-    "line1\nline2"
+    ""
 
+# Test 24: Clear pattern space with address (2z clears only line 2)
 run_stdin_test \
     "Clear pattern space with address" \
     '2z' \
     "line1\nline2" \
-    "line1\nline2"
+    "line1"
 
 echo ""
 echo "--- Integration: Multiple Phase 5 Features ---"

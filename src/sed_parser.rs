@@ -165,6 +165,48 @@ pub fn parse_sed_expression(expr: &str) -> Result<Vec<SedCommand>> {
     Ok(commands)
 }
 
+/// Helper function to check if a position is inside a pattern address
+/// Pattern addresses are delimited by '/' or '\', e.g., /pattern/ or \pattern\
+/// Returns true if the position is inside the delimiters (not at the delimiters themselves)
+fn is_inside_pattern_address(cmd: &str, pos: usize) -> bool {
+    let bytes = cmd.as_bytes();
+    let n = bytes.len();
+
+    // We need to count delimiter pairs before the position
+    // Each pair consists of an opening delimiter and its matching closing delimiter
+    // We're "inside" if we've seen an odd number of opening delimiters before this position
+
+    // For simplicity, let's just look for the pattern: /.../ where pos is between the slashes
+    // We need to find the LAST '/' BEFORE pos and check if it has a matching '/' AFTER pos
+
+    // Find the last '/' or '\' before pos
+    let mut last_delim_before = None;
+    for i in (0..pos).rev() {
+        if bytes[i] == b'/' || bytes[i] == b'\\' {
+            last_delim_before = Some(i);
+            break;
+        }
+    }
+
+    let start_pos = match last_delim_before {
+        Some(sp) => sp,
+        None => return false,  // No delimiter before pos, so we're not inside
+    };
+
+    // Look for the NEXT '/' or '\' after start_pos
+    for i in (start_pos + 1)..n {
+        if bytes[i] == bytes[start_pos] {  // Same delimiter character
+            // Found matching closing delimiter
+            // Check if pos is between the delimiters
+            return pos > start_pos && pos < i;
+        }
+    }
+
+    // No matching closing delimiter found
+    // Assume we're NOT inside (unclosed pattern)
+    false
+}
+
 fn parse_single_command(cmd: &str) -> Result<SedCommand> {
     let cmd = cmd.trim();
 
@@ -275,6 +317,93 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
                     return parse_test(cmd);
                 } else {
                     return parse_test_false(cmd);
+                }
+            }
+        }
+    }
+
+    // Phase 5: Check for file I/O and additional commands
+    // These commands (=, F, z, r, R, w, W) have filenames or are standalone
+    // so we check for them BEFORE checking if command "ends with" certain characters
+    if trimmed.contains('=') {
+        // Print line number (=) - may have address before it
+        // Examples: "=", "5=", "/pat/="
+        // The = should be the last character (except for optional address before it)
+        if let Some(eq_pos) = trimmed.find('=') {
+            let rest = &trimmed[eq_pos + 1..];
+            if rest.trim().is_empty() {
+                // Valid = command (nothing after = except maybe whitespace)
+                return parse_print_line_number(cmd);
+            }
+        }
+    }
+
+    if trimmed.contains('F') {
+        // Print filename (F) - GNU sed extension
+        // Examples: "F", "5F", "/pat/F"
+        if let Some(f_pos) = trimmed.find('F') {
+            let rest = &trimmed[f_pos + 1..];
+            if rest.trim().is_empty() {
+                // Valid F command (nothing after F except maybe whitespace)
+                return parse_print_filename(cmd);
+            }
+        }
+    }
+
+    if trimmed.contains('z') {
+        // Clear pattern space (z) - GNU sed extension
+        // Examples: "z", "5z", "/pat/z"
+        // Make sure it's not part of a substitution
+        if !cmd.starts_with('s') && cmd.chars().filter(|&c| c == 's').count() <= 1 {
+            if let Some(z_pos) = trimmed.find('z') {
+                let rest = &trimmed[z_pos + 1..];
+                if rest.trim().is_empty() {
+                    // Valid z command (nothing after z except maybe whitespace)
+                    return parse_clear_pattern_space(cmd);
+                }
+            }
+        }
+    }
+
+    // Check for r/R/w/W commands (file I/O)
+    // Examples: "r /path/file", "5r file.txt", "/pat/r file"
+    // These commands have filenames after them, so they don't "end with" the command char
+    // IMPORTANT: Must check that the command char is NOT part of a pattern address like /pat/
+    // Pattern addresses are delimited by forward slashes, so we skip r/R/w/W inside /.../
+    if trimmed.contains('r') || trimmed.contains('R') || trimmed.contains('w') || trimmed.contains('W') {
+        // Find all positions of each command character
+        let mut r_positions: Vec<usize> = trimmed.match_indices('r').map(|(i, _)| i).collect();
+        let mut R_positions: Vec<usize> = trimmed.match_indices('R').map(|(i, _)| i).collect();
+        let mut w_positions: Vec<usize> = trimmed.match_indices('w').map(|(i, _)| i).collect();
+        let mut W_positions: Vec<usize> = trimmed.match_indices('W').map(|(i, _)| i).collect();
+
+        // Filter out positions that are inside pattern addresses (between '/' characters)
+        // Pattern addresses have the form /pattern/ or \pattern\
+        r_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
+        R_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
+        w_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
+        W_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
+
+        // Find which position comes first among the remaining (non-pattern) positions
+        let all_positions: Vec<(usize, char)> = r_positions.into_iter().map(|p| (p, 'r'))
+            .chain(R_positions.into_iter().map(|p| (p, 'R')))
+            .chain(w_positions.into_iter().map(|p| (p, 'w')))
+            .chain(W_positions.into_iter().map(|p| (p, 'W')))
+            .collect();
+
+        if let Some(&(pos, char_at_pos)) = all_positions.iter().min_by_key(|(p, _)| p) {
+            let rest = &trimmed[pos + 1..];
+
+            // After the command char, there should be a filename (possibly with spaces)
+            // The filename can be anything, so if there's content after, it's likely a file I/O command
+            if !rest.trim().is_empty() {
+                // Has content after command char - likely filename
+                match char_at_pos {
+                    'r' => return parse_read_file(cmd),
+                    'R' => return parse_read_line(cmd),
+                    'w' => return parse_write_file(cmd),
+                    'W' => return parse_write_first_line(cmd),
+                    _ => {}
                 }
             }
         }

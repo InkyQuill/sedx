@@ -123,6 +123,16 @@ struct CycleState {
     /// Side-effect output accumulated during cycle (P, p, n commands)
     side_effects: Vec<String>,
 
+    /// File read output (r, R commands) - printed AFTER pattern space (Phase 5)
+    file_reads: Vec<String>,
+
+    /// Stdout output for = and F commands (Phase 5)
+    /// These are printed to stdout immediately, not to the output buffer
+    stdout_outputs: Vec<String>,
+
+    /// Current filename (for F command - Phase 5)
+    current_filename: String,
+
     /// Input line iterator for n/N commands
     line_iter: LineIterator,
 
@@ -144,13 +154,16 @@ struct CycleState {
 }
 
 impl CycleState {
-    fn new(hold_space: String, lines: Vec<String>) -> Self {
+    fn new(hold_space: String, lines: Vec<String>, filename: String) -> Self {
         Self {
             pattern_space: String::new(),
             hold_space,
             line_num: 0,
             deleted: false,
             side_effects: Vec::new(),
+            file_reads: Vec::new(),  // Phase 5: Initialize file reads
+            stdout_outputs: Vec::new(),  // Phase 5: Initialize stdout outputs
+            current_filename: filename,  // Phase 5: Initialize filename
             line_iter: LineIterator::new(lines),
             pattern_range_states: HashMap::new(),
             mixed_range_states: HashMap::new(),
@@ -210,6 +223,7 @@ pub struct FileProcessor {
     label_registry: HashMap<String, usize>,  // Maps label names to command indices
     // Phase 5: File I/O support
     write_handles: HashMap<String, BufWriter<std::fs::File>>,  // File handles for w/W commands
+    read_positions: HashMap<String, usize>,  // Current line position for R command (filename -> line_index)
 }
 
 /// Result of applying a command in streaming mode
@@ -1169,6 +1183,7 @@ impl FileProcessor {
             no_default_output: false,
             label_registry,
             write_handles: HashMap::new(),
+            read_positions: HashMap::new(),
         }
     }
 
@@ -1370,7 +1385,7 @@ impl FileProcessor {
     ///
     /// Matches GNU sed execute.c:1685 (main loop) + execute_program (command loop)
     pub fn apply_cycle_based(&mut self, lines: Vec<String>) -> Result<Vec<String>> {
-        let mut state = CycleState::new(self.hold_space.clone(), lines);
+        let mut state = CycleState::new(self.hold_space.clone(), lines, String::from("(stdin)"));
         let mut output = Vec::new();
 
         // Outer loop: read each line into pattern space (matches execute.c:1685)
@@ -1428,6 +1443,10 @@ impl FileProcessor {
                             output.push(side_effect.clone());
                             self.printed_lines.push(side_effect);
                         }
+                        // Add stdout outputs before quitting (Phase 5)
+                        for stdout_output in state.stdout_outputs.drain(..) {
+                            output.push(stdout_output);
+                        }
                         // Update hold space from final state
                         self.hold_space = state.hold_space.clone();
                         // Return output early (quit program)
@@ -1436,15 +1455,32 @@ impl FileProcessor {
                 }
             }
 
-            // Add side effects (P, p, n commands) - these are printed immediately
+            // Add stdout outputs (=, F commands) - these are printed BEFORE the pattern space (Phase 5)
+            // In GNU sed, line numbers and filenames appear on separate lines before the pattern space
+            for stdout_output in state.stdout_outputs.drain(..) {
+                output.push(stdout_output);
+                // Don't add to printed_lines since these are metadata, not content
+            }
+
+            // Add side effects (n, P, p commands) - these are printed BEFORE pattern space
+            // n command: print current line BEFORE reading next line
+            // P/p commands: print pattern space immediately
             for side_effect in state.side_effects.drain(..) {
                 output.push(side_effect.clone());
                 self.printed_lines.push(side_effect);
             }
 
             // Add pattern space to output (unless deleted or in quiet mode)
+            // This is the default output at the end of the cycle
             if !state.deleted && !self.no_default_output {
                 output.push(state.pattern_space.clone());
+            }
+
+            // Add file read outputs (r, R commands) - these are printed AFTER the pattern space
+            // This matches GNU sed behavior where r command output appears after the current line
+            for file_read in state.file_reads.drain(..) {
+                output.push(file_read.clone());
+                self.printed_lines.push(file_read);
             }
 
             // Reset deletion flag for next cycle
@@ -1733,7 +1769,7 @@ impl FileProcessor {
 
     /// Apply command within a cycle (returns cycle result)
     /// Matches GNU sed execute.c:1297-1643 (command switch statement)
-    fn apply_command_to_cycle(&self, cmd: &Command, state: &mut CycleState) -> Result<CycleResult> {
+    fn apply_command_to_cycle(&mut self, cmd: &Command, state: &mut CycleState) -> Result<CycleResult> {
         match cmd {
             // n command: print current, read next, continue (matches execute.c:1459)
             Command::Next { range: _ } => {
@@ -1915,42 +1951,111 @@ impl FileProcessor {
             }
 
             // Phase 5: File I/O commands
-            // Note: For write commands (w/W), we need &mut self to access write_handles
-            // This is a limitation of the current architecture - file I/O is not fully
-            // supported in cycle-based mode yet. For now, these commands are no-ops.
-            Command::ReadFile { filename: _, range: _ } => {
-                // TODO: Implement file reading (requires access to output buffer)
+            // Note: Write commands now work with &mut self access
+            Command::WriteFile { filename, range: _ } => {
+                // w command: Write pattern space to file (Phase 5)
+                // Write the entire pattern space to the file
+                if let Some(writer) = self.write_handles.get_mut(filename) {
+                    writeln!(writer, "{}", state.pattern_space)
+                        .with_context(|| format!("Failed to write to file: {}", filename))?;
+                } else {
+                    // Open file for writing (create if doesn't exist, truncate if exists)
+                    let file = std::fs::File::create(filename)
+                        .with_context(|| format!("Failed to create file: {}", filename))?;
+                    let mut writer = BufWriter::new(file);
+                    writeln!(writer, "{}", state.pattern_space)
+                        .with_context(|| format!("Failed to write to file: {}", filename))?;
+                    writer.flush()
+                        .with_context(|| format!("Failed to flush file: {}", filename))?;
+                    self.write_handles.insert(filename.clone(), writer);
+                }
                 Ok(CycleResult::Continue)
             }
-            Command::WriteFile { filename: _, range: _ } => {
-                // TODO: Implement file writing (requires &mut self for write_handles)
+            Command::WriteFirstLine { filename, range: _ } => {
+                // W command: Write first line of pattern space to file (Phase 5)
+                // Write only the first line (up to newline or entire pattern space if no newline)
+                let first_line = if let Some(idx) = state.pattern_space.find('\n') {
+                    &state.pattern_space[..idx]
+                } else {
+                    &state.pattern_space
+                };
+
+                if let Some(writer) = self.write_handles.get_mut(filename) {
+                    writeln!(writer, "{}", first_line)
+                        .with_context(|| format!("Failed to write to file: {}", filename))?;
+                } else {
+                    // Open file for writing
+                    let file = std::fs::File::create(filename)
+                        .with_context(|| format!("Failed to create file: {}", filename))?;
+                    let mut writer = BufWriter::new(file);
+                    writeln!(writer, "{}", first_line)
+                        .with_context(|| format!("Failed to write to file: {}", filename))?;
+                    writer.flush()
+                        .with_context(|| format!("Failed to flush file: {}", filename))?;
+                    self.write_handles.insert(filename.clone(), writer);
+                }
                 Ok(CycleResult::Continue)
             }
-            Command::ReadLine { filename: _, range: _ } => {
-                // TODO: Implement line reading (requires state to track file position)
+            Command::ReadFile { filename, range: _ } => {
+                // r command: Read file and append to output (Phase 5)
+                // Read the entire file and add each line to file_reads (output after pattern space)
+                let file_content = std::fs::read_to_string(filename)
+                    .with_context(|| format!("Failed to read file: {}", filename))?;
+
+                // Add each line as a file read (output after current line)
+                for line in file_content.lines() {
+                    state.file_reads.push(line.to_string());
+                }
+
                 Ok(CycleResult::Continue)
             }
-            Command::WriteFirstLine { filename: _, range: _ } => {
-                // TODO: Implement first-line writing (requires &mut self for write_handles)
+            Command::ReadLine { filename, range: _ } => {
+                // R command: Read one line from file and append to pattern space (Phase 5)
+                // This command reads one line per cycle and appends it with a newline
+                // Track file position across cycles
+
+                // Read file content
+                let file_content = std::fs::read_to_string(filename)
+                    .with_context(|| format!("Failed to read file: {}", filename))?;
+
+                // Get current position for this file (default to 0)
+                let pos = self.read_positions.entry(filename.clone()).or_insert(0);
+
+                // Collect all lines to find the line at current position
+                let lines: Vec<&str> = file_content.lines().collect();
+
+                // Check if we're at EOF
+                if *pos < lines.len() {
+                    // Get the line at current position
+                    if let Some(line) = lines.get(*pos) {
+                        state.pattern_space.push('\n');
+                        state.pattern_space.push_str(line);
+                    }
+                    // Advance to next line for next cycle
+                    *pos += 1;
+                }
+                // If at EOF or file is empty, do nothing (GNU sed behavior)
+
                 Ok(CycleResult::Continue)
             }
 
             // Phase 5: Additional commands
             Command::PrintLineNumber { range: _ } => {
-                // TODO: Implement print line number (needs to write to stdout separately)
-                // This command prints the current line number to stdout
+                // Print line number to stdout (Phase 5: = command)
+                // This prints the current line number to stdout immediately
+                state.stdout_outputs.push(state.line_num.to_string());
                 Ok(CycleResult::Continue)
             }
             Command::PrintFilename { range: _ } => {
-                // TODO: Implement print filename (needs access to current filename)
-                // This command prints the current filename to stdout
+                // Print filename to stdout (Phase 5: F command)
+                // GNU sed extension - prints current filename
+                state.stdout_outputs.push(state.current_filename.clone());
                 Ok(CycleResult::Continue)
             }
             Command::ClearPatternSpace { range: _ } => {
                 // Clear the pattern space (set to empty string)
-                // This is simple - we can implement this now!
-                // state.pattern_space = String::new();  // Would need &mut state
-                // For now, it's a no-op in the immutable context
+                // GNU sed extension - zaps the pattern space
+                state.pattern_space.clear();
                 Ok(CycleResult::Continue)
             }
 
@@ -1962,7 +2067,7 @@ impl FileProcessor {
 
     /// n command: print current, read next, continue with remaining commands
     /// Matches execute.c:1459-1472
-    fn apply_next_cycle(&self, state: &mut CycleState) -> Result<CycleResult> {
+    fn apply_next_cycle(&mut self, state: &mut CycleState) -> Result<CycleResult> {
         // 1. Side effect: print current pattern space (if not -n mode)
         if !self.no_default_output {
             state.side_effects.push(state.pattern_space.clone());
@@ -1981,7 +2086,7 @@ impl FileProcessor {
 
     /// N command: append next line to pattern space
     /// Matches execute.c:1474-1489
-    fn apply_next_append_cycle(&self, state: &mut CycleState) -> Result<CycleResult> {
+    fn apply_next_append_cycle(&mut self, state: &mut CycleState) -> Result<CycleResult> {
         // 1. Try to read next line first
         if let Some(next_line) = state.line_iter.read_next() {
             // 2. Only append newline and line if we successfully read
@@ -1998,7 +2103,7 @@ impl FileProcessor {
 
     /// P command: print first line of multi-line pattern space
     /// Matches execute.c:1496-1502
-    fn apply_print_first_line_cycle(&self, state: &mut CycleState) -> Result<CycleResult> {
+    fn apply_print_first_line_cycle(&mut self, state: &mut CycleState) -> Result<CycleResult> {
         // Find first newline
         if let Some(idx) = state.pattern_space.find('\n') {
             // Print text up to first newline
@@ -2010,7 +2115,7 @@ impl FileProcessor {
 
     /// D command: delete first line, restart cycle
     /// Matches execute.c:1333-1350
-    fn apply_delete_first_line_cycle(&self, state: &mut CycleState) -> Result<CycleResult> {
+    fn apply_delete_first_line_cycle(&mut self, state: &mut CycleState) -> Result<CycleResult> {
         // Find first newline
         if let Some(idx) = state.pattern_space.find('\n') {
             // Delete first line up to (and including) newline
@@ -3601,8 +3706,8 @@ mod cycle_tests {
     #[test]
     fn test_cycle_state_creation() {
         let lines = vec!["line1".to_string(), "line2".to_string()];
-        let state = CycleState::new(String::new(), lines);
-        
+        let state = CycleState::new(String::new(), lines, String::from("test.txt"));
+
         assert_eq!(state.line_num, 0);
         assert_eq!(state.pattern_space, "");
         assert!(!state.deleted);
