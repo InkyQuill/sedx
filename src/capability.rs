@@ -89,6 +89,13 @@ pub fn can_stream(commands: &[Command]) -> bool {
             | Command::DeleteFirstLine { .. } => {
                 return false;
             }
+            // Phase 5: Flow control commands are NOT streamable (require label tracking and program counter)
+            Command::Label { .. }
+            | Command::Branch { .. }
+            | Command::Test { .. }
+            | Command::TestFalse { .. } => {
+                return false;
+            }
         }
     }
     true

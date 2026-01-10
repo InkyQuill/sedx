@@ -66,6 +66,19 @@ pub enum SedCommand {
     DeleteFirstLine {
         range: Option<(Address, Address)>, // D command - delete first line
     },
+    // Phase 5: Flow control commands
+    Label {
+        name: String, // :label - defines a branch target
+    },
+    Branch {
+        label: Option<String>, // b [label] - branch to label (end of script if None)
+    },
+    Test {
+        label: Option<String>, // t [label] - branch if substitution made
+    },
+    TestFalse {
+        label: Option<String>, // T [label] - branch if NO substitution made
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -200,7 +213,11 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
     }
 
     // Determine command type by looking at the last character or special patterns
-    if cmd.ends_with('Q') && !cmd.starts_with('s') {
+    // Check for label first (starts with :)
+    if cmd.starts_with(':') {
+        // Label definition (Phase 5)
+        parse_label(cmd)
+    } else if cmd.ends_with('Q') && !cmd.starts_with('s') {
         // Quit without printing command (Phase 4)
         parse_quit_without_print(cmd)
     } else if cmd.ends_with('q') && !cmd.starts_with('s') {
@@ -243,6 +260,9 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
             'N' => parse_next_append(cmd),
             'P' => parse_print_first_line(cmd),
             'D' => parse_delete_first_line(cmd),
+            'b' => parse_branch(cmd),  // Phase 5
+            't' => parse_test(cmd),    // Phase 5
+            'T' => parse_test_false(cmd),  // Phase 5
             _ => {
                 Err(anyhow!("Unknown sed command: {}", cmd))
             }
@@ -812,6 +832,124 @@ fn convert_sed_backreferences(replacement: &str) -> String {
     }
 
     result
+}
+
+// Phase 5: Parse label definition (:label)
+fn parse_label(cmd: &str) -> Result<SedCommand> {
+    let cmd = cmd.trim();
+
+    // Remove the leading ':'
+    let label_name = cmd[1..].trim();
+
+    if label_name.is_empty() {
+        return Err(anyhow!("Label name cannot be empty"));
+    }
+
+    // GNU sed restricts label names to max 8 characters
+    if label_name.len() > 8 {
+        return Err(anyhow!("Label name too long (max 8 characters): {}", label_name));
+    }
+
+    Ok(SedCommand::Label {
+        name: label_name.to_string(),
+    })
+}
+
+// Phase 5: Parse branch command (b [label])
+fn parse_branch(cmd: &str) -> Result<SedCommand> {
+    let cmd = cmd.trim();
+    let addr_part = &cmd[..cmd.len() - 1]; // Remove 'b'
+
+    // Check if there's a label
+    let label = if addr_part.trim().is_empty() {
+        // Just 'b' - branch to end of script
+        None
+    } else {
+        // 'b label' or '10b label' - branch to label
+        let label_part = addr_part.trim();
+        // Check if there's an address part
+        if let Some(space_idx) = label_part.rfind(' ') {
+            // Has address: "10b label" or "/pattern/b label"
+            let addr_str = &label_part[..space_idx];
+            let label_name = label_part[space_idx + 1..].trim();
+
+            // Validate address if present
+            if !addr_str.is_empty() {
+                parse_address(addr_str)?;
+            }
+
+            Some(label_name.to_string())
+        } else if label_part.starts_with('b') {
+            // No address, just "b label"
+            Some(label_part[1..].trim().to_string())
+        } else {
+            // Has address like "10b" with no label
+            parse_address(label_part)?;
+            None
+        }
+    };
+
+    Ok(SedCommand::Branch { label })
+}
+
+// Phase 5: Parse test branch command (t [label])
+fn parse_test(cmd: &str) -> Result<SedCommand> {
+    let cmd = cmd.trim();
+    let addr_part = &cmd[..cmd.len() - 1]; // Remove 't'
+
+    // Same logic as branch, but for 't' command
+    let label = if addr_part.trim().is_empty() {
+        None
+    } else {
+        let label_part = addr_part.trim();
+        if let Some(space_idx) = label_part.rfind(' ') {
+            let addr_str = &label_part[..space_idx];
+            let label_name = label_part[space_idx + 1..].trim();
+
+            if !addr_str.is_empty() {
+                parse_address(addr_str)?;
+            }
+
+            Some(label_name.to_string())
+        } else if label_part.starts_with('t') {
+            Some(label_part[1..].trim().to_string())
+        } else {
+            parse_address(label_part)?;
+            None
+        }
+    };
+
+    Ok(SedCommand::Test { label })
+}
+
+// Phase 5: Parse test false branch command (T [label])
+fn parse_test_false(cmd: &str) -> Result<SedCommand> {
+    let cmd = cmd.trim();
+    let addr_part = &cmd[..cmd.len() - 1]; // Remove 'T'
+
+    // Same logic as branch, but for 'T' command
+    let label = if addr_part.trim().is_empty() {
+        None
+    } else {
+        let label_part = addr_part.trim();
+        if let Some(space_idx) = label_part.rfind(' ') {
+            let addr_str = &label_part[..space_idx];
+            let label_name = label_part[space_idx + 1..].trim();
+
+            if !addr_str.is_empty() {
+                parse_address(addr_str)?;
+            }
+
+            Some(label_name.to_string())
+        } else if label_part.starts_with('T') {
+            Some(label_part[1..].trim().to_string())
+        } else {
+            parse_address(label_part)?;
+            None
+        }
+    };
+
+    Ok(SedCommand::TestFalse { label })
 }
 
 #[cfg(test)]

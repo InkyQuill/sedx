@@ -168,6 +168,19 @@ impl Parser {
                     }),
                 })
             }
+            // Phase 5: Flow control commands
+            LegacySedCommand::Label { name } => {
+                Ok(Command::Label { name })
+            }
+            LegacySedCommand::Branch { label } => {
+                Ok(Command::Branch { label })
+            }
+            LegacySedCommand::Test { label } => {
+                Ok(Command::Test { label })
+            }
+            LegacySedCommand::TestFalse { label } => {
+                Ok(Command::TestFalse { label })
+            }
         }
     }
 

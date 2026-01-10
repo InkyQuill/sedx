@@ -1180,7 +1180,8 @@ impl FileProcessor {
                     // Supported
                 }
                 // Unsupported commands (fall back to batch processing)
-                Insert { .. } | Append { .. } | Change { .. } | Group { .. } => {
+                Insert { .. } | Append { .. } | Change { .. } | Group { .. } |
+                Label { .. } | Branch { .. } | Test { .. } | TestFalse { .. } => {
                     return false;
                 }
             }
@@ -1505,6 +1506,11 @@ impl FileProcessor {
                     Some(addr) => self.address_matches_cycle(addr, state),
                 }
             }
+
+            // Phase 5: Flow control commands (always applicable, they control execution)
+            Command::Label { .. } | Command::Branch { .. } | Command::Test { .. } | Command::TestFalse { .. } => {
+                true
+            }
         }
     }
 
@@ -1706,6 +1712,28 @@ impl FileProcessor {
             // q/Q commands: quit (matches execute.c:1504, 1511)
             Command::Quit { .. } => Ok(CycleResult::Quit(0)),
             Command::QuitWithoutPrint { .. } => Ok(CycleResult::Quit(0)),
+
+            // Phase 5: Flow control commands (basic implementation)
+            // TODO: Implement proper branching with label registry and program counter
+            Command::Label { .. } => {
+                // Label is a no-op in execution (just marks a position)
+                Ok(CycleResult::Continue)
+            }
+            Command::Branch { .. } => {
+                // For now, just continue - proper branching requires program counter
+                // TODO: Implement branch to label / end of script
+                Ok(CycleResult::Continue)
+            }
+            Command::Test { .. } => {
+                // For now, just continue - proper test branching requires substitution flag tracking
+                // TODO: Implement test branch if substitution was made
+                Ok(CycleResult::Continue)
+            }
+            Command::TestFalse { .. } => {
+                // For now, just continue - proper test branching requires substitution flag tracking
+                // TODO: Implement test branch if NO substitution was made
+                Ok(CycleResult::Continue)
+            }
 
             // For now, delegate other commands to existing implementation
             // TODO: Port all commands to cycle model
@@ -1940,6 +1968,12 @@ impl FileProcessor {
             }
             Command::DeleteFirstLine { range } => {
                 self.apply_delete_first_line(lines, range)?;
+            }
+            // Phase 5: Flow control commands (delegated to cycle-based processing)
+            // These commands are not supported in legacy batch mode
+            Command::Label { .. } | Command::Branch { .. } | Command::Test { .. } | Command::TestFalse { .. } => {
+                // Flow control commands require cycle-based execution
+                // For now, just continue - they'll be handled properly in cycle mode
             }
         }
         Ok(true)

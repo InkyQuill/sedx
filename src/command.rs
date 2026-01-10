@@ -104,6 +104,29 @@ pub enum Command {
     DeleteFirstLine {
         range: Option<(Address, Address)>,
     },
+
+    /// Label definition (Phase 5): :label - defines a branch target
+    Label {
+        name: String,
+    },
+
+    /// Branch (Phase 5): b [label] - unconditional branch to label
+    /// If no label specified, branches to end of script
+    Branch {
+        label: Option<String>,
+    },
+
+    /// Test branch (Phase 5): t [label] - branch if substitution made
+    /// Branches to label if a substitution was made since last input
+    Test {
+        label: Option<String>,
+    },
+
+    /// Test false branch (Phase 5): T [label] - branch if NO substitution
+    /// Branches to label if NO substitution was made since last input
+    TestFalse {
+        label: Option<String>,
+    },
 }
 
 /// Substitution flags (unified across sed and sd)
