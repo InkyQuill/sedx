@@ -63,6 +63,11 @@ struct Cli {
     #[arg(help = "Add a sed expression (can be specified multiple times)\nExpressions are applied in the order given\nExample: sedx -e 's/foo/bar/' -e 's/baz/qux/' file.txt")]
     expressions: Vec<String>,
 
+    /// Read script from file
+    #[arg(short = 'f', long = "file", value_name = "SCRIPT_FILE")]
+    #[arg(help = "Read sed script from a file\nThe file should contain sed commands, one per line\nSupports shebang: #!/usr/bin/sedx -f\nExample: sedx -f script.sed file.txt")]
+    script_file: Option<String>,
+
     /// Files to process
     #[arg(value_name = "FILE")]
     files: Vec<String>,
@@ -317,6 +322,36 @@ EXAMPLES:
     },
 }
 
+/// Read sed script from file and extract expressions
+/// Skips empty lines, comments, and shebang lines
+fn read_script_file(path: &str) -> Result<Vec<String>> {
+    use std::fs;
+
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read script file: {}", path))?;
+
+    let mut expressions = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        // Skip empty lines
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Skip comments and shebang
+        if trimmed.starts_with('#') {
+            continue;
+        }
+
+        // Add the expression
+        expressions.push(trimmed.to_string());
+    }
+
+    Ok(expressions)
+}
+
 pub fn parse_args() -> Result<Args> {
     let cli = Cli::parse();
 
@@ -333,8 +368,35 @@ pub fn parse_args() -> Result<Args> {
             BackupAction::Prune { keep, keep_days, force } => Ok(Args::BackupPrune { keep, keep_days, force }),
         },
         None => {
-            // Combine expressions from -e flags and/or positional argument
-            let expression = if !cli.expressions.is_empty() {
+            // Combine expressions from script file (-f), -e flags, and/or positional argument
+            let (expression, files) = if let Some(script_path) = &cli.script_file {
+                // When using -f flag, positional arguments are files, not expressions
+                // Read expressions from script file
+                let script_exprs = read_script_file(script_path)?;
+
+                // Combine script file expressions with -e flags
+                let mut all_exprs = script_exprs;
+
+                // Add -e expressions if provided
+                if !cli.expressions.is_empty() {
+                    all_exprs.extend(cli.expressions.clone());
+                }
+
+                // If a positional expression was provided, treat it as a file (not an expression)
+                // This handles: sedx -f script.sed file.txt
+                let mut files = cli.files.clone();
+                if let Some(pos_expr) = &cli.expression {
+                    files.push(pos_expr.clone());
+                }
+
+                if all_exprs.is_empty() {
+                    anyhow::bail!("Script file '{}' is empty or contains no valid commands", script_path);
+                }
+
+                // Join with semicolons (sed syntax for multiple commands)
+                let expr = all_exprs.join("; ");
+                (expr, files)
+            } else if !cli.expressions.is_empty() {
                 // -e flags were provided, combine them with semicolons
                 let mut exprs = cli.expressions.clone();
 
@@ -344,11 +406,13 @@ pub fn parse_args() -> Result<Args> {
                 }
 
                 // Join with semicolons (sed syntax for multiple commands)
-                exprs.join("; ")
+                let expr = exprs.join("; ");
+                (expr, cli.files.clone())
             } else {
-                // No -e flags, use positional expression
-                cli.expression
-                    .context("Missing sed expression. Usage: sedx 's/old/new/g' file.txt")?
+                // No -e or -f flags, use positional expression
+                let expr = cli.expression
+                    .context("Missing sed expression. Usage: sedx 's/old/new/g' file.txt or sedx -f script.sed file.txt")?;
+                (expr, cli.files.clone())
             };
 
             // Note: Empty files vector means read from stdin (like sed)
@@ -382,7 +446,7 @@ pub fn parse_args() -> Result<Args> {
 
             Ok(Args::Execute {
                 expression,
-                files: cli.files,
+                files,
                 dry_run: cli.dry_run,
                 interactive: cli.interactive,
                 context,
