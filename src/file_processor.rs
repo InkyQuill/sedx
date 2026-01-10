@@ -127,6 +127,12 @@ struct CycleState {
 
     /// Mixed range states for tracking complex ranges (Chunk 8)
     mixed_range_states: HashMap<MixedRangeKey, MixedRangeState>,
+
+    /// Line number range states (for 1,3 ranges)
+    /// Maps (start_line, end_line) -> (in_range, ended)
+    /// in_range: true if we're currently inside the range
+    /// ended: true if we've passed the end of the range
+    line_range_states: HashMap<(usize, usize), (bool, bool)>,
 }
 
 impl CycleState {
@@ -140,6 +146,7 @@ impl CycleState {
             line_iter: LineIterator::new(lines),
             pattern_range_states: HashMap::new(),
             mixed_range_states: HashMap::new(),
+            line_range_states: HashMap::new(),
         }
     }
 }
@@ -1328,10 +1335,13 @@ impl FileProcessor {
             state.pattern_space = line;
             state.line_num += 1;
 
+            // Clone commands to avoid borrow checker issues
+            let commands = self.commands.clone();
+
             // Inner loop: apply commands to pattern space (matches execute.c:1289)
-            'cycle: for cmd in &self.commands {
+            'cycle: for cmd in &commands {
                 // Check if command applies to current cycle state
-                if !self.should_apply_to_cycle(cmd, &state) {
+                if !self.should_apply_to_cycle(cmd, &mut state) {
                     continue;
                 }
 
@@ -1388,40 +1398,231 @@ impl FileProcessor {
     }
 
     /// Check if command applies to current cycle state (address matching)
-    fn should_apply_to_cycle(&self, cmd: &Command, _state: &CycleState) -> bool {
+    fn should_apply_to_cycle(&mut self, cmd: &Command, state: &mut CycleState) -> bool {
+        // Helper to check if a single address matches the current line
+        let address_matches = |addr: &Address| -> bool {
+            self.address_matches_cycle(addr, state)
+        };
+
         match cmd {
-            // Commands with Option<range> - may or may not have range
-            Command::Substitution { .. }
-            | Command::Next { .. }
-            | Command::NextAppend { .. }
-            | Command::Hold { .. }
-            | Command::HoldAppend { .. }
-            | Command::Get { .. }
-            | Command::GetAppend { .. }
-            | Command::Exchange { .. }
-            | Command::Group { .. } => {
-                // TODO: Implement proper range checking
-                true
+            // Commands with Option<range>
+            Command::Substitution { range, .. } => {
+                match range {
+                    None => true,  // No range - applies to all lines
+                    Some((start, end)) => {
+                        // Check if current line is within the range
+                        self.check_range_inclusive(state, start, end)
+                    }
+                }
+            }
+
+            Command::Next { range } => {
+                match range {
+                    None => true,
+                    Some((start, end)) => self.check_range_inclusive(state, start, end),
+                }
+            }
+
+            Command::NextAppend { range } => {
+                match range {
+                    None => true,
+                    Some((start, end)) => self.check_range_inclusive(state, start, end),
+                }
+            }
+
+            Command::Hold { range } => {
+                match range {
+                    None => true,
+                    Some((start, end)) => self.check_range_inclusive(state, start, end),
+                }
+            }
+
+            Command::HoldAppend { range } => {
+                match range {
+                    None => true,
+                    Some((start, end)) => self.check_range_inclusive(state, start, end),
+                }
+            }
+
+            Command::Get { range } => {
+                match range {
+                    None => true,
+                    Some((start, end)) => self.check_range_inclusive(state, start, end),
+                }
+            }
+
+            Command::GetAppend { range } => {
+                match range {
+                    None => true,
+                    Some((start, end)) => self.check_range_inclusive(state, start, end),
+                }
+            }
+
+            Command::Exchange { range } => {
+                match range {
+                    None => true,
+                    Some((start, end)) => self.check_range_inclusive(state, start, end),
+                }
+            }
+
+            Command::Group { range, .. } => {
+                // Groups don't support cycle-based yet (fall back to batch)
+                false
             }
 
             // Commands with required range (tuple, not Option)
-            Command::Delete { .. }
-            | Command::Print { .. }
-            | Command::PrintFirstLine { .. }
-            | Command::DeleteFirstLine { .. } => {
-                // TODO: Implement proper range checking
-                true
+            Command::Delete { range } => {
+                self.check_range_inclusive(state, &range.0, &range.1)
             }
 
-            // Commands that handle their own address checking
+            Command::Print { range } => {
+                self.check_range_inclusive(state, &range.0, &range.1)
+            }
+
+            Command::PrintFirstLine { range } => {
+                match range {
+                    None => true,
+                    Some((start, end)) => self.check_range_inclusive(state, start, end),
+                }
+            }
+
+            Command::DeleteFirstLine { range } => {
+                match range {
+                    None => true,
+                    Some((start, end)) => self.check_range_inclusive(state, start, end),
+                }
+            }
+
+            // Insert/Append/Change handle their own addresses
             Command::Insert { .. } | Command::Append { .. } | Command::Change { .. } => {
                 true
             }
 
-            // Quit commands
-            Command::Quit { .. } | Command::QuitWithoutPrint { .. } => {
-                // TODO: Implement proper address checking
+            // Quit commands: check address if present
+            Command::Quit { address } | Command::QuitWithoutPrint { address } => {
+                match address {
+                    None => true,  // No address = quit immediately
+                    Some(addr) => self.address_matches_cycle(addr, state),
+                }
+            }
+        }
+    }
+
+    /// Check if an address matches the current cycle state
+    fn address_matches_cycle(&self, addr: &Address, state: &CycleState) -> bool {
+        match addr {
+            Address::LineNumber(n) => {
+                if *n == 0 {
+                    // Address 0 matches the "input before first line"
+                    state.line_num == 0
+                } else {
+                    state.line_num == *n
+                }
+            }
+
+            Address::Pattern(pattern) => {
+                // Check if current pattern space matches the pattern
+                if let Ok(re) = Regex::new(pattern) {
+                    re.is_match(&state.pattern_space)
+                } else {
+                    false
+                }
+            }
+
+            Address::FirstLine => state.line_num == 1,
+
+            Address::LastLine => {
+                // In cycle mode, we don't know the total line count yet
+                // For now, assume this matches (will be refined when needed)
                 true
+            }
+
+            Address::Negated(inner) => {
+                // Negation: match if inner address doesn't match
+                !self.address_matches_cycle(inner, state)
+            }
+
+            Address::Relative { base, offset } => {
+                // Resolve base address, then apply offset
+                let base_line = match base.as_ref() {
+                    Address::LineNumber(n) => *n as isize,
+                    _ => state.line_num as isize,
+                };
+
+                let target_line = base_line + *offset;
+                target_line == state.line_num as isize
+            }
+
+            Address::Step { start, step } => {
+                // Check if current line is in the stepping sequence
+                if state.line_num >= *start {
+                    (state.line_num - *start) % *step == 0
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
+    /// Check if current line is within a range [start, end]
+    /// Uses state tracking to handle ranges across cycles
+    fn check_range_inclusive(&mut self, state: &mut CycleState, start: &Address, end: &Address) -> bool {
+        match (start, end) {
+            // Line number range: 1,3
+            (Address::LineNumber(start_line), Address::LineNumber(end_line)) => {
+                // Special case: single line address (start == end)
+                if start_line == end_line {
+                    return state.line_num == *start_line;
+                }
+
+                // Multi-line range: use state tracking
+                let key = (*start_line, *end_line);
+                let (in_range, ended) = state.line_range_states
+                    .entry(key)
+                    .or_insert((false, false));
+
+                // If range has ended, stay ended
+                if *ended {
+                    return false;
+                }
+
+                // Check if we're entering the range
+                if state.line_num == *start_line {
+                    *in_range = true;
+                    return true;
+                }
+
+                // Check if we're exiting the range
+                if state.line_num == *end_line {
+                    *ended = true;
+                    return true;  // Include the end line
+                }
+
+                // Return true if we're currently in the range
+                *in_range
+            }
+
+            // Pattern range: /start/,/end/
+            (Address::Pattern(start_pat), Address::Pattern(end_pat)) => {
+                // Special case: same pattern for start and end
+                if start_pat == end_pat {
+                    return self.address_matches_cycle(start, state);
+                }
+
+                // For now, use simple stateless matching
+                // TODO: Add proper pattern range state tracking similar to streaming mode
+                let start_match = self.address_matches_cycle(start, state);
+                let end_match = self.address_matches_cycle(end, state);
+                start_match || end_match
+            }
+
+            // Mixed range: line,pattern or pattern,line
+            _ => {
+                // For now, use simple stateless matching
+                // TODO: Add proper mixed range state tracking
+                let start_match = self.address_matches_cycle(start, state);
+                let end_match = self.address_matches_cycle(end, state);
+                start_match || end_match
             }
         }
     }
@@ -1534,18 +1735,17 @@ impl FileProcessor {
     /// N command: append next line to pattern space
     /// Matches execute.c:1474-1489
     fn apply_next_append_cycle(&self, state: &mut CycleState) -> Result<CycleResult> {
-        // 1. Append newline separator
-        state.pattern_space.push('\n');
-
-        // 2. Read next line and append
+        // 1. Try to read next line first
         if let Some(next_line) = state.line_iter.read_next() {
+            // 2. Only append newline and line if we successfully read
+            state.pattern_space.push('\n');
             state.pattern_space.push_str(&next_line);
             state.line_num += 1;
             Ok(CycleResult::Continue)
         } else {
-            // At EOF: remove appended newline
-            state.pattern_space.pop();
-            Ok(CycleResult::DeleteLine)
+            // At EOF: don't modify pattern space, just continue
+            // GNU sed doesn't add a newline at EOF
+            Ok(CycleResult::Continue)
         }
     }
 
@@ -1556,10 +1756,8 @@ impl FileProcessor {
         if let Some(idx) = state.pattern_space.find('\n') {
             // Print text up to first newline
             state.side_effects.push(state.pattern_space[..idx].to_string());
-        } else {
-            // No newline: print entire pattern space
-            state.side_effects.push(state.pattern_space.clone());
         }
+        // If no newline, P command does nothing (GNU sed behavior)
         Ok(CycleResult::Continue)
     }
 
