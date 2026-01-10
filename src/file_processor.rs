@@ -1193,6 +1193,25 @@ impl FileProcessor {
                 // Always stop processing after quit
                 return Ok(false);
             }
+            // Phase 4: Q command (quit without printing)
+            Command::QuitWithoutPrint { address } => {
+                // Q command: quit without printing current pattern space
+                // For stdin mode: clear all lines to prevent output
+                // For file mode: same as q (truncates file)
+                if let Some(addr) = address {
+                    let idx = self.resolve_address(addr, lines, 0)?;
+                    if idx < lines.len() {
+                        // For Q, we need to keep lines up to but NOT including the quit line
+                        // This prevents the quit line from being printed
+                        lines.truncate(idx);
+                    }
+                } else {
+                    // Quit immediately - clear all lines WITHOUT printing
+                    lines.clear();
+                }
+                // Always stop processing after quit
+                return Ok(false);
+            }
             Command::Group { range, commands } => {
                 // Group needs to handle things differently since it's recursive
                 // Reconstruct commands as a vector we can use

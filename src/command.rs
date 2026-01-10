@@ -31,6 +31,11 @@ pub enum Command {
         address: Option<Address>,
     },
 
+    /// Quit without printing (sed: 10Q) - Phase 4
+    QuitWithoutPrint {
+        address: Option<Address>,
+    },
+
     /// Insert text before line (sed: 5i\text)
     Insert {
         text: String,

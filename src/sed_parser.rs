@@ -29,6 +29,10 @@ pub enum SedCommand {
     Quit {
         address: Option<Address>, // q or 10q or /pattern/q
     },
+    // Phase 4: Quit without printing
+    QuitWithoutPrint {
+        address: Option<Address>, // Q or 10Q or /pattern/Q
+    },
     Group {
         range: Option<(Address, Address)>, // Optional range for the group
         commands: Vec<SedCommand>, // Commands to execute
@@ -196,7 +200,10 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
     }
 
     // Determine command type by looking at the last character or special patterns
-    if cmd.ends_with('q') && !cmd.starts_with('s') {
+    if cmd.ends_with('Q') && !cmd.starts_with('s') {
+        // Quit without printing command (Phase 4)
+        parse_quit_without_print(cmd)
+    } else if cmd.ends_with('q') && !cmd.starts_with('s') {
         // Quit command
         parse_quit(cmd)
     } else if cmd.ends_with('d') {
@@ -221,6 +228,7 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
 
         match command_char {
             's' => parse_substitution(cmd),
+            'Q' => parse_quit_without_print(cmd),
             'q' => parse_quit(cmd),
             'd' => parse_delete(cmd),
             'p' => parse_print(cmd),
@@ -404,6 +412,26 @@ fn parse_quit(cmd: &str) -> Result<SedCommand> {
     // '10q' or '/pattern/q' - quit at that address
     let addr = parse_address(addr_part)?;
     Ok(SedCommand::Quit {
+        address: Some(addr),
+    })
+}
+
+// Phase 4: Parse Q command (quit without printing)
+fn parse_quit_without_print(cmd: &str) -> Result<SedCommand> {
+    let cmd = cmd.trim();
+    let addr_part = &cmd[..cmd.len() - 1]; // Remove 'Q'
+
+    // Check if there's an address
+    if addr_part.trim().is_empty() {
+        // Just 'Q' - quit immediately without printing
+        return Ok(SedCommand::QuitWithoutPrint {
+            address: None,
+        });
+    }
+
+    // '10Q' or '/pattern/Q' - quit at that address without printing
+    let addr = parse_address(addr_part)?;
+    Ok(SedCommand::QuitWithoutPrint {
         address: Some(addr),
     })
 }

@@ -69,6 +69,11 @@ impl Parser {
                     address: address.map(|a| self.convert_address(a)),
                 })
             }
+            LegacySedCommand::QuitWithoutPrint { address } => {
+                Ok(Command::QuitWithoutPrint {
+                    address: address.map(|a| self.convert_address(a)),
+                })
+            }
             LegacySedCommand::Insert { text, address } => {
                 Ok(Command::Insert {
                     text,
