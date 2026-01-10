@@ -847,18 +847,12 @@ impl StreamProcessor {
                     // Unchanged line - add to buffer
                     self.context_buffer.push_back((line_num, processed_line, change_type));
 
-                    // Keep buffer size limited to context_size * 2
-                    // (we may need up to context_size lines before a change)
+                    // Keep buffer size limited to context_size
+                    // In streaming mode, we only show context around changes, not all lines
                     while self.context_buffer.len() > self.context_size {
-                        // Buffer too full - remove oldest and add to changes
-                        if let Some(front) = self.context_buffer.pop_front() {
-                            changes.push(LineChange {
-                                line_number: front.0,
-                                change_type: front.2,
-                                content: front.1,
-                                old_content: None,
-                            });
-                        }
+                        // Buffer too full - remove oldest WITHOUT adding to changes
+                        // This ensures only changed lines + nearby context are in the diff
+                        self.context_buffer.pop_front();
                     }
                 }
 
