@@ -426,6 +426,8 @@ fn commands_can_modify_files(commands: &[crate::command::Command]) -> bool {
             | Command::Next { .. } | Command::NextAppend { .. } | Command::PrintFirstLine { .. }
             // Phase 5: Flow control commands don't modify files
             | Command::Label { .. } | Command::Branch { .. } | Command::Test { .. } | Command::TestFalse { .. }
+            // Phase 5: Print commands don't modify files (they write to stdout)
+            | Command::PrintLineNumber { .. } | Command::PrintFilename { .. }
             => continue,  // Skip read-only commands, keep checking
 
             // Commands that MIGHT modify files
@@ -435,6 +437,7 @@ fn commands_can_modify_files(commands: &[crate::command::Command]) -> bool {
             | Command::GetAppend { .. } | Command::Exchange { .. }
             | Command::Group { .. } | Command::DeleteFirstLine { .. }
             | Command::ReadFile { .. } | Command::WriteFile { .. } | Command::ReadLine { .. } | Command::WriteFirstLine { .. }
+            | Command::ClearPatternSpace { .. }
             => return true,  // Found a modifying command
         }
     }

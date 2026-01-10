@@ -99,6 +99,16 @@ pub enum SedCommand {
         filename: String, // W filename - write first line to file
         range: Option<Address>, // Optional address for write
     },
+    // Phase 5: Additional commands
+    PrintLineNumber {
+        range: Option<Address>, // = - print line number (optional address)
+    },
+    PrintFilename {
+        range: Option<Address>, // F - print filename (optional address)
+    },
+    ClearPatternSpace {
+        range: Option<Address>, // z - clear pattern space (optional address)
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -318,6 +328,9 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
             'R' => parse_read_line(cmd),
             'w' => parse_write_file(cmd),
             'W' => parse_write_first_line(cmd),
+            '=' => parse_print_line_number(cmd),
+            'F' => parse_print_filename(cmd),
+            'z' => parse_clear_pattern_space(cmd),
             _ => {
                 Err(anyhow!("Unknown sed command: {}", cmd))
             }
@@ -1124,6 +1137,66 @@ fn parse_write_first_line(cmd: &str) -> Result<SedCommand> {
         filename: filename.to_string(),
         range,
     })
+}
+
+// Phase 5: Parse print line number command (=)
+fn parse_print_line_number(cmd: &str) -> Result<SedCommand> {
+    let cmd = cmd.trim();
+
+    // Find the '=' command character
+    let eq_pos = cmd.find('=').ok_or_else(|| anyhow!("Print line number command missing '='"))?;
+
+    // Split into: address_part (before '=') and the rest
+    let address_part = &cmd[..eq_pos];
+
+    // Parse the optional address from address_part
+    let range = if address_part.trim().is_empty() {
+        None
+    } else {
+        Some(parse_address(address_part.trim())?)
+    };
+
+    Ok(SedCommand::PrintLineNumber { range })
+}
+
+// Phase 5: Parse print filename command (F)
+fn parse_print_filename(cmd: &str) -> Result<SedCommand> {
+    let cmd = cmd.trim();
+
+    // Find the 'F' command character
+    let f_pos = cmd.find('F').ok_or_else(|| anyhow!("Print filename command missing 'F'"))?;
+
+    // Split into: address_part (before 'F') and the rest
+    let address_part = &cmd[..f_pos];
+
+    // Parse the optional address from address_part
+    let range = if address_part.trim().is_empty() {
+        None
+    } else {
+        Some(parse_address(address_part.trim())?)
+    };
+
+    Ok(SedCommand::PrintFilename { range })
+}
+
+// Phase 5: Parse clear pattern space command (z)
+fn parse_clear_pattern_space(cmd: &str) -> Result<SedCommand> {
+    let cmd = cmd.trim();
+
+    // Find the 'z' command character
+    let z_pos = cmd.find('z').ok_or_else(|| anyhow!("Clear pattern space command missing 'z'"))?;
+
+    // Split into: address_part (before 'z') and the rest
+    let address_part = &cmd[..z_pos];
+
+    // Parse the optional address from address_part
+    let range = if address_part.trim().is_empty() {
+        None
+    } else {
+        Some(parse_address(address_part.trim())?)
+    };
+
+    Ok(SedCommand::ClearPatternSpace { range })
 }
 
 #[cfg(test)]

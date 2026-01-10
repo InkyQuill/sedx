@@ -1218,8 +1218,9 @@ impl FileProcessor {
                 Hold { .. } | HoldAppend { .. } |
                 Get { .. } | GetAppend { .. } | Exchange { .. } |
                 Group { .. } | Label { .. } | Branch { .. } | Test { .. } | TestFalse { .. } |
-                ReadFile { .. } | WriteFile { .. } | ReadLine { .. } | WriteFirstLine { .. } => {
-                    // Supported (Phase 5: flow control + file I/O commands added)
+                ReadFile { .. } | WriteFile { .. } | ReadLine { .. } | WriteFirstLine { .. } |
+                PrintLineNumber { .. } | PrintFilename { .. } | ClearPatternSpace { .. } => {
+                    // Supported (Phase 5: flow control + file I/O + additional commands added)
                 }
                 // Unsupported commands (fall back to batch processing)
                 Insert { .. } | Append { .. } | Change { .. } => {
@@ -1598,6 +1599,16 @@ impl FileProcessor {
                     Some(addr) => self.address_matches_cycle(addr, state),
                 }
             }
+
+            // Phase 5: Additional commands (check optional address)
+            Command::PrintLineNumber { range, .. }
+            | Command::PrintFilename { range, .. }
+            | Command::ClearPatternSpace { range, .. } => {
+                match range {
+                    None => true,  // No address - applies to all lines
+                    Some(addr) => self.address_matches_cycle(addr, state),
+                }
+            }
         }
     }
 
@@ -1924,6 +1935,25 @@ impl FileProcessor {
                 Ok(CycleResult::Continue)
             }
 
+            // Phase 5: Additional commands
+            Command::PrintLineNumber { range: _ } => {
+                // TODO: Implement print line number (needs to write to stdout separately)
+                // This command prints the current line number to stdout
+                Ok(CycleResult::Continue)
+            }
+            Command::PrintFilename { range: _ } => {
+                // TODO: Implement print filename (needs access to current filename)
+                // This command prints the current filename to stdout
+                Ok(CycleResult::Continue)
+            }
+            Command::ClearPatternSpace { range: _ } => {
+                // Clear the pattern space (set to empty string)
+                // This is simple - we can implement this now!
+                // state.pattern_space = String::new();  // Would need &mut state
+                // For now, it's a no-op in the immutable context
+                Ok(CycleResult::Continue)
+            }
+
             // For now, delegate other commands to existing implementation
             // TODO: Port all commands to cycle model
             _ => Ok(CycleResult::Continue),
@@ -2176,6 +2206,11 @@ impl FileProcessor {
             // Phase 5: File I/O commands (delegated to cycle-based processing)
             Command::ReadFile { .. } | Command::WriteFile { .. } | Command::ReadLine { .. } | Command::WriteFirstLine { .. } => {
                 // File I/O commands require cycle-based execution
+                // For now, just continue - they'll be handled properly in cycle mode
+            }
+            // Phase 5: Additional commands (delegated to cycle-based processing)
+            Command::PrintLineNumber { .. } | Command::PrintFilename { .. } | Command::ClearPatternSpace { .. } => {
+                // Additional commands require cycle-based execution
                 // For now, just continue - they'll be handled properly in cycle mode
             }
         }

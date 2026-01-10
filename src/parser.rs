@@ -220,6 +220,21 @@ impl Parser {
                     range: range.map(|a| self.convert_address(a)),
                 })
             }
+            LegacySedCommand::PrintLineNumber { range } => {
+                Ok(Command::PrintLineNumber {
+                    range: range.map(|a| self.convert_address(a)),
+                })
+            }
+            LegacySedCommand::PrintFilename { range } => {
+                Ok(Command::PrintFilename {
+                    range: range.map(|a| self.convert_address(a)),
+                })
+            }
+            LegacySedCommand::ClearPatternSpace { range } => {
+                Ok(Command::ClearPatternSpace {
+                    range: range.map(|a| self.convert_address(a)),
+                })
+            }
         }
     }
 

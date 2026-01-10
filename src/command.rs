@@ -161,6 +161,24 @@ pub enum Command {
         filename: String,
         range: Option<Address>,
     },
+
+    /// Print line number (Phase 5): = - print current line number to stdout
+    /// Can have optional address: addr =
+    PrintLineNumber {
+        range: Option<Address>,
+    },
+
+    /// Print filename (Phase 5): F - print current filename to stdout
+    /// GNU sed extension
+    PrintFilename {
+        range: Option<Address>,
+    },
+
+    /// Clear pattern space (Phase 5): z - clear pattern space (GNU sed extension)
+    /// Sets pattern space to empty string
+    ClearPatternSpace {
+        range: Option<Address>,
+    },
 }
 
 /// Substitution flags (unified across sed and sd)

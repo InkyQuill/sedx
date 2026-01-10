@@ -103,6 +103,14 @@ pub fn can_stream(commands: &[Command]) -> bool {
             | Command::WriteFirstLine { .. } => {
                 return false;
             }
+            // Phase 5: Additional commands (print line number, print filename, clear pattern space)
+            // PrintLineNumber and PrintFilename write to stdout separately
+            // ClearPatternSpace modifies pattern space state
+            Command::PrintLineNumber { .. }
+            | Command::PrintFilename { .. }
+            | Command::ClearPatternSpace { .. } => {
+                return false;
+            }
         }
     }
     true
