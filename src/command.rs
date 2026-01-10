@@ -112,20 +112,26 @@ pub enum Command {
 
     /// Branch (Phase 5): b [label] - unconditional branch to label
     /// If no label specified, branches to end of script
+    /// Can have optional address/range: addr b or addr1,addr2 b label
     Branch {
         label: Option<String>,
+        range: Option<(Address, Address)>,
     },
 
     /// Test branch (Phase 5): t [label] - branch if substitution made
     /// Branches to label if a substitution was made since last input
+    /// Can have optional address/range: addr t or addr1,addr2 t label
     Test {
         label: Option<String>,
+        range: Option<(Address, Address)>,
     },
 
     /// Test false branch (Phase 5): T [label] - branch if NO substitution
     /// Branches to label if NO substitution was made since last input
+    /// Can have optional address/range: addr T or addr1,addr2 T label
     TestFalse {
         label: Option<String>,
+        range: Option<(Address, Address)>,
     },
 }
 

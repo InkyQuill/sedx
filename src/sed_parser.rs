@@ -72,12 +72,15 @@ pub enum SedCommand {
     },
     Branch {
         label: Option<String>, // b [label] - branch to label (end of script if None)
+        range: Option<(Address, Address)>, // Optional address/range for branch
     },
     Test {
         label: Option<String>, // t [label] - branch if substitution made
+        range: Option<(Address, Address)>, // Optional address/range for test
     },
     TestFalse {
         label: Option<String>, // T [label] - branch if NO substitution made
+        range: Option<(Address, Address)>, // Optional address/range for test false
     },
 }
 
@@ -212,12 +215,46 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
         }
     }
 
-    // Determine command type by looking at the last character or special patterns
-    // Check for label first (starts with :)
+    // Phase 5: Check for flow control commands BEFORE other commands
+    // because b/t/T may have labels after them (not at the end)
     if cmd.starts_with(':') {
         // Label definition (Phase 5)
-        parse_label(cmd)
-    } else if cmd.ends_with('Q') && !cmd.starts_with('s') {
+        return parse_label(cmd);
+    }
+
+    // Check for b/t/T commands anywhere in the command
+    // Examples: "b", "b label", "10b", "10b label", "/pat/b label"
+    let trimmed = cmd.trim();
+    if trimmed.contains('b') || trimmed.contains('t') || trimmed.contains('T') {
+        // Verify it's actually a flow control command by checking the position
+        // For "b", "b label", "10b", "10b label" - the b/t/T should be followed by space or end of string
+        let b_pos = trimmed.find('b');
+        let t_pos = trimmed.find('t');
+        let T_pos = trimmed.find('T');
+
+        // Find which position comes first
+        let min_pos = [b_pos, t_pos, T_pos].iter().filter_map(|&p| p).min();
+
+        if let Some(pos) = min_pos {
+            let char_at_pos = trimmed.chars().nth(pos).unwrap();
+            let rest = &trimmed[pos + 1..];
+
+            // Check if after b/t/T there's only whitespace, label, or end of string
+            if rest.trim().is_empty() || rest.starts_with(' ') {
+                // Definitely flow control
+                if char_at_pos == 'b' {
+                    return parse_branch(cmd);
+                } else if char_at_pos == 't' {
+                    return parse_test(cmd);
+                } else {
+                    return parse_test_false(cmd);
+                }
+            }
+        }
+    }
+
+    // Determine command type by looking at the last character or special patterns
+    if cmd.ends_with('Q') && !cmd.starts_with('s') {
         // Quit without printing command (Phase 4)
         parse_quit_without_print(cmd)
     } else if cmd.ends_with('q') && !cmd.starts_with('s') {
@@ -239,7 +276,7 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
         // Change command
         parse_change(cmd)
     } else {
-        // Try to determine by last character
+        // Try to determine by last character for other commands
         let command_char = cmd.chars().last()
             .ok_or_else(|| anyhow!("Empty command"))?;
 
@@ -260,9 +297,6 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
             'N' => parse_next_append(cmd),
             'P' => parse_print_first_line(cmd),
             'D' => parse_delete_first_line(cmd),
-            'b' => parse_branch(cmd),  // Phase 5
-            't' => parse_test(cmd),    // Phase 5
-            'T' => parse_test_false(cmd),  // Phase 5
             _ => {
                 Err(anyhow!("Unknown sed command: {}", cmd))
             }
@@ -858,98 +892,93 @@ fn parse_label(cmd: &str) -> Result<SedCommand> {
 // Phase 5: Parse branch command (b [label])
 fn parse_branch(cmd: &str) -> Result<SedCommand> {
     let cmd = cmd.trim();
-    let addr_part = &cmd[..cmd.len() - 1]; // Remove 'b'
 
-    // Check if there's a label
-    let label = if addr_part.trim().is_empty() {
+    // Find the 'b' command character
+    let b_pos = cmd.find('b').ok_or_else(|| anyhow!("Branch command missing 'b'"))?;
+
+    // Split into: address_part (before 'b') and rest_part (after 'b' including 'b')
+    let address_part = &cmd[..b_pos];
+    let rest_part = &cmd[b_pos..]; // Includes the 'b'
+
+    // Parse the optional range from address_part
+    let range = parse_optional_range(address_part)?;
+
+    // Extract label if present (after the 'b')
+    let label_part = &rest_part[1..]; // Skip the 'b'
+    let label = if label_part.trim().is_empty() {
         // Just 'b' - branch to end of script
         None
     } else {
-        // 'b label' or '10b label' - branch to label
-        let label_part = addr_part.trim();
-        // Check if there's an address part
-        if let Some(space_idx) = label_part.rfind(' ') {
-            // Has address: "10b label" or "/pattern/b label"
-            let addr_str = &label_part[..space_idx];
-            let label_name = label_part[space_idx + 1..].trim();
-
-            // Validate address if present
-            if !addr_str.is_empty() {
-                parse_address(addr_str)?;
-            }
-
+        // 'b label' or '10b label'
+        let label_name = label_part.trim();
+        if !label_name.is_empty() {
             Some(label_name.to_string())
-        } else if label_part.starts_with('b') {
-            // No address, just "b label"
-            Some(label_part[1..].trim().to_string())
         } else {
-            // Has address like "10b" with no label
-            parse_address(label_part)?;
             None
         }
     };
 
-    Ok(SedCommand::Branch { label })
+    Ok(SedCommand::Branch { label, range })
 }
 
 // Phase 5: Parse test branch command (t [label])
 fn parse_test(cmd: &str) -> Result<SedCommand> {
     let cmd = cmd.trim();
-    let addr_part = &cmd[..cmd.len() - 1]; // Remove 't'
 
-    // Same logic as branch, but for 't' command
-    let label = if addr_part.trim().is_empty() {
+    // Find the 't' command character
+    let t_pos = cmd.find('t').ok_or_else(|| anyhow!("Test command missing 't'"))?;
+
+    // Split into: address_part (before 't') and rest_part (after 't' including 't')
+    let address_part = &cmd[..t_pos];
+    let rest_part = &cmd[t_pos..]; // Includes the 't'
+
+    // Parse the optional range from address_part
+    let range = parse_optional_range(address_part)?;
+
+    // Extract label if present (after the 't')
+    let label_part = &rest_part[1..]; // Skip the 't'
+    let label = if label_part.trim().is_empty() {
         None
     } else {
-        let label_part = addr_part.trim();
-        if let Some(space_idx) = label_part.rfind(' ') {
-            let addr_str = &label_part[..space_idx];
-            let label_name = label_part[space_idx + 1..].trim();
-
-            if !addr_str.is_empty() {
-                parse_address(addr_str)?;
-            }
-
+        let label_name = label_part.trim();
+        if !label_name.is_empty() {
             Some(label_name.to_string())
-        } else if label_part.starts_with('t') {
-            Some(label_part[1..].trim().to_string())
         } else {
-            parse_address(label_part)?;
             None
         }
     };
 
-    Ok(SedCommand::Test { label })
+    Ok(SedCommand::Test { label, range })
 }
 
 // Phase 5: Parse test false branch command (T [label])
 fn parse_test_false(cmd: &str) -> Result<SedCommand> {
     let cmd = cmd.trim();
-    let addr_part = &cmd[..cmd.len() - 1]; // Remove 'T'
 
-    // Same logic as branch, but for 'T' command
-    let label = if addr_part.trim().is_empty() {
+    // Find the 'T' command character
+    let t_pos = cmd.find('T').ok_or_else(|| anyhow!("Test false command missing 'T'"))?;
+
+    // Split into: address_part (before 'T') and rest_part (after 'T' including 'T')
+    let address_part = &cmd[..t_pos];
+    let rest_part = &cmd[t_pos..]; // Includes the 'T'
+
+    // Parse the optional range from address_part
+    let range = parse_optional_range(address_part)?;
+
+    // Extract label if present (after the 'T')
+    let label_part = &rest_part[1..]; // Skip the 'T'
+    let label = if label_part.trim().is_empty() {
         None
     } else {
-        let label_part = addr_part.trim();
-        if let Some(space_idx) = label_part.rfind(' ') {
-            let addr_str = &label_part[..space_idx];
-            let label_name = label_part[space_idx + 1..].trim();
-
-            if !addr_str.is_empty() {
-                parse_address(addr_str)?;
-            }
-
+        let label_name = label_part.trim();
+        if !label_name.is_empty() {
             Some(label_name.to_string())
-        } else if label_part.starts_with('T') {
-            Some(label_part[1..].trim().to_string())
         } else {
-            parse_address(label_part)?;
             None
         }
     };
 
-    Ok(SedCommand::TestFalse { label })
+    Ok(SedCommand::TestFalse { label, range })
 }
 
 #[cfg(test)]

@@ -97,6 +97,10 @@ enum CycleResult {
     /// Pattern space has been modified (first line removed)
     RestartCycle,
 
+    /// Branch to specific command (Phase 5: b/t/T commands)
+    /// Contains the target program counter (command index)
+    Branch(usize),
+
     /// Quit processing immediately (q/Q commands)
     /// Returns exit code (0 for q, N for Q)
     Quit(i32),
@@ -133,6 +137,10 @@ struct CycleState {
     /// in_range: true if we're currently inside the range
     /// ended: true if we've passed the end of the range
     line_range_states: HashMap<(usize, usize), (bool, bool)>,
+
+    /// Substitution flag for t/T commands (Phase 5)
+    /// Set to true when any substitution succeeds, reset at start of each cycle
+    substitution_made: bool,
 }
 
 impl CycleState {
@@ -147,6 +155,7 @@ impl CycleState {
             pattern_range_states: HashMap::new(),
             mixed_range_states: HashMap::new(),
             line_range_states: HashMap::new(),
+            substitution_made: false,  // Phase 5: Initialize substitution flag
         }
     }
 }
@@ -197,6 +206,8 @@ pub struct FileProcessor {
     current_line_index: usize,       // Current line index in input (for n/N commands)
     // Cycle-based architecture (Phase 4 refactoring)
     no_default_output: bool,         // -n flag: suppress automatic output
+    // Phase 5: Flow control support
+    label_registry: HashMap<String, usize>,  // Maps label names to command indices
 }
 
 /// Result of applying a command in streaming mode
@@ -1144,6 +1155,9 @@ impl StreamProcessor {
 
 impl FileProcessor {
     pub fn new(commands: Vec<Command>) -> Self {
+        // Build label registry (Phase 5)
+        let label_registry = Self::build_label_registry(&commands);
+
         Self {
             commands,
             printed_lines: Vec::new(),
@@ -1151,7 +1165,27 @@ impl FileProcessor {
             pattern_space: None,
             current_line_index: 0,
             no_default_output: false,
+            label_registry,
         }
+    }
+
+    /// Build a registry mapping label names to command indices (Phase 5)
+    /// This allows the b/t/T commands to jump to specific commands
+    fn build_label_registry(commands: &[Command]) -> HashMap<String, usize> {
+        let mut registry = HashMap::new();
+
+        for (idx, cmd) in commands.iter().enumerate() {
+            if let Command::Label { name } = cmd {
+                // Register the label with the NEXT command's index
+                // Labels are placed BEFORE the command they label
+                // e.g., ":loop s/foo/bar/" - "loop" labels the s command
+                if idx + 1 < commands.len() {
+                    registry.insert(name.clone(), idx + 1);
+                }
+            }
+        }
+
+        registry
     }
 
     /// Set the -n flag (suppress automatic output)
@@ -1335,14 +1369,26 @@ impl FileProcessor {
         while let Some(line) = state.line_iter.current_line() {
             state.pattern_space = line;
             state.line_num += 1;
+            state.substitution_made = false;  // Phase 5: Reset substitution flag at start of cycle
 
             // Clone commands to avoid borrow checker issues
             let commands = self.commands.clone();
+            let num_commands = commands.len();
 
-            // Inner loop: apply commands to pattern space (matches execute.c:1289)
-            'cycle: for cmd in &commands {
+            // Inner loop: apply commands to pattern space using program counter (Phase 5)
+            let mut pc: usize = 0;  // Program counter
+            while pc < num_commands {
+                let cmd = &commands[pc];
+
+                // Skip Label commands (Phase 5: they're just markers)
+                if let Command::Label { .. } = cmd {
+                    pc += 1;
+                    continue;
+                }
+
                 // Check if command applies to current cycle state
                 if !self.should_apply_to_cycle(cmd, &mut state) {
+                    pc += 1;
                     continue;
                 }
 
@@ -1353,15 +1399,20 @@ impl FileProcessor {
                 match result {
                     CycleResult::Continue => {
                         // Continue to next command
+                        pc += 1;
+                    }
+                    CycleResult::Branch(target_pc) => {
+                        // Jump to target command (Phase 5: b/t/T commands)
+                        pc = target_pc;
                     }
                     CycleResult::DeleteLine => {
                         // End cycle, pattern space not printed (matches d command)
                         state.deleted = true;
-                        break 'cycle;
+                        break;
                     }
                     CycleResult::RestartCycle => {
                         // Restart command loop from beginning (matches D command)
-                        continue 'cycle;
+                        pc = 0;
                     }
                     CycleResult::Quit(_code) => {
                         // Add side effects before quitting
@@ -1507,9 +1558,21 @@ impl FileProcessor {
                 }
             }
 
-            // Phase 5: Flow control commands (always applicable, they control execution)
-            Command::Label { .. } | Command::Branch { .. } | Command::Test { .. } | Command::TestFalse { .. } => {
-                true
+            // Phase 5: Flow control commands (check range if present)
+            Command::Label { .. } => {
+                true  // Labels are always applicable
+            }
+            Command::Branch { range, .. }
+            | Command::Test { range, .. }
+            | Command::TestFalse { range, .. } => {
+                // Check if the range matches the current cycle
+                match range {
+                    None => true,  // No range - applies to all lines
+                    Some((start, end)) => {
+                        // Check if current line is within the range
+                        self.check_range_inclusive(state, start, end)
+                    }
+                }
             }
         }
     }
@@ -1713,26 +1776,74 @@ impl FileProcessor {
             Command::Quit { .. } => Ok(CycleResult::Quit(0)),
             Command::QuitWithoutPrint { .. } => Ok(CycleResult::Quit(0)),
 
-            // Phase 5: Flow control commands (basic implementation)
-            // TODO: Implement proper branching with label registry and program counter
+            // Phase 5: Flow control commands
             Command::Label { .. } => {
                 // Label is a no-op in execution (just marks a position)
                 Ok(CycleResult::Continue)
             }
-            Command::Branch { .. } => {
-                // For now, just continue - proper branching requires program counter
-                // TODO: Implement branch to label / end of script
-                Ok(CycleResult::Continue)
+            Command::Branch { label, range: _ } => {
+                // b [label] - unconditional branch to label or end of script
+                match label {
+                    Some(label_name) => {
+                        // Branch to label
+                        if let Some(&target_pc) = self.label_registry.get(label_name) {
+                            Ok(CycleResult::Branch(target_pc))
+                        } else {
+                            // GNU sed: undefined label is treated as branch to end
+                            Ok(CycleResult::Branch(self.commands.len()))
+                        }
+                    }
+                    None => {
+                        // Branch to end of script
+                        Ok(CycleResult::Branch(self.commands.len()))
+                    }
+                }
             }
-            Command::Test { .. } => {
-                // For now, just continue - proper test branching requires substitution flag tracking
-                // TODO: Implement test branch if substitution was made
-                Ok(CycleResult::Continue)
+            Command::Test { label, range: _ } => {
+                // t [label] - branch if substitution was made
+                if state.substitution_made {
+                    match label {
+                        Some(label_name) => {
+                            // Branch to label
+                            if let Some(&target_pc) = self.label_registry.get(label_name) {
+                                Ok(CycleResult::Branch(target_pc))
+                            } else {
+                                // Undefined label: branch to end
+                                Ok(CycleResult::Branch(self.commands.len()))
+                            }
+                        }
+                        None => {
+                            // Branch to end of script
+                            Ok(CycleResult::Branch(self.commands.len()))
+                        }
+                    }
+                } else {
+                    // No substitution made: continue to next command
+                    Ok(CycleResult::Continue)
+                }
             }
-            Command::TestFalse { .. } => {
-                // For now, just continue - proper test branching requires substitution flag tracking
-                // TODO: Implement test branch if NO substitution was made
-                Ok(CycleResult::Continue)
+            Command::TestFalse { label, range: _ } => {
+                // T [label] - branch if NO substitution was made
+                if !state.substitution_made {
+                    match label {
+                        Some(label_name) => {
+                            // Branch to label
+                            if let Some(&target_pc) = self.label_registry.get(label_name) {
+                                Ok(CycleResult::Branch(target_pc))
+                            } else {
+                                // Undefined label: branch to end
+                                Ok(CycleResult::Branch(self.commands.len()))
+                            }
+                        }
+                        None => {
+                            // Branch to end of script
+                            Ok(CycleResult::Branch(self.commands.len()))
+                        }
+                    }
+                } else {
+                    // Substitution was made: continue to next command
+                    Ok(CycleResult::Continue)
+                }
             }
 
             // For now, delegate other commands to existing implementation
@@ -1854,13 +1965,22 @@ impl FileProcessor {
 
             if found {
                 state.pattern_space = result;
+                state.substitution_made = true;  // Phase 5: Mark substitution as successful
             }
         } else if global {
             // Replace all occurrences
+            let before = state.pattern_space.clone();
             state.pattern_space = re.replace_all(&state.pattern_space, replacement).to_string();
+            if state.pattern_space != before {
+                state.substitution_made = true;  // Phase 5: Mark substitution as successful
+            }
         } else {
             // Replace first occurrence only
+            let before = state.pattern_space.clone();
             state.pattern_space = re.replace(&state.pattern_space, replacement).to_string();
+            if state.pattern_space != before {
+                state.substitution_made = true;  // Phase 5: Mark substitution as successful
+            }
         }
 
         // Handle print flag (p flag in s///p)

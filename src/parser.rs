@@ -172,14 +172,29 @@ impl Parser {
             LegacySedCommand::Label { name } => {
                 Ok(Command::Label { name })
             }
-            LegacySedCommand::Branch { label } => {
-                Ok(Command::Branch { label })
+            LegacySedCommand::Branch { label, range } => {
+                Ok(Command::Branch {
+                    label,
+                    range: range.map(|(a, b)| {
+                        (self.convert_address(a), self.convert_address(b))
+                    }),
+                })
             }
-            LegacySedCommand::Test { label } => {
-                Ok(Command::Test { label })
+            LegacySedCommand::Test { label, range } => {
+                Ok(Command::Test {
+                    label,
+                    range: range.map(|(a, b)| {
+                        (self.convert_address(a), self.convert_address(b))
+                    }),
+                })
             }
-            LegacySedCommand::TestFalse { label } => {
-                Ok(Command::TestFalse { label })
+            LegacySedCommand::TestFalse { label, range } => {
+                Ok(Command::TestFalse {
+                    label,
+                    range: range.map(|(a, b)| {
+                        (self.convert_address(a), self.convert_address(b))
+                    }),
+                })
             }
         }
     }
