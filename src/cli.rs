@@ -102,6 +102,21 @@ struct Cli {
     #[arg(help = "Use Extended Regular Expressions (ERE)\nLike sed -E: ( ), { }, +, ?, |")]
     ere: bool,
 
+    /// Skip backup creation (requires --force)
+    #[arg(long = "no-backup", requires = "force")]
+    #[arg(help = "Skip creating a backup (requires --force)\n⚠️  USE WITH CAUTION: Changes cannot be undone!\nRecommended only for files under version control")]
+    no_backup: bool,
+
+    /// Force dangerous operations (use with --no-backup)
+    #[arg(long = "force", requires = "no_backup")]
+    #[arg(help = "Force dangerous operations (required for --no-backup)\nConfirms you understand the risks")]
+    force: bool,
+
+    /// Custom backup directory
+    #[arg(long, value_name = "DIR")]
+    #[arg(help = "Use custom directory for backups\nDefault: ~/.sedx/backups/\nUseful when backup partition is full")]
+    backup_dir: Option<String>,
+
     /// Subcommands
     #[command(subcommand)]
     command: Option<Commands>,
@@ -145,6 +160,118 @@ This helps with backup management and cleanup.
 EXAMPLES:
   sedx status                     Show backup status")]
     Status,
+
+    /// Manage backups
+    #[command(long_about = "Manage SedX backups.
+
+Provides subcommands for listing, restoring, removing, and pruning backups.
+
+EXAMPLES:
+  sedx backup list                 List all backups
+  sedx backup show <id>            Show backup details
+  sedx backup restore <id>         Restore from backup
+  sedx backup remove <id>          Remove a backup
+  sedx backup prune --keep=5       Keep only 5 most recent backups
+  sedx backup prune --keep-days=7  Keep only backups from last 7 days")]
+    Backup {
+        #[command(subcommand)]
+        action: BackupAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum BackupAction {
+    /// List all backups
+    #[command(long_about = "List all backups with details.
+
+Shows backup ID, timestamp, expression, and files for each backup.
+Most recent backups appear first.
+
+OPTIONS:
+  -v, --verbose    Show more details (file paths, sizes)
+
+EXAMPLES:
+  sedx backup list               List all backups
+  sedx backup list -v            List with verbose output")]
+    List {
+        /// Show more details (file paths, sizes)
+        #[arg(short, long)]
+        verbose: bool,
+    },
+
+    /// Show backup details
+    #[command(long_about = "Show detailed information about a specific backup.
+
+Displays the full metadata for a backup including expression, timestamp,
+and all files that were backed up.
+
+EXAMPLES:
+  sedx backup show 20250110-120000-abc123    Show specific backup")]
+    Show {
+        /// Backup ID
+        #[arg(value_name = "ID")]
+        id: String,
+    },
+
+    /// Restore from a backup
+    #[command(long_about = "Restore files from a backup.
+
+Restores all files to their state at the time of the backup.
+The backup is removed after successful restore.
+
+EXAMPLES:
+  sedx backup restore 20250110-120000-abc123    Restore from backup")]
+    Restore {
+        /// Backup ID
+        #[arg(value_name = "ID")]
+        id: String,
+    },
+
+    /// Remove a backup
+    #[command(long_about = "Remove a specific backup.
+
+Permanently deletes a backup and frees disk space.
+Use with caution - this cannot be undone.
+
+EXAMPLES:
+  sedx backup remove 20250110-120000-abc123    Remove backup")]
+    Remove {
+        /// Backup ID
+        #[arg(value_name = "ID")]
+        id: String,
+
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        force: bool,
+    },
+
+    /// Prune old backups
+    #[command(long_about = "Remove old backups, keeping only recent ones.
+
+Helps manage disk space by removing old backups.
+You can keep a certain number of recent backups, or backups from recent days.
+
+OPTIONS:
+  --keep=N         Keep only N most recent backups (default: 10)
+  --keep-days=N    Keep only backups from last N days
+
+EXAMPLES:
+  sedx backup prune --keep=5                 Keep only 5 most recent
+  sedx backup prune --keep-days=7            Keep only last 7 days
+  sedx backup prune --keep=5 --force         Skip confirmation")]
+    Prune {
+        /// Number of recent backups to keep
+        #[arg(long, value_name = "N")]
+        keep: Option<usize>,
+
+        /// Keep backups from last N days
+        #[arg(long, value_name = "N")]
+        keep_days: Option<usize>,
+
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        force: bool,
+    },
 }
 
 pub fn parse_args() -> Result<Args> {
@@ -154,6 +281,13 @@ pub fn parse_args() -> Result<Args> {
         Some(Commands::Rollback { id }) => Ok(Args::Rollback { id }),
         Some(Commands::History) => Ok(Args::History),
         Some(Commands::Status) => Ok(Args::Status),
+        Some(Commands::Backup { action }) => match action {
+            BackupAction::List { verbose } => Ok(Args::BackupList { verbose }),
+            BackupAction::Show { id } => Ok(Args::BackupShow { id }),
+            BackupAction::Restore { id } => Ok(Args::BackupRestore { id }),
+            BackupAction::Remove { id, force } => Ok(Args::BackupRemove { id, force }),
+            BackupAction::Prune { keep, keep_days, force } => Ok(Args::BackupPrune { keep, keep_days, force }),
+        },
         None => {
             let expression = cli
                 .expression
@@ -196,6 +330,8 @@ pub fn parse_args() -> Result<Args> {
                 context,
                 streaming,
                 regex_flavor,
+                no_backup: cli.no_backup,
+                backup_dir: cli.backup_dir,
             })
         }
     }
@@ -221,10 +357,30 @@ pub enum Args {
         context: usize,
         streaming: bool,
         regex_flavor: RegexFlavor,
+        no_backup: bool,
+        backup_dir: Option<String>,
     },
     Rollback {
         id: Option<String>,
     },
     History,
     Status,
+    BackupList {
+        verbose: bool,
+    },
+    BackupShow {
+        id: String,
+    },
+    BackupRestore {
+        id: String,
+    },
+    BackupRemove {
+        id: String,
+        force: bool,
+    },
+    BackupPrune {
+        keep: Option<usize>,
+        keep_days: Option<usize>,
+        force: bool,
+    },
 }

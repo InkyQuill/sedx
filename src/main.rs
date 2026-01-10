@@ -10,7 +10,7 @@ mod file_processor;
 mod parser;
 mod sed_parser;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use cli::{parse_args, Args, RegexFlavor};
 use command::{Command, Address};
 use parser::Parser;
@@ -30,12 +30,14 @@ fn main() -> Result<()> {
             context,
             streaming,
             regex_flavor,
+            no_backup,
+            backup_dir,
         } => {
             // Check if we're in stdin mode (no files specified)
             if files.is_empty() {
                 execute_stdin(&expression, regex_flavor)?;
             } else {
-                execute_command(&expression, &files, dry_run, interactive, context, streaming, regex_flavor)?;
+                execute_command(&expression, &files, dry_run, interactive, context, streaming, regex_flavor, no_backup, backup_dir)?;
             }
         }
         Args::Rollback { id } => {
@@ -46,6 +48,21 @@ fn main() -> Result<()> {
         }
         Args::Status => {
             show_status()?;
+        }
+        Args::BackupList { verbose } => {
+            backup_list(verbose)?;
+        }
+        Args::BackupShow { id } => {
+            backup_show(&id)?;
+        }
+        Args::BackupRestore { id } => {
+            backup_restore(&id)?;
+        }
+        Args::BackupRemove { id, force } => {
+            backup_remove(&id, force)?;
+        }
+        Args::BackupPrune { keep, keep_days, force } => {
+            backup_prune(keep, keep_days, force)?;
         }
     }
 
@@ -196,6 +213,8 @@ fn execute_command(
     context: usize,
     streaming: bool,
     regex_flavor: RegexFlavor,
+    no_backup: bool,
+    backup_dir: Option<String>,
 ) -> Result<()> {
     // Parse sed expression using unified parser
     let parser = Parser::new(regex_flavor);
@@ -304,11 +323,24 @@ fn execute_command(
         return Ok(());
     }
 
-    // Execute mode: apply with backup
-    let mut backup_manager = backup_manager::BackupManager::new()?;
+    // Execute mode: apply with backup (unless --no-backup --force)
+    let backup_id = if no_backup {
+        // Skip backup creation
+        println!("⚠️  Skipping backup (changes cannot be undone)");
+        None
+    } else {
+        // Create backup with custom or default directory
+        let mut backup_manager = if let Some(dir) = backup_dir {
+            backup_manager::BackupManager::with_directory(dir)?
+        } else {
+            backup_manager::BackupManager::new()?
+        };
 
-    // Create backup BEFORE applying changes
-    let backup_id = backup_manager.create_backup(expression, &file_paths)?;
+        // Create backup BEFORE applying changes
+        let id = backup_manager.create_backup(expression, &file_paths)?;
+        println!("✅ Backup created: {}", id);
+        Some(id)
+    };
 
     // Apply changes
     for file_path in &file_paths {
@@ -344,8 +376,13 @@ fn execute_command(
         }
     }
 
-    println!("\nBackup ID: {}", backup_id);
-    println!("Rollback with: sedx rollback {}", backup_id);
+    // Show rollback info only if backup was created
+    if let Some(id) = backup_id {
+        println!("\nBackup ID: {}", id);
+        println!("Rollback with: sedx rollback {}", id);
+    } else {
+        println!("\nNo backup created - changes cannot be undone");
+    }
 
     Ok(())
 }
@@ -396,6 +433,184 @@ fn show_status() -> Result<()> {
         println!("  ID: {}", last.id);
         println!("  Time: {}", last.timestamp.format("%Y-%m-%d %H:%M:%S"));
         println!("  Command: {}", last.expression);
+    }
+
+    Ok(())
+}
+
+// Backup subcommand handlers
+
+fn backup_list(verbose: bool) -> Result<()> {
+    let backup_manager = backup_manager::BackupManager::new()?;
+    let backups = backup_manager.list_backups()?;
+
+    if backups.is_empty() {
+        println!("No backups found.");
+        return Ok(());
+    }
+
+    println!("Backups ({} total):\n", backups.len());
+
+    for backup in backups.iter().rev() {
+        println!("ID: {}", backup.id);
+        println!("  Time: {}", backup.timestamp.format("%Y-%m-%d %H:%M:%S"));
+        println!("  Expression: {}", backup.expression);
+        println!("  Files: {}", backup.files.len());
+
+        if verbose {
+            println!("  Details:");
+            for file_backup in &backup.files {
+                let size = std::fs::metadata(&file_backup.backup_path)
+                    .map(|m| m.len())
+                    .unwrap_or(0);
+                println!("    - {} ({} bytes)",
+                    file_backup.original_path.display(),
+                    disk_space::DiskSpaceInfo::bytes_to_human(size));
+            }
+        }
+        println!();
+    }
+
+    Ok(())
+}
+
+fn backup_show(id: &str) -> Result<()> {
+    let backup_manager = backup_manager::BackupManager::new()?;
+    let backups = backup_manager.list_backups()?;
+
+    let backup = backups.iter()
+        .find(|b| b.id.starts_with(id))
+        .ok_or_else(|| anyhow::anyhow!("Backup not found: {}", id))?;
+
+    println!("Backup Details:\n");
+    println!("ID: {}", backup.id);
+    println!("Time: {}", backup.timestamp.format("%Y-%m-%d %H:%M:%S UTC"));
+    println!("Expression: {}", backup.expression);
+    println!("Files: {}\n", backup.files.len());
+
+    for file_backup in &backup.files {
+        let size = std::fs::metadata(&file_backup.backup_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
+        println!("  {}", file_backup.original_path.display());
+        println!("    Backup: {}", file_backup.backup_path.display());
+        println!("    Size: {}", disk_space::DiskSpaceInfo::bytes_to_human(size));
+        println!();
+    }
+
+    Ok(())
+}
+
+fn backup_restore(id: &str) -> Result<()> {
+    let backup_manager = backup_manager::BackupManager::new()?;
+    println!("Restoring backup: {}", id);
+    println!("This will replace current files with backed up versions.\n");
+
+    backup_manager.restore_backup(id)?;
+
+    Ok(())
+}
+
+fn backup_remove(id: &str, force: bool) -> Result<()> {
+    let backup_manager = backup_manager::BackupManager::new()?;
+    let backups = backup_manager.list_backups()?;
+
+    let backup = backups.iter()
+        .find(|b| b.id.starts_with(id))
+        .ok_or_else(|| anyhow::anyhow!("Backup not found: {}", id))?;
+
+    if !force {
+        println!("This will permanently delete backup: {}", backup.id);
+        print!("Are you sure? [y/N] ");
+        io::stdout().flush()?;
+
+        let mut confirm = String::new();
+        io::stdin().read_line(&mut confirm)?;
+
+        if !confirm.trim().eq_ignore_ascii_case("y") {
+            println!("Cancelled.");
+            return Ok(());
+        }
+    }
+
+    let backup_dir = backup_manager.backups_dir().join(&backup.id);
+    fs::remove_dir_all(&backup_dir)
+        .with_context(|| format!("Failed to remove backup: {}", backup.id))?;
+
+    println!("✅ Backup removed: {}", backup.id);
+
+    Ok(())
+}
+
+fn backup_prune(keep: Option<usize>, keep_days: Option<usize>, force: bool) -> Result<()> {
+    let backup_manager = backup_manager::BackupManager::new()?;
+    let backups = backup_manager.list_backups()?;
+
+    if backups.is_empty() {
+        println!("No backups to prune.");
+        return Ok(());
+    }
+
+    let keep = keep.unwrap_or(10); // Default: keep 10 most recent
+
+    // Determine which backups to remove
+    let mut to_remove = Vec::new();
+
+    if let Some(days) = keep_days {
+        // Prune by date
+        let cutoff_date = chrono::Utc::now() - chrono::Duration::days(days as i64);
+
+        for backup in &backups {
+            if backup.timestamp < cutoff_date {
+                to_remove.push(backup.clone());
+            }
+        }
+
+        println!("Pruning backups older than {} days:", days);
+    } else {
+        // Prune by count
+        let sorted = backups.clone();
+        let mut backups_by_date = sorted.into_iter().enumerate().collect::<Vec<_>>();
+        backups_by_date.sort_by_key(|(_, b)| b.timestamp);
+
+        // Keep the N most recent
+        for (idx, backup) in backups_by_date.into_iter().rev().skip(keep) {
+            to_remove.push(backup);
+        }
+
+        println!("Pruning backups, keeping only {} most recent:", keep);
+    }
+
+    if to_remove.is_empty() {
+        println!("No backups to remove.");
+        return Ok(());
+    }
+
+    println!("\nBackups to be removed:");
+    for backup in &to_remove {
+        println!("  - {} ({})", backup.id, backup.timestamp.format("%Y-%m-%d %H:%M:%S"));
+    }
+    println!("\nTotal: {} backup(s)", to_remove.len());
+
+    if !force {
+        print!("Continue? [y/N] ");
+        io::stdout().flush()?;
+
+        let mut confirm = String::new();
+        io::stdin().read_line(&mut confirm)?;
+
+        if !confirm.trim().eq_ignore_ascii_case("y") {
+            println!("Cancelled.");
+            return Ok(());
+        }
+    }
+
+    // Remove the backups
+    for backup in to_remove {
+        let backup_dir = backup_manager.backups_dir().join(&backup.id);
+        fs::remove_dir_all(&backup_dir)
+            .with_context(|| format!("Failed to remove backup: {}", backup.id))?;
+        println!("✅ Removed: {}", backup.id);
     }
 
     Ok(())

@@ -2,12 +2,12 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 const MAX_BACKUPS: usize = 50;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupMetadata {
     pub id: String,
     pub timestamp: DateTime<Utc>,
@@ -15,7 +15,7 @@ pub struct BackupMetadata {
     pub files: Vec<FileBackup>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileBackup {
     pub original_path: PathBuf,
     pub backup_path: PathBuf,
@@ -35,6 +35,22 @@ impl BackupManager {
             .with_context(|| format!("Failed to create backups directory: {}", backups_dir.display()))?;
 
         Ok(Self { backups_dir })
+    }
+
+    /// Create a BackupManager with a custom backup directory
+    pub fn with_directory(dir: String) -> Result<Self> {
+        let backups_dir = PathBuf::from(dir);
+
+        // Create backups directory if it doesn't exist
+        fs::create_dir_all(&backups_dir)
+            .with_context(|| format!("Failed to create backups directory: {}", backups_dir.display()))?;
+
+        Ok(Self { backups_dir })
+    }
+
+    /// Get the backup directory path
+    pub fn backups_dir(&self) -> &Path {
+        &self.backups_dir
     }
 
     pub fn create_backup(&mut self, expression: &str, files: &[PathBuf]) -> Result<String> {
