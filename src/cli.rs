@@ -58,6 +58,11 @@ struct Cli {
     #[arg(value_name = "EXPRESSION")]
     expression: Option<String>,
 
+    /// Add an expression (can be used multiple times)
+    #[arg(short = 'e', long = "expression", value_name = "EXPR")]
+    #[arg(help = "Add a sed expression (can be specified multiple times)\nExpressions are applied in the order given\nExample: sedx -e 's/foo/bar/' -e 's/baz/qux/' file.txt")]
+    expressions: Vec<String>,
+
     /// Files to process
     #[arg(value_name = "FILE")]
     files: Vec<String>,
@@ -73,9 +78,14 @@ struct Cli {
     interactive: bool,
 
     /// Number of context lines to show (default: 2)
-    #[arg(short = 'n', long, value_name = "NUM")]
+    #[arg(long, value_name = "NUM")]
     #[arg(help = "Number of context lines to show around changes\nUse 0 to show only changed lines (equivalent to --no-context)")]
     context: Option<usize>,
+
+    /// Quiet mode (suppress automatic output in stdin mode)
+    #[arg(short = 'n', long = "quiet", alias = "silent")]
+    #[arg(help = "Suppress automatic output (only lines printed with 'p' command are shown)\nUseful with -p flag in expressions like: sedx -n '1,10p'")]
+    quiet: bool,
 
     /// No context (show only changed lines)
     #[arg(long = "no-context", alias = "nc")]
@@ -323,9 +333,23 @@ pub fn parse_args() -> Result<Args> {
             BackupAction::Prune { keep, keep_days, force } => Ok(Args::BackupPrune { keep, keep_days, force }),
         },
         None => {
-            let expression = cli
-                .expression
-                .context("Missing sed expression. Usage: sedx 's/old/new/g' file.txt")?;
+            // Combine expressions from -e flags and/or positional argument
+            let expression = if !cli.expressions.is_empty() {
+                // -e flags were provided, combine them with semicolons
+                let mut exprs = cli.expressions.clone();
+
+                // If positional expression is also provided, add it first (before -e expressions)
+                if let Some(pos_expr) = &cli.expression {
+                    exprs.insert(0, pos_expr.clone());
+                }
+
+                // Join with semicolons (sed syntax for multiple commands)
+                exprs.join("; ")
+            } else {
+                // No -e flags, use positional expression
+                cli.expression
+                    .context("Missing sed expression. Usage: sedx 's/old/new/g' file.txt")?
+            };
 
             // Note: Empty files vector means read from stdin (like sed)
 
@@ -366,6 +390,7 @@ pub fn parse_args() -> Result<Args> {
                 regex_flavor,
                 no_backup: cli.no_backup,
                 backup_dir: cli.backup_dir,
+                quiet: cli.quiet,
             })
         }
     }
@@ -393,6 +418,7 @@ pub enum Args {
         regex_flavor: RegexFlavor,
         no_backup: bool,
         backup_dir: Option<String>,
+        quiet: bool,
     },
     Rollback {
         id: Option<String>,

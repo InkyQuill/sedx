@@ -35,12 +35,13 @@ fn main() -> Result<()> {
             regex_flavor,
             no_backup,
             backup_dir,
+            quiet,
         } => {
             // Check if we're in stdin mode (no files specified)
             if files.is_empty() {
-                execute_stdin(&expression, regex_flavor)?;
+                execute_stdin(&expression, regex_flavor, quiet)?;
             } else {
-                execute_command(&expression, &files, dry_run, interactive, context, streaming, regex_flavor, no_backup, backup_dir)?;
+                execute_command(&expression, &files, dry_run, interactive, context, streaming, regex_flavor, no_backup, backup_dir, quiet)?;
             }
         }
         Args::Rollback { id } => {
@@ -80,7 +81,7 @@ fn main() -> Result<()> {
 }
 
 /// Process stdin and write to stdout (pipeline mode, like sed)
-fn execute_stdin(expression: &str, regex_flavor: RegexFlavor) -> Result<()> {
+fn execute_stdin(expression: &str, regex_flavor: RegexFlavor, quiet: bool) -> Result<()> {
     // Parse sed expression
     let parser = Parser::new(regex_flavor);
     let commands = parser.parse(expression)?;
@@ -104,8 +105,16 @@ fn execute_stdin(expression: &str, regex_flavor: RegexFlavor) -> Result<()> {
     }
 
     // Write output to stdout
-    for line in result_lines {
-        println!("{}", line);
+    if quiet {
+        // In quiet mode, only print lines explicitly marked by print command
+        for line in processor.get_printed_lines() {
+            println!("{}", line);
+        }
+    } else {
+        // Normal mode: print all lines
+        for line in result_lines {
+            println!("{}", line);
+        }
     }
 
     Ok(())
@@ -225,6 +234,7 @@ fn execute_command(
     regex_flavor: RegexFlavor,
     no_backup: bool,
     backup_dir: Option<String>,
+    quiet: bool,
 ) -> Result<()> {
     // Load configuration file
     let config = load_config()?;

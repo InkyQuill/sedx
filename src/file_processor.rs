@@ -586,6 +586,11 @@ impl StreamProcessor {
                                     flags
                                 )?;
                                 line_changed = processed_line != original_line;
+
+                                // Handle print flag in substitution (GNU sed compatible)
+                                if line_changed && flags.print {
+                                    print_line = true;
+                                }
                             }
                         }
                         Command::Delete { range: (start, end) } => {
@@ -791,7 +796,13 @@ impl StreamProcessor {
                                                     replacement,
                                                     flags
                                                 )?;
-                                                line_changed = line_changed || (processed_line != original);
+                                                let was_changed = processed_line != original;
+                                                line_changed = line_changed || was_changed;
+
+                                                // Handle print flag in substitution (GNU sed compatible)
+                                                if was_changed && flags.print {
+                                                    print_line = true;
+                                                }
                                             }
                                         }
                                         Command::Delete { range: (start, end) } => {
@@ -1012,6 +1023,11 @@ impl FileProcessor {
         }
     }
 
+    /// Get the lines that were printed by print commands (for quiet mode)
+    pub fn get_printed_lines(&self) -> &[String] {
+        &self.printed_lines
+    }
+
     /// Legacy method - returns simple changes (for backward compatibility)
     pub fn process_file(&mut self, file_path: &Path) -> Result<Vec<FileChange>> {
         let diff = self.process_file_with_context(file_path)?;
@@ -1194,7 +1210,7 @@ impl FileProcessor {
         Ok(true)
     }
 
-    fn apply_substitution(&self, lines: &mut Vec<String>, pattern: &str, replacement: &str, flags: &SubstitutionFlags, range: &Option<(Address, Address)>) -> Result<()> {
+    fn apply_substitution(&mut self, lines: &mut Vec<String>, pattern: &str, replacement: &str, flags: &SubstitutionFlags, range: &Option<(Address, Address)>) -> Result<()> {
         let global = flags.global;
         let case_insensitive = flags.case_insensitive;
 
@@ -1218,10 +1234,16 @@ impl FileProcessor {
 
                     for line in lines.iter_mut() {
                         if !pattern_re.is_match(line) {
+                            let original = line.clone();
                             if global {
                                 *line = re.replace_all(line, replacement).to_string();
                             } else {
                                 *line = re.replace(line, replacement).to_string();
+                            }
+
+                            // Handle print flag
+                            if flags.print && *line != original {
+                                self.printed_lines.push(line.clone());
                             }
                         }
                     }
@@ -1239,7 +1261,8 @@ impl FileProcessor {
                         start_pat,
                         &re,
                         replacement,
-                        global
+                        global,
+                        flags.print
                     );
                 }
             }
@@ -1249,10 +1272,16 @@ impl FileProcessor {
             None => {
                 // Apply to all lines
                 for line in lines.iter_mut() {
+                    let original = line.clone();
                     if global {
                         *line = re.replace_all(line, replacement).to_string();
                     } else {
                         *line = re.replace(line, replacement).to_string();
+                    }
+
+                    // Handle print flag
+                    if flags.print && *line != original {
+                        self.printed_lines.push(line.clone());
                     }
                 }
             }
@@ -1262,10 +1291,16 @@ impl FileProcessor {
                 let end_idx = self.resolve_address(end, lines, lines.len())?;
 
                 for i in start_idx..=end_idx.min(lines.len() - 1) {
+                    let original = lines[i].clone();
                     if global {
                         lines[i] = re.replace_all(&lines[i], replacement).to_string();
                     } else {
                         lines[i] = re.replace(&lines[i], replacement).to_string();
+                    }
+
+                    // Handle print flag
+                    if flags.print && lines[i] != original {
+                        self.printed_lines.push(lines[i].clone());
                     }
                 }
             }
@@ -1286,12 +1321,13 @@ impl FileProcessor {
     /// * `replacement` - Replacement string (with backreferences converted)
     /// * `global` - If true, replace all occurrences in each line
     fn apply_pattern_substitution(
-        &self,
+        &mut self,
         lines: &mut Vec<String>,
         pattern_str: &str,
         pattern_regex: &Regex,
         replacement: &str,
         global: bool,
+        print_flag: bool,
     ) -> Result<()> {
         use regex::Regex;
 
@@ -1302,10 +1338,16 @@ impl FileProcessor {
         // Apply substitution to all lines matching the pattern
         for line in lines.iter_mut() {
             if line_pattern_re.is_match(line) {
+                let original = line.clone();
                 if global {
                     *line = pattern_regex.replace_all(line, replacement).to_string();
                 } else {
                     *line = pattern_regex.replace(line, replacement).to_string();
+                }
+
+                // Handle print flag
+                if print_flag && *line != original {
+                    self.printed_lines.push(line.clone());
                 }
             }
         }
