@@ -196,6 +196,30 @@ impl Parser {
                     }),
                 })
             }
+            LegacySedCommand::ReadFile { filename, range } => {
+                Ok(Command::ReadFile {
+                    filename,
+                    range: range.map(|a| self.convert_address(a)),
+                })
+            }
+            LegacySedCommand::WriteFile { filename, range } => {
+                Ok(Command::WriteFile {
+                    filename,
+                    range: range.map(|a| self.convert_address(a)),
+                })
+            }
+            LegacySedCommand::ReadLine { filename, range } => {
+                Ok(Command::ReadLine {
+                    filename,
+                    range: range.map(|a| self.convert_address(a)),
+                })
+            }
+            LegacySedCommand::WriteFirstLine { filename, range } => {
+                Ok(Command::WriteFirstLine {
+                    filename,
+                    range: range.map(|a| self.convert_address(a)),
+                })
+            }
         }
     }
 

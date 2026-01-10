@@ -96,6 +96,13 @@ pub fn can_stream(commands: &[Command]) -> bool {
             | Command::TestFalse { .. } => {
                 return false;
             }
+            // Phase 5: File I/O commands are NOT streamable (require file handle management)
+            Command::ReadFile { .. }
+            | Command::WriteFile { .. }
+            | Command::ReadLine { .. }
+            | Command::WriteFirstLine { .. } => {
+                return false;
+            }
         }
     }
     true

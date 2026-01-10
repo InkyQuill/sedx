@@ -434,6 +434,7 @@ fn commands_can_modify_files(commands: &[crate::command::Command]) -> bool {
             | Command::Hold { .. } | Command::HoldAppend { .. } | Command::Get { .. }
             | Command::GetAppend { .. } | Command::Exchange { .. }
             | Command::Group { .. } | Command::DeleteFirstLine { .. }
+            | Command::ReadFile { .. } | Command::WriteFile { .. } | Command::ReadLine { .. } | Command::WriteFirstLine { .. }
             => return true,  // Found a modifying command
         }
     }

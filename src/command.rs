@@ -133,6 +133,34 @@ pub enum Command {
         label: Option<String>,
         range: Option<(Address, Address)>,
     },
+
+    /// Read file (Phase 5): r filename - read file and append contents to output
+    /// Can have optional address: addr r filename
+    ReadFile {
+        filename: String,
+        range: Option<Address>,
+    },
+
+    /// Write file (Phase 5): w filename - write pattern space to file
+    /// Can have optional address: addr w filename
+    WriteFile {
+        filename: String,
+        range: Option<Address>,
+    },
+
+    /// Read one line (Phase 5): R filename - read one line from file
+    /// Can have optional address: addr R filename
+    ReadLine {
+        filename: String,
+        range: Option<Address>,
+    },
+
+    /// Write first line (Phase 5): W filename - write first line of pattern space to file
+    /// Can have optional address: addr W filename
+    WriteFirstLine {
+        filename: String,
+        range: Option<Address>,
+    },
 }
 
 /// Substitution flags (unified across sed and sd)

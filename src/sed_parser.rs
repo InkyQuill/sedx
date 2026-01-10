@@ -82,6 +82,23 @@ pub enum SedCommand {
         label: Option<String>, // T [label] - branch if NO substitution made
         range: Option<(Address, Address)>, // Optional address/range for test false
     },
+    // Phase 5: File I/O commands
+    ReadFile {
+        filename: String, // r filename - read file and append contents
+        range: Option<Address>, // Optional address for read
+    },
+    WriteFile {
+        filename: String, // w filename - write pattern space to file
+        range: Option<Address>, // Optional address for write
+    },
+    ReadLine {
+        filename: String, // R filename - read one line from file
+        range: Option<Address>, // Optional address for read
+    },
+    WriteFirstLine {
+        filename: String, // W filename - write first line to file
+        range: Option<Address>, // Optional address for write
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -297,6 +314,10 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
             'N' => parse_next_append(cmd),
             'P' => parse_print_first_line(cmd),
             'D' => parse_delete_first_line(cmd),
+            'r' => parse_read_file(cmd),
+            'R' => parse_read_line(cmd),
+            'w' => parse_write_file(cmd),
+            'W' => parse_write_first_line(cmd),
             _ => {
                 Err(anyhow!("Unknown sed command: {}", cmd))
             }
@@ -979,6 +1000,130 @@ fn parse_test_false(cmd: &str) -> Result<SedCommand> {
     };
 
     Ok(SedCommand::TestFalse { label, range })
+}
+
+// Phase 5: Parse read file command (r filename)
+fn parse_read_file(cmd: &str) -> Result<SedCommand> {
+    let cmd = cmd.trim();
+
+    // Find the 'r' command character
+    let r_pos = cmd.find('r').ok_or_else(|| anyhow!("Read file command missing 'r'"))?;
+
+    // Split into: address_part (before 'r') and rest_part (after 'r' including 'r')
+    let address_part = &cmd[..r_pos];
+    let rest_part = &cmd[r_pos..]; // Includes the 'r'
+
+    // Parse the optional address from address_part
+    let range = if address_part.trim().is_empty() {
+        None
+    } else {
+        Some(parse_address(address_part.trim())?)
+    };
+
+    // Extract filename (after the 'r')
+    let filename_part = &rest_part[1..]; // Skip the 'r'
+    let filename = filename_part.trim();
+    if filename.is_empty() {
+        anyhow::bail!("Read file command requires filename");
+    }
+
+    Ok(SedCommand::ReadFile {
+        filename: filename.to_string(),
+        range,
+    })
+}
+
+// Phase 5: Parse write file command (w filename)
+fn parse_write_file(cmd: &str) -> Result<SedCommand> {
+    let cmd = cmd.trim();
+
+    // Find the 'w' command character
+    let w_pos = cmd.find('w').ok_or_else(|| anyhow!("Write file command missing 'w'"))?;
+
+    // Split into: address_part (before 'w') and rest_part (after 'w' including 'w')
+    let address_part = &cmd[..w_pos];
+    let rest_part = &cmd[w_pos..]; // Includes the 'w'
+
+    // Parse the optional address from address_part
+    let range = if address_part.trim().is_empty() {
+        None
+    } else {
+        Some(parse_address(address_part.trim())?)
+    };
+
+    // Extract filename (after the 'w')
+    let filename_part = &rest_part[1..]; // Skip the 'w'
+    let filename = filename_part.trim();
+    if filename.is_empty() {
+        anyhow::bail!("Write file command requires filename");
+    }
+
+    Ok(SedCommand::WriteFile {
+        filename: filename.to_string(),
+        range,
+    })
+}
+
+// Phase 5: Parse read line command (R filename)
+fn parse_read_line(cmd: &str) -> Result<SedCommand> {
+    let cmd = cmd.trim();
+
+    // Find the 'R' command character
+    let r_pos = cmd.find('R').ok_or_else(|| anyhow!("Read line command missing 'R'"))?;
+
+    // Split into: address_part (before 'R') and rest_part (after 'R' including 'R')
+    let address_part = &cmd[..r_pos];
+    let rest_part = &cmd[r_pos..]; // Includes the 'R'
+
+    // Parse the optional address from address_part
+    let range = if address_part.trim().is_empty() {
+        None
+    } else {
+        Some(parse_address(address_part.trim())?)
+    };
+
+    // Extract filename (after the 'R')
+    let filename_part = &rest_part[1..]; // Skip the 'R'
+    let filename = filename_part.trim();
+    if filename.is_empty() {
+        anyhow::bail!("Read line command requires filename");
+    }
+
+    Ok(SedCommand::ReadLine {
+        filename: filename.to_string(),
+        range,
+    })
+}
+
+// Phase 5: Parse write first line command (W filename)
+fn parse_write_first_line(cmd: &str) -> Result<SedCommand> {
+    let cmd = cmd.trim();
+
+    // Find the 'W' command character
+    let w_pos = cmd.find('W').ok_or_else(|| anyhow!("Write first line command missing 'W'"))?;
+
+    // Split into: address_part (before 'W') and rest_part (after 'W' including 'W')
+    let address_part = &cmd[..w_pos];
+    let rest_part = &cmd[w_pos..]; // Includes the 'W'
+
+    // Parse the optional address from address_part
+    let range = if address_part.trim().is_empty() {
+        None
+    } else {
+        Some(parse_address(address_part.trim())?)
+    };
+
+    // Extract filename (after the 'W')
+    let filename_part = &rest_part[1..]; // Skip the 'W'
+    let filename = filename_part.trim();
+    if filename.is_empty() {
+        anyhow::bail!("Write first line command requires filename");
+    }
+
+    Ok(SedCommand::WriteFirstLine {
+        filename: filename.to_string(),
+        range,
+    })
 }
 
 #[cfg(test)]
