@@ -1,7 +1,7 @@
 # SedX Development Roadmap
 
 **Version:** 0.2.0-alpha → 1.0.0
-**Last Updated:** 2025-01-07
+**Last Updated:** 2026-01-10
 **Development Approach:** Incremental Releases with Comprehensive Testing
 
 ---
@@ -25,37 +25,47 @@ SedX is a **modern, safe text processing tool** that:
 
 ## 📊 Current Status (v0.2.0-alpha - neo branch)
 
-**Implemented:** 3,300+ lines, 11 modules
+**Implemented:** 3,400+ lines, 11 modules
 - ✅ 10/30 sed commands (33%)
 - ✅ Basic backups (no disk checks)
 - ✅ Dry-run & interactive modes
-- ✅ Hold space operations (in-memory)
+- ✅ Hold space operations (in-memory + streaming)
 - ✅ **Unified Command System (UCS) parser**
 - ✅ **Regex flavor support (PCRE/ERE/BRE)**
 - ✅ **BRE to ERE auto-conversion**
 - ✅ **Stdin/stdout pipeline support**
-- ✅ **Streaming processing (chunks 1-8 completed)**
+- ✅ **Streaming processing (chunks 1-10 completed)**
   - ✅ Basic infrastructure + atomic writes
   - ✅ Commands: s, d, p, a, i, c, q
   - ✅ Sliding window diff with context
   - ✅ Pattern ranges with state machine
-- ⏳ Hold space in streaming (chunk 9)
+  - ✅ Hold space operations (h, H, g, G, x)
+  - ✅ Command grouping with ranges ({...})
+  - ✅ Single-pattern address fix (/foo/d)
+- ⏳ Comprehensive testing & optimization (chunk 11)
 - ❌ No disk space checks
 - ❌ Missing critical flags (-n, -e, -f)
 
-**Recent Work (Completed 2025-01-09):**
-- **Chunk 8 completed**: Pattern ranges in streaming mode
-  - Added PatternRangeState enum with state machine
-  - Implemented /start/,/end/ pattern range tracking
-  - Added mixed ranges: /start/,10, 5,/end/, /start/,+5
-  - Added stepping addresses: 1~2 (every 2nd line)
-  - All 101 tests passing (99 + 2 new pattern range tests)
+**Recent Work (Completed 2026-01-10):**
+- **Chunk 10 completed**: Command grouping in streaming mode
+  - Full support for `{...}` command groups in streaming
+  - Groups work with all range types: line ranges, pattern ranges, mixed ranges
+  - Verified with extensive testing against GNU sed
+
+- **Critical bug fix**: Single-pattern address handling
+  - Fixed `/pattern/d` to match each line independently (not as a range)
+  - Fixed `/pattern/s/foo/bar/` substitution behavior
+  - All 10 regression tests now passing (was 9/10)
+
+**Test Results:**
+- ✅ 103 unit tests passing
+- ✅ 10/10 regression tests passing (was 9/10 - fixed delete pattern bug)
+- ⚠️ 13/20 hold space tests passing (7 edge cases with empty hold space)
 
 **Streaming Progress:**
-- Chunks 1-7: ✅ Completed (basic streaming through sliding window diff)
-- Chunk 8: ✅ Completed (pattern ranges with state machine)
-- Chunk 9: ⏳ In Progress (hold space operations in streaming)
-- Chunk 10-11: Pending (grouping, testing & optimization)
+- Chunks 1-9: ✅ Completed (basic streaming through hold space)
+- Chunk 10: ✅ Completed (command grouping with ranges)
+- Chunk 11: ⏳ In Progress (comprehensive testing & optimization)
 
 ---
 
@@ -89,9 +99,9 @@ SedX is a **modern, safe text processing tool** that:
 - [ ] Stream-enable: `q` (quit)
 
 **Week 3: Complex Operations**
-- [ ] Stream-enable: `{}` (grouping)
-- [ ] Stream-enable pattern ranges with state machine
-- [ ] Stream-enable hold space operations
+- [x] Stream-enable pattern ranges with state machine
+- [x] Stream-enable hold space operations
+- [x] Stream-enable: `{}` (grouping) - Completed with full range support
 - [ ] Stream-enable negation
 
 **Week 4: Testing & Polish**

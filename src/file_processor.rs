@@ -358,6 +358,15 @@ impl StreamProcessor {
         use Address::*;
 
         match (&range.0, &range.1) {
+            // Single pattern address: /foo/d (not a range!)
+            // When both patterns are the same, match each line independently
+            (Pattern(start_pat), Pattern(end_pat)) if start_pat == end_pat => {
+                // Compile pattern and match current line only (no state machine)
+                let re = Regex::new(start_pat)
+                    .with_context(|| format!("Invalid regex pattern: {}", start_pat))?;
+                Ok(re.is_match(line))
+            }
+
             // Pattern-to-pattern: /start/,/end/
             (Pattern(start_pat), Pattern(end_pat)) => {
                 self.check_pattern_range(line, start_pat, end_pat)
