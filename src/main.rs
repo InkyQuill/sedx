@@ -3,6 +3,7 @@ mod bre_converter;
 mod capability;
 mod cli;
 mod command;
+mod config;
 mod diff_formatter;
 mod disk_space;
 mod ere_converter;
@@ -13,10 +14,12 @@ mod sed_parser;
 use anyhow::{Context, Result};
 use cli::{parse_args, Args, RegexFlavor};
 use command::{Command, Address};
+use config::{load_config, config_file_path, ensure_complete_config};
 use parser::Parser;
 use std::fs;
 use std::io::{self, Write, Read};
 use std::path::{Path, PathBuf};
+use std::process::Command as ProcessCommand;
 
 fn main() -> Result<()> {
     let args = parse_args()?;
@@ -63,6 +66,13 @@ fn main() -> Result<()> {
         }
         Args::BackupPrune { keep, keep_days, force } => {
             backup_prune(keep, keep_days, force)?;
+        }
+        Args::Config { show } => {
+            if show {
+                config_show()?;
+            } else {
+                config_edit()?;
+            }
         }
     }
 
@@ -216,6 +226,12 @@ fn execute_command(
     no_backup: bool,
     backup_dir: Option<String>,
 ) -> Result<()> {
+    // Load configuration file
+    let config = load_config()?;
+
+    // Use backup_dir from config if not specified via CLI
+    let backup_dir = backup_dir.or_else(|| config.backup.backup_dir.clone());
+
     // Parse sed expression using unified parser
     let parser = Parser::new(regex_flavor);
     let commands = parser.parse(expression)?;
@@ -242,14 +258,19 @@ fn execute_command(
 
         let file_size_mb = metadata.len() / 1024 / 1024;
 
-        // Decide: use streaming if (streaming flag OR file >= 100MB OR commands support it)
+        // Get streaming threshold from config (default: 100MB)
+        let streaming_threshold_mb = config.processing.max_memory_mb.unwrap_or(100);
+        let streaming_threshold_bytes = (streaming_threshold_mb * 1024 * 1024) as u64;
+
+        // Decide: use streaming if (streaming flag OR file >= threshold OR commands support it)
         let use_streaming = if !supports_streaming {
             false  // Commands don't support streaming
         } else if streaming {
             true  // Explicitly enabled
-        } else if metadata.len() >= 100 * 1024 * 1024 {
-            // Auto-detect: file >= 100MB
-            eprintln!("📊 Streaming mode activated for {} ({} MB)", file_path.display(), file_size_mb);
+        } else if metadata.len() >= streaming_threshold_bytes {
+            // Auto-detect: file >= threshold
+            eprintln!("📊 Streaming mode activated for {} ({} MB, threshold: {} MB)",
+                     file_path.display(), file_size_mb, streaming_threshold_mb);
             true
         } else {
             // Chunk 10: Use streaming for small files too if commands support it
@@ -612,6 +633,127 @@ fn backup_prune(keep: Option<usize>, keep_days: Option<usize>, force: bool) -> R
             .with_context(|| format!("Failed to remove backup: {}", backup.id))?;
         println!("✅ Removed: {}", backup.id);
     }
+
+    Ok(())
+}
+
+// Config command handlers
+
+fn config_show() -> Result<()> {
+    let config = load_config()?;
+    let config_path = config_file_path()?;
+
+    println!("SedX Configuration:");
+    println!("  File: {}\n", config_path.display());
+
+    println!("[backup]");
+    if let Some(max_size_gb) = config.backup.max_size_gb {
+        println!("  max_size_gb = {}", max_size_gb);
+    } else {
+        println!("  max_size_gb = (not set)");
+    }
+    if let Some(max_disk) = config.backup.max_disk_usage_percent {
+        println!("  max_disk_usage_percent = {}", max_disk);
+    } else {
+        println!("  max_disk_usage_percent = (not set)");
+    }
+    if let Some(ref dir) = config.backup.backup_dir {
+        println!("  backup_dir = \"{}\"", dir);
+    } else {
+        println!("  backup_dir = (not set)");
+    }
+
+    println!("\n[compatibility]");
+    if let Some(ref mode) = config.compatibility.mode {
+        println!("  mode = \"{}\"", mode);
+    } else {
+        println!("  mode = (not set)");
+    }
+    if let Some(show_warn) = config.compatibility.show_warnings {
+        println!("  show_warnings = {}", show_warn);
+    } else {
+        println!("  show_warnings = (not set)");
+    }
+
+    println!("\n[processing]");
+    if let Some(ctx) = config.processing.context_lines {
+        println!("  context_lines = {}", ctx);
+    } else {
+        println!("  context_lines = (not set)");
+    }
+    if let Some(max_mem) = config.processing.max_memory_mb {
+        println!("  max_memory_mb = {}", max_mem);
+    } else {
+        println!("  max_memory_mb = (not set)");
+    }
+    if let Some(stream) = config.processing.streaming {
+        println!("  streaming = {}", stream);
+    } else {
+        println!("  streaming = (not set)");
+    }
+
+    Ok(())
+}
+
+fn config_edit() -> Result<()> {
+    use config::{save_config, Config, validate_config};
+
+    let config_path = config_file_path()?;
+
+    // Ensure config file exists with all fields
+    let file_existed = config_path.exists();
+    if !file_existed {
+        println!("Creating new configuration file: {}", config_path.display());
+    }
+
+    // Ensure all fields are present (adds missing fields from template)
+    ensure_complete_config()?;
+
+    if !file_existed {
+        println!("✅ Created default configuration file\n");
+    }
+
+    // Get editor from environment
+    let editor = std::env::var("EDITOR")
+        .or_else(|_| std::env::var("VISUAL"))
+        .unwrap_or_else(|_| {
+            // Try common editors in order of preference
+            if cfg!(unix) {
+                if which::which("vim").is_ok() {
+                    "vim".to_string()
+                } else if which::which("nano").is_ok() {
+                    "nano".to_string()
+                } else {
+                    "vi".to_string()
+                }
+            } else {
+                "notepad".to_string()
+            }
+        });
+
+    println!("Opening {} in editor: {}", config_path.display(), editor);
+    println!("After saving and exiting, the configuration will be validated.\n");
+
+    // Open editor
+    let status = ProcessCommand::new(&editor)
+        .arg(&config_path)
+        .status()
+        .with_context(|| format!("Failed to open editor: {}", editor))?;
+
+    if !status.success() {
+        anyhow::bail!("Editor exited with non-zero status: {}", status);
+    }
+
+    // Validate the edited config
+    let config_str = fs::read_to_string(&config_path)
+        .with_context(|| format!("Failed to read config file: {}", config_path.display()))?;
+
+    let config: Config = toml::from_str(&config_str)
+        .with_context(|| format!("Failed to parse config file: {}", config_path.display()))?;
+
+    validate_config(&config)?;
+
+    println!("\n✅ Configuration is valid!");
 
     Ok(())
 }

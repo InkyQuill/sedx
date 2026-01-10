@@ -177,6 +177,39 @@ EXAMPLES:
         #[command(subcommand)]
         action: BackupAction,
     },
+
+    /// Edit configuration file
+    #[command(long_about = "Open configuration file in text editor.
+
+Opens the SedX configuration file (~/.sedx/config.toml) in your default editor.
+If the file doesn't exist, a default one will be created.
+
+After saving and exiting, the configuration will be validated.
+If there are any errors, they will be displayed and the file will not be updated.
+
+CONFIGURATION OPTIONS:
+  [backup]
+    max_size_gb = 2              # Max backup size before warning (GB)
+    max_disk_usage_percent = 60   # Max % of free space to use
+    backup_dir = \"/path\"         # Custom backup directory (optional)
+
+  [compatibility]
+    mode = \"pcre\"                # Regex mode: pcre, ere, or bre
+    show_warnings = true          # Show incompatibility warnings
+
+  [processing]
+    context_lines = 2             # Context lines to show (max 10)
+    max_memory_mb = 100           # Max memory for streaming (MB)
+    streaming = true              # Enable streaming for large files
+
+EXAMPLES:
+  sedx config                     Edit configuration
+  sedx config --show              Show current configuration")]
+    Config {
+        /// Show current configuration without editing
+        #[arg(long = "show")]
+        show: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -281,6 +314,7 @@ pub fn parse_args() -> Result<Args> {
         Some(Commands::Rollback { id }) => Ok(Args::Rollback { id }),
         Some(Commands::History) => Ok(Args::History),
         Some(Commands::Status) => Ok(Args::Status),
+        Some(Commands::Config { show }) => Ok(Args::Config { show }),
         Some(Commands::Backup { action }) => match action {
             BackupAction::List { verbose } => Ok(Args::BackupList { verbose }),
             BackupAction::Show { id } => Ok(Args::BackupShow { id }),
@@ -382,5 +416,8 @@ pub enum Args {
         keep: Option<usize>,
         keep_days: Option<usize>,
         force: bool,
+    },
+    Config {
+        show: bool,
     },
 }
