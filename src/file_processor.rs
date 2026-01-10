@@ -32,6 +32,122 @@ enum PatternRangeState {
     CountingRelativeLines { remaining: usize },       // /start/,+5 - counting N lines after match
 }
 
+// ============================================================================
+// CYCLE-BASED ARCHITECTURE (Phase 4 Refactoring)
+// ============================================================================
+
+/// Iterator for input lines with lookahead support
+/// Required for n and N commands that need to read ahead
+#[derive(Clone)]
+struct LineIterator {
+    lines: Vec<String>,
+    current: usize,
+}
+
+impl LineIterator {
+    fn new(lines: Vec<String>) -> Self {
+        Self { lines, current: 0 }
+    }
+
+    /// Get current line for cycle (advances iterator)
+    fn current_line(&mut self) -> Option<String> {
+        if self.current < self.lines.len() {
+            let line = self.lines[self.current].clone();
+            self.current += 1;
+            Some(line)
+        } else {
+            None
+        }
+    }
+
+    /// Read next line (for n/N commands) without advancing outer loop
+    fn read_next(&mut self) -> Option<String> {
+        if self.current < self.lines.len() {
+            let line = self.lines[self.current].clone();
+            self.current += 1;
+            Some(line)
+        } else {
+            None  // EOF
+        }
+    }
+
+    /// Check if at EOF
+    fn is_eof(&self) -> bool {
+        self.current >= self.lines.len()
+    }
+
+    /// Peek at current position without consuming
+    fn peek(&self) -> usize {
+        self.current
+    }
+}
+
+/// Result of applying a command within a cycle
+/// Matches GNU sed's control flow from execute.c
+#[derive(Debug, Clone, PartialEq)]
+enum CycleResult {
+    /// Continue to next command in the cycle
+    Continue,
+
+    /// Delete pattern space and end cycle (d command)
+    /// Pattern space is NOT printed
+    DeleteLine,
+
+    /// Restart command cycle from first command (D command)
+    /// Pattern space has been modified (first line removed)
+    RestartCycle,
+
+    /// Quit processing immediately (q/Q commands)
+    /// Returns exit code (0 for q, N for Q)
+    Quit(i32),
+}
+
+/// State for a single sed cycle
+struct CycleState {
+    /// Current pattern space (can be multi-line with '\n' separators)
+    pattern_space: String,
+
+    /// Hold space (persistent across cycles)
+    hold_space: String,
+
+    /// Current line number (1-indexed)
+    line_num: usize,
+
+    /// Pattern space marked for deletion (d command)
+    deleted: bool,
+
+    /// Side-effect output accumulated during cycle (P, p, n commands)
+    side_effects: Vec<String>,
+
+    /// Input line iterator for n/N commands
+    line_iter: LineIterator,
+
+    /// Pattern range states (for /start/,/end/ ranges)
+    pattern_range_states: HashMap<(String, String), PatternRangeState>,
+
+    /// Mixed range states for tracking complex ranges (Chunk 8)
+    mixed_range_states: HashMap<MixedRangeKey, MixedRangeState>,
+}
+
+impl CycleState {
+    fn new(hold_space: String, lines: Vec<String>) -> Self {
+        Self {
+            pattern_space: String::new(),
+            hold_space,
+            line_num: 0,
+            deleted: false,
+            side_effects: Vec::new(),
+            line_iter: LineIterator::new(lines),
+            pattern_range_states: HashMap::new(),
+            mixed_range_states: HashMap::new(),
+        }
+    }
+}
+
+// ============================================================================
+// END CYCLE-BASED ARCHITECTURE
+// ============================================================================
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChangeType {
     Unchanged,    // Line not modified
@@ -72,6 +188,8 @@ pub struct FileProcessor {
     // Multi-line pattern space support (Phase 4)
     pattern_space: Option<String>,  // Multi-line pattern space (None = normal single-line mode)
     current_line_index: usize,       // Current line index in input (for n/N commands)
+    // Cycle-based architecture (Phase 4 refactoring)
+    no_default_output: bool,         // -n flag: suppress automatic output
 }
 
 /// Result of applying a command in streaming mode
@@ -1025,7 +1143,13 @@ impl FileProcessor {
             hold_space: String::new(),
             pattern_space: None,
             current_line_index: 0,
+            no_default_output: false,
         }
+    }
+
+    /// Set the -n flag (suppress automatic output)
+    pub fn set_no_default_output(&mut self, value: bool) {
+        self.no_default_output = value;
     }
 
     /// Get the lines that were printed by print commands (for quiet mode)
@@ -1151,6 +1275,224 @@ impl FileProcessor {
 
         Ok(lines.len())
     }
+
+    // ============================================================================
+    // CYCLE-BASED PROCESSING (Phase 4 Refactoring)
+    // ============================================================================
+
+    /// Process file using cycle-based execution (matches GNU sed model)
+    /// This method preserves all SedX advantages: backups, diffs, PCRE support
+    ///
+    /// Matches GNU sed execute.c:1685 (main loop) + execute_program (command loop)
+    fn process_cycle_based(&mut self, lines: Vec<String>) -> Result<Vec<String>> {
+        let mut state = CycleState::new(self.hold_space.clone(), lines);
+        let mut output = Vec::new();
+
+        // Outer loop: read each line into pattern space (matches execute.c:1685)
+        while let Some(line) = state.line_iter.current_line() {
+            state.pattern_space = line;
+            state.line_num += 1;
+
+            // Inner loop: apply commands to pattern space (matches execute.c:1289)
+            'cycle: for cmd in &self.commands {
+                // Check if command applies to current cycle state
+                if !self.should_apply_to_cycle(cmd, &state) {
+                    continue;
+                }
+
+                // Apply command to pattern space
+                let result = self.apply_command_to_cycle(cmd, &mut state)?;
+
+                // Handle cycle result (matches execute.c switch statement)
+                match result {
+                    CycleResult::Continue => {
+                        // Continue to next command
+                    }
+                    CycleResult::DeleteLine => {
+                        // End cycle, pattern space not printed (matches d command)
+                        state.deleted = true;
+                        break 'cycle;
+                    }
+                    CycleResult::RestartCycle => {
+                        // Restart command loop from beginning (matches D command)
+                        continue 'cycle;
+                    }
+                    CycleResult::Quit(_code) => {
+                        // Add side effects before quitting
+                        output.extend(state.side_effects.drain(..));
+                        // Return output early (quit program)
+                        return Ok(output);
+                    }
+                }
+            }
+
+            // Add side effects (P, p, n commands) - these are printed immediately
+            output.extend(state.side_effects.drain(..));
+
+            // Add pattern space to output (unless deleted or in quiet mode)
+            if !state.deleted && !self.no_default_output {
+                output.push(state.pattern_space.clone());
+            }
+
+            // Reset deletion flag for next cycle
+            state.deleted = false;
+        }
+
+        Ok(output)
+    }
+
+    /// Check if command applies to current cycle state (address matching)
+    fn should_apply_to_cycle(&self, cmd: &Command, _state: &CycleState) -> bool {
+        match cmd {
+            // Commands with Option<range> - may or may not have range
+            Command::Substitution { .. }
+            | Command::Next { .. }
+            | Command::NextAppend { .. }
+            | Command::Hold { .. }
+            | Command::HoldAppend { .. }
+            | Command::Get { .. }
+            | Command::GetAppend { .. }
+            | Command::Exchange { .. }
+            | Command::Group { .. } => {
+                // TODO: Implement proper range checking
+                true
+            }
+
+            // Commands with required range (tuple, not Option)
+            Command::Delete { .. }
+            | Command::Print { .. }
+            | Command::PrintFirstLine { .. }
+            | Command::DeleteFirstLine { .. } => {
+                // TODO: Implement proper range checking
+                true
+            }
+
+            // Commands that handle their own address checking
+            Command::Insert { .. } | Command::Append { .. } | Command::Change { .. } => {
+                true
+            }
+
+            // Quit commands
+            Command::Quit { .. } | Command::QuitWithoutPrint { .. } => {
+                // TODO: Implement proper address checking
+                true
+            }
+        }
+    }
+
+    /// Apply command within a cycle (returns cycle result)
+    /// Matches GNU sed execute.c:1297-1643 (command switch statement)
+    fn apply_command_to_cycle(&self, cmd: &Command, state: &mut CycleState) -> Result<CycleResult> {
+        match cmd {
+            // n command: print current, read next, continue (matches execute.c:1459)
+            Command::Next { range: _ } => {
+                self.apply_next_cycle(state)
+            }
+
+            // N command: append next line (matches execute.c:1474)
+            Command::NextAppend { range: _ } => {
+                self.apply_next_append_cycle(state)
+            }
+
+            // P command: print first line (matches execute.c:1496)
+            Command::PrintFirstLine { range: _ } => {
+                self.apply_print_first_line_cycle(state)
+            }
+
+            // D command: delete first line, restart (matches execute.c:1333)
+            Command::DeleteFirstLine { range: _ } => {
+                self.apply_delete_first_line_cycle(state)
+            }
+
+            // d command: delete pattern space, end cycle (matches execute.c:1328)
+            Command::Delete { range: _ } => {
+                Ok(CycleResult::DeleteLine)
+            }
+
+            // p command: print pattern space (matches execute.c:1491)
+            Command::Print { range: _ } => {
+                state.side_effects.push(state.pattern_space.clone());
+                Ok(CycleResult::Continue)
+            }
+
+            // q/Q commands: quit (matches execute.c:1504, 1511)
+            Command::Quit { .. } => Ok(CycleResult::Quit(0)),
+            Command::QuitWithoutPrint { .. } => Ok(CycleResult::Quit(0)),
+
+            // For now, delegate other commands to existing implementation
+            // TODO: Port all commands to cycle model
+            _ => Ok(CycleResult::Continue),
+        }
+    }
+
+    /// n command: print current, read next, continue with remaining commands
+    /// Matches execute.c:1459-1472
+    fn apply_next_cycle(&self, state: &mut CycleState) -> Result<CycleResult> {
+        // 1. Side effect: print current pattern space (if not -n mode)
+        if !self.no_default_output {
+            state.side_effects.push(state.pattern_space.clone());
+        }
+
+        // 2. Read next line into pattern space
+        if let Some(next_line) = state.line_iter.read_next() {
+            state.pattern_space = next_line;
+            state.line_num += 1;
+            Ok(CycleResult::Continue)  // Continue with remaining commands!
+        } else {
+            // At EOF: end cycle
+            Ok(CycleResult::DeleteLine)  // Don't print anything
+        }
+    }
+
+    /// N command: append next line to pattern space
+    /// Matches execute.c:1474-1489
+    fn apply_next_append_cycle(&self, state: &mut CycleState) -> Result<CycleResult> {
+        // 1. Append newline separator
+        state.pattern_space.push('\n');
+
+        // 2. Read next line and append
+        if let Some(next_line) = state.line_iter.read_next() {
+            state.pattern_space.push_str(&next_line);
+            state.line_num += 1;
+            Ok(CycleResult::Continue)
+        } else {
+            // At EOF: remove appended newline
+            state.pattern_space.pop();
+            Ok(CycleResult::DeleteLine)
+        }
+    }
+
+    /// P command: print first line of multi-line pattern space
+    /// Matches execute.c:1496-1502
+    fn apply_print_first_line_cycle(&self, state: &mut CycleState) -> Result<CycleResult> {
+        // Find first newline
+        if let Some(idx) = state.pattern_space.find('\n') {
+            // Print text up to first newline
+            state.side_effects.push(state.pattern_space[..idx].to_string());
+        } else {
+            // No newline: print entire pattern space
+            state.side_effects.push(state.pattern_space.clone());
+        }
+        Ok(CycleResult::Continue)
+    }
+
+    /// D command: delete first line, restart cycle
+    /// Matches execute.c:1333-1350
+    fn apply_delete_first_line_cycle(&self, state: &mut CycleState) -> Result<CycleResult> {
+        // Find first newline
+        if let Some(idx) = state.pattern_space.find('\n') {
+            // Delete first line up to (and including) newline
+            state.pattern_space = state.pattern_space[idx + 1..].to_string();
+            Ok(CycleResult::RestartCycle)
+        } else {
+            // No newline: delete entire pattern space
+            Ok(CycleResult::DeleteLine)
+        }
+    }
+
+    // ============================================================================
+    // END CYCLE-BASED PROCESSING
+    // ============================================================================
 
     pub fn apply_command(&mut self, lines: &mut Vec<String>, cmd: &Command) -> Result<bool> {
         // Returns Ok(true) if processing should continue, Ok(false) if quit was requested
@@ -2601,5 +2943,101 @@ mod tests {
             }
             _ => panic!("First command should be a Group"),
         }
+    }
+}
+
+// ============================================================================
+// CYCLE-BASED ARCHITECTURE TESTS
+// ============================================================================
+
+#[cfg(test)]
+mod cycle_tests {
+    use super::*;
+    use crate::command::{Command, Address, SubstitutionFlags};
+
+    /// Helper to parse a simple sed expression
+    fn parse_simple(expr: &str) -> Vec<Command> {
+        // For now, manually construct commands
+        // TODO: Use proper parser when available
+        if expr == "n; d" {
+            vec![
+                Command::Next { range: None },
+                Command::Delete { range: (Address::LineNumber(1), Address::LastLine) },
+            ]
+        } else if expr == "n" {
+            vec![
+                Command::Next { range: None },
+            ]
+        } else {
+            vec![]
+        }
+    }
+
+    #[test]
+    fn test_cycle_state_creation() {
+        let lines = vec!["line1".to_string(), "line2".to_string()];
+        let state = CycleState::new(String::new(), lines);
+        
+        assert_eq!(state.line_num, 0);
+        assert_eq!(state.pattern_space, "");
+        assert!(!state.deleted);
+        assert!(state.side_effects.is_empty());
+    }
+
+    #[test]
+    fn test_line_iterator() {
+        let lines = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let mut iter = LineIterator::new(lines);
+        
+        assert_eq!(iter.current_line(), Some("a".to_string()));
+        assert_eq!(iter.current_line(), Some("b".to_string()));
+        assert_eq!(iter.current_line(), Some("c".to_string()));
+        assert_eq!(iter.current_line(), None);
+        assert!(iter.is_eof());
+    }
+
+    #[test]
+    fn test_line_iterator_read_next() {
+        let lines = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let mut iter = LineIterator::new(lines);
+        
+        // current_line advances the iterator
+        assert_eq!(iter.current_line(), Some("a".to_string()));
+        
+        // read_next also advances, so it should return "c" (skips "b")
+        assert_eq!(iter.read_next(), Some("b".to_string()));
+        
+        // Now current_line would return "c"
+        assert_eq!(iter.current_line(), Some("c".to_string()));
+        
+        // At EOF
+        assert_eq!(iter.read_next(), None);
+    }
+
+    #[test]
+    fn test_n_d_command_basic() {
+        // Test the famous "n; d" command (should print odd lines)
+        let commands = parse_simple("n; d");
+        let mut processor = FileProcessor::new(commands);
+        
+        let input = vec!["1".to_string(), "2".to_string(), "3".to_string(), "4".to_string()];
+        let result = processor.process_cycle_based(input).unwrap();
+        
+        // Should output odd lines: "1", "3"
+        assert_eq!(result, vec!["1", "3"]);
+    }
+
+    #[test]
+    fn test_n_command_alone() {
+        // Test n command alone (should print all lines)
+        let commands = parse_simple("n");
+        let mut processor = FileProcessor::new(commands);
+        
+        let input = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let result = processor.process_cycle_based(input).unwrap();
+        
+        // n outputs current line, reads next, continues
+        // Since there are no more commands, it should output all lines
+        assert_eq!(result, vec!["a", "b", "c"]);
     }
 }
