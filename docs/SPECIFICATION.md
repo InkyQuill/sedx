@@ -467,7 +467,7 @@ $ sedx config
 
 ### 4.1 Command Categories
 
-#### Implemented (v0.2.0-alpha)
+#### Implemented (v0.2.6-alpha)
 
 - ✅ **s** - Substitution
 - ✅ **d** - Delete
@@ -476,6 +476,11 @@ $ sedx config
 - ✅ **c** - Change text
 - ✅ **p** - Print
 - ✅ **q** - Quit
+- ✅ **Q** - Quit without printing
+- ✅ **n** - Next line (print, read next, continue)
+- ✅ **N** - Next append (append newline + next line)
+- ✅ **P** - Print first line of pattern space
+- ✅ **D** - Delete first line, restart cycle
 - ✅ **{}** - Command grouping
 - ✅ **h** - Hold (copy to hold space)
 - ✅ **H** - Hold append (append to hold space)
@@ -483,13 +488,9 @@ $ sedx config
 - ✅ **G** - Get append (append from hold space)
 - ✅ **x** - Exchange (swap pattern and hold space)
 
-#### Planned - Tier 1 (v0.4.0)
-
-- 📋 **n** - Next line (print, read next, restart cycle)
-- 📋 **N** - Next append (append newline + next line)
-- 📋 **P** - Print first line of pattern space
-- 📋 **D** - Delete first line, restart cycle
-- 📋 **Q** - Quit without printing
+**Note:** Multi-line commands (n, N, P, D) now work with full address/range support
+in cycle-based execution mode. Commands are applied per-line with proper
+state tracking across cycles, matching GNU sed's behavior.
 
 #### Planned - Tier 2 (v0.5.0)
 

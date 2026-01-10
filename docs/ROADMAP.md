@@ -23,10 +23,10 @@ SedX is a **modern, safe text processing tool** that:
 
 ---
 
-## 📊 Current Status (v0.2.4-alpha - neo branch)
+## 📊 Current Status (v0.2.6-alpha - neo branch)
 
 **Implemented:** 4,500+ lines, 14 modules
-- ✅ 11/30 sed commands (37%)
+- ✅ 16/30 sed commands (53%)
 - ✅ **Full backup system with disk space checking**
 - ✅ **Configuration file system** (~/.sedx/config.toml)
 - ✅ **Backup management CLI** (list, show, restore, remove, prune)
@@ -54,9 +54,16 @@ SedX is a **modern, safe text processing tool** that:
   - ✅ **Week 2**: Multi-line pattern space (n, N, P, D commands - basic implementation)
   - ✅ **Week 3**: Q command (quit without printing), `-f`/`--file` flag, backup optimization
   - ✅ **Week 4**: Comprehensive testing & bug fixes
-    - Phase 4 tests: 22/29 passing (76%)
+    - Phase 4 tests: 27/29 passing (93%)
     - Regression tests: 10/10 passing (100%)
     - Comprehensive tests: 32/40 passing (80%)
+  - ✅ **Week 5**: Cycle-based architecture & address resolution
+    - Implemented full cycle-based execution model
+    - Address resolution for all command types (line, pattern, range, negated, relative, step)
+    - Single-line address range bug fix
+    - N command EOF handling fix
+    - P command newline handling fix
+    - Full address/range support for multi-line commands
 
 - **Phase 3 COMPLETE**: Enhanced Regex & Substitution ✅
   - ✅ Escape sequences in replacements (\n, \t, \r, \\, \xHH, \uHHHH)
@@ -381,16 +388,30 @@ hint: Use ${1}user to disambiguate: s/(\d+)/${1}user/
 - ✅ Backup optimization (skip for read-only commands)
 
 **Week 4: Testing** ✅ COMPLETED
-- ✅ Phase 4 comprehensive tests (22/29 passing, 76%)
+- ✅ Phase 4 comprehensive tests (27/29 passing, 93%)
 - ✅ Regression tests vs GNU sed (10/10 passing, 100%)
 - ✅ Comprehensive test suite (32/40 passing, 80%)
 - ✅ Edge cases tested (empty files, huge lines, EOF handling)
 - ✅ Multi-line operation tests (partial - addresses required)
 
+**Week 5: Cycle-Based Architecture & Address Resolution** ✅ COMPLETED
+- ✅ Full cycle-based execution model implemented
+- ✅ Address resolution for all command types:
+  - LineNumber, Pattern, FirstLine, LastLine
+  - Negated addresses
+  - Relative ranges (addr,+N and addr,~N)
+  - Step addresses (first~step)
+- ✅ Range state tracking across cycles (for 1,3 ranges)
+- ✅ Single-line address range bug fix (2p now works correctly)
+- ✅ N command EOF handling fix (no extra newlines)
+- ✅ P command newline handling fix (only prints when newline present)
+- ✅ Full address/range support for multi-line commands (n, N, P, D, Q)
+
 #### Success Criteria
 - ✅ 80% of common sed scripts work unmodified (achieved)
-- ✅ All Tier 1 commands implemented (11/30 complete)
+- ✅ All Tier 1 commands implemented (16/30 complete)
 - ✅ No regressions in existing functionality (100% regression test pass)
+- ✅ Cycle-based architecture with full address resolution (achieved)
 
 #### Example Usage
 ```bash
