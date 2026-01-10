@@ -1,8 +1,8 @@
 # SedX System Specification
 
 **Version:** 1.0.0 (Target)
-**Current Version:** 0.2.0-alpha (neo branch)
-**Last Updated:** 2025-01-08
+**Current Version:** 0.2.6-alpha (neo branch)
+**Last Updated:** 2026-01-10
 
 ---
 
@@ -469,6 +469,7 @@ $ sedx config
 
 #### Implemented (v0.2.6-alpha)
 
+**Phase 1-3 Commands:**
 - ✅ **s** - Substitution
 - ✅ **d** - Delete
 - ✅ **a** - Append text
@@ -477,6 +478,8 @@ $ sedx config
 - ✅ **p** - Print
 - ✅ **q** - Quit
 - ✅ **Q** - Quit without printing
+
+**Phase 4 Commands (Multi-line & Cycle-Based Architecture):**
 - ✅ **n** - Next line (print, read next, continue)
 - ✅ **N** - Next append (append newline + next line)
 - ✅ **P** - Print first line of pattern space
@@ -488,29 +491,36 @@ $ sedx config
 - ✅ **G** - Get append (append from hold space)
 - ✅ **x** - Exchange (swap pattern and hold space)
 
-**Note:** Multi-line commands (n, N, P, D) now work with full address/range support
-in cycle-based execution mode. Commands are applied per-line with proper
-state tracking across cycles, matching GNU sed's behavior.
+**Note:** All commands above use cycle-based execution mode matching GNU sed's behavior.
+Multi-line commands (n, N, P, D) work with full address/range support. Commands are
+applied per-cycle with proper state tracking across cycles.
 
-#### Planned - Tier 2 (v0.5.0)
+**Phase 5 Flow Control Commands (v0.2.6-alpha):**
+- ✅ **:** - Label definition
+- ✅ **b** - Branch to label (unconditional)
+- ✅ **t** - Branch if substitution made (conditional on successful substitution)
+- ✅ **T** - Branch if NO substitution made (inverse conditional)
 
-- 📋 **:** - Label definition
-- 📋 **b** - Branch to label
-- 📋 **t** - Branch if substitution made
-- 📋 **T** - Branch if NO substitution made
-- 📋 **r** - Read file
-- 📋 **w** - Write to file
-- 📋 **R** - Read one line from file
-- 📋 **W** - Write first line to file
+**Phase 5 File I/O Commands (Parsing Only - Stub Implementation):**
+- 🔶 **r** - Read file (parses correctly, no-op implementation)
+- 🔶 **w** - Write to file (parses correctly, no-op implementation)
+- 🔶 **R** - Read one line from file (parses correctly, no-op implementation)
+- 🔶 **W** - Write first line to file (parses correctly, no-op implementation)
+
+**Phase 5 Additional Commands (Parsing Only - Stub Implementation):**
+- 🔶 **=** - Print line number (parses correctly, no-op implementation)
+- 🔶 **F** - Print filename (parses correctly, no-op implementation)
+- 🔶 **z** - Clear pattern space (parses correctly, no-op implementation)
+
+**Legend:**
+- ✅ Fully implemented and tested
+- 🔶 Parses correctly but not fully implemented (stub/no-op)
 
 #### Planned - Tier 3 (v0.6.0)
 
 - 📋 **y** - Translate characters
 - 📋 **l** - List with escape sequences
-- 📋 **=** - Print line number
-- 📋 **F** - Print filename
 - 📋 **e** - Execute shell command
-- 📋 **z** - Clear pattern space
 
 ---
 
@@ -741,67 +751,175 @@ sedx '/foo/x' file.txt  # Swap matching lines with hold space
 
 ---
 
+#### Flow Control (b, t, T commands)
+
+**Labels (`:label`):**
+```bash
+# Define a label for branching
+sedx ':start; /found/q; n; b start' file.txt
+```
+
+**Branch (`b`):**
+```bash
+# Unconditional branch to label
+sedx 'b skip; s/foo/bar/; :skip; s/baz/qux/' file.txt
+
+# Branch to end (skip remaining commands)
+sedx '5b; s/foo/bar/' file.txt  # Skip substitution on line 5
+
+# Branch with pattern address
+sedx '/error/b end; s/normal/OK/; :end' file.txt
+```
+
+**Test Branch (`t`):**
+```bash
+# Branch if substitution was made
+sedx ':loop; s/foo/bar/; t loop' file.txt  # Repeat until no more "foo"
+
+# Branch to label if substitution succeeded
+sedx 's/test/OK/; t success; s/test/FAIL/; :success' file.txt
+
+# t flag works per-line (substitution flag resets each line)
+sedx 's/foo/Foo/; t; s/bar/Bar/' file.txt
+```
+
+**Test Inverse Branch (`T`):**
+```bash
+# Branch if NO substitution was made
+sedx 's/foo/bar/; T nosub; s/baz/qux/; b end; :nosub; s/fallback/backup/; :end' file.txt
+
+# Handle lines that didn't match
+sedx ':start; s/foo/bar/; T next; s/bar/baz/; b end; :next; s/no_match/skipped/; :end' file.txt
+```
+
+**Key Behaviors:**
+- **b command:** Unconditional branch, jumps to label or end of script
+- **t command:** Branches only if a substitution was made in the current cycle
+- **T command:** Branches only if NO substitution was made in the current cycle
+- **Substitution flag:** Tracked per-line, resets at the start of each cycle
+- **Labels:** Can be defined anywhere in the script, resolved during parsing
+
+**Examples:**
+```bash
+# Loop until pattern matches (search for "target")
+sedx ':top; /target/q; n; b top' file.txt
+
+# Conditional substitution based on match
+sedx '/error/{ s/error/ERROR/; t log; }; s/normal/OK/; b end; :log; s/^/[LOG] /; :end' file.txt
+```
+
+---
+
 ### 4.3 Command Reference (Planned)
 
-#### Next Line Operations (v0.4.0)
+#### File I/O (Parsing Only - Full Implementation Pending)
 
-**`n` - Next line:**
+**Note:** The following file I/O commands parse correctly but are currently stubs (no-op implementation).
+
+**Read file (`r`):**
 ```bash
-seq 1 5 | sedx 'n; d'  # Output: 1, 3, 5
-```
-
-**`N` - Next append:**
-```bash
-printf "a\nb\nc" | sedx 'N; s/\n/ /'  # Output: "a b\nc"
-```
-
-**`P` - Print first line:**
-```bash
-printf "a\nb\nc" | sedx 'N;P;D'  # Process multi-line
-```
-
-**`D` - Delete first line:**
-```bash
-sedx ':top;N;D;/pattern/q;b top' file.txt
-```
-
----
-
-#### Flow Control (v0.5.0)
-
-**Labels and branching:**
-```bash
-# Loop until pattern matches
-sedx ':top; /found/q; n; b top' file.txt
-
-# Repeat substitution
-sedx ':loop; s/foo/bar/; t loop' file.txt
-
-# Branch if NO substitution
-sedx ':loop; s/foo/bar/; T end; b loop; :end'
-```
-
----
-
-#### File I/O (v0.5.0)
-
-**Read file:**
-```bash
+# Currently parses but doesn't execute
 sedx '5r header.txt' file.txt
 sedx '/error/r error_template.txt' log.txt
 ```
 
-**Write to file:**
+**Write to file (`w`):**
 ```bash
+# Currently parses but doesn't execute
 sedx '/error/w errors.log' log.txt
 sedx '5,10w excerpt.txt' file.txt
 ```
 
+**Read line (`R`):**
+```bash
+# Currently parses but doesn't execute
+sedx '5R include.txt' file.txt
+```
+
+**Write first line (`W`):**
+```bash
+# Currently parses but doesn't execute
+sedx '/header/W headers.log' file.txt
+```
+
 ---
 
-## 5. Substitution System
+## 5. Architecture & Execution Model
 
-### 5.1 Syntax
+### 5.1 Cycle-Based Processing
+
+SedX uses a **cycle-based execution model** that matches GNU sed's behavior. Each input line goes through a "cycle" where all commands are applied in sequence.
+
+#### Execution Flow
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ FOR EACH INPUT LINE:                                    │
+│   1. READ LINE into pattern space                       │
+│   2. FOR EACH COMMAND:                                  │
+│      a. Check if command applies (address match)        │
+│      b. Execute command on pattern space                │
+│      c. Handle result:                                  │
+│         - Continue to next command                     │
+│         - Delete pattern space (d command)              │
+│         - Restart cycle (D command)                     │
+│         - Quit processing (q/Q commands)                │
+│   3. IF NOT DELETED: Print pattern space               │
+│   4. Advance to next line                               │
+└─────────────────────────────────────────────────────────┘
+```
+
+#### Key Components
+
+**CycleState:**
+- `pattern_space`: Current line being processed (can be multi-line)
+- `hold_space`: Persistent storage across cycles
+- `line_num`: Current line number (1-indexed)
+- `deleted`: Flag marking pattern space for deletion
+- `side_effects`: Accumulated output from p, P, n commands
+
+**CycleResult (command execution result):**
+- `Continue`: Apply next command
+- `DeleteLine`: End cycle, pattern space not printed
+- `RestartCycle`: Restart from first command (D command)
+- `Quit(code)`: Exit processing immediately
+
+#### Multi-Line Pattern Space
+
+Commands like `N`, `P`, and `D` operate on multi-line pattern spaces:
+- `N` appends next line: `"line1"` → `"line1\nline2"`
+- `P` prints only first line: `"line1\nline2"` → outputs `"line1"`
+- `D` deletes first line and restarts: `"line1\nline2"` → process `"line2"` from first command
+
+This architecture enables complex text processing patterns while maintaining GNU sed compatibility.
+
+#### Flow Control with Labels and Branches
+
+Cycle-based execution supports flow control commands:
+- **Labels (`:label`)**: Define jump targets
+- **Branch (`b`)**: Unconditional jump to label
+- **Test (`t`)**: Jump if substitution occurred in current cycle
+- **Test Inverse (`T`)**: Jump if NO substitution occurred
+
+**Example:**
+```bash
+# Loop until "target" found
+:start; /target/q; n; b start
+```
+
+This works because:
+1. Each cycle processes one line
+2. `n` reads next line, continues cycle
+3. `b start` jumps to label, continues with next line
+4. `/target/q` quits when pattern matches
+
+For detailed implementation, see the cycle-based architecture documentation (archived).
+
+---
+
+## 6. Substitution System
+
+### 6.1 Syntax
 
 SedX uses **traditional sed syntax** for all operations:
 
@@ -832,7 +950,7 @@ sedx '/error/s/test/fix/' file.txt
 
 ---
 
-### 5.2 Regex Flavor Impact on Syntax
+### 6.2 Regex Flavor Impact on Syntax
 
 The regex flavor affects pattern syntax and backreference style:
 
@@ -858,7 +976,7 @@ sedx -E 's/(foo)(bar)/\2\1/' file.txt      # Uses $1, $2 internally
 
 ---
 
-### 5.3 Substitution Flags
+### 6.3 Substitution Flags
 
 **In-Expression Flags:**
 ```bash
@@ -877,7 +995,7 @@ sedx 's/foo/bar/p' file.txt      # Print line if substitution made
 
 ---
 
-### 5.4 CLI-Level Flags
+### 6.4 CLI-Level Flags
 
 | Flag | Description | Example |
 |------|-------------|---------|
@@ -888,7 +1006,7 @@ sedx 's/foo/bar/p' file.txt      # Print line if substitution made
 
 ---
 
-### 5.5 Capture Groups
+### 6.5 Capture Groups
 
 #### Syntax Support
 
@@ -929,7 +1047,7 @@ $ sedx 's/(\d+)/${1}user/' file.txt  # OK
 
 ---
 
-### 5.6 Escape Sequences
+### 6.6 Escape Sequences
 
 Supported in replacement strings:
 
@@ -946,7 +1064,7 @@ Supported in replacement strings:
 
 ---
 
-### 5.7 Replacement Limiting
+### 6.7 Replacement Limiting
 
 Limit total replacements per file:
 
@@ -962,11 +1080,11 @@ sedx --max-replacements=10 's/error/ERROR/g' log.txt
 
 ---
 
-## 6. Address Types
+## 7. Address Types
 
 Addresses specify which lines commands apply to.
 
-### 6.1 Line Numbers
+### 7.1 Line Numbers
 
 ```bash
 sedx '5d' file.txt          # Line 5
@@ -974,7 +1092,7 @@ sedx '5,10d' file.txt       # Lines 5-10
 sedx '1,5!d' file.txt       # All except lines 1-5
 ```
 
-### 6.2 Pattern Addresses
+### 7.2 Pattern Addresses
 
 ```bash
 sedx '/foo/d' file.txt                    # Lines matching "foo"
@@ -983,7 +1101,7 @@ sedx '/foo/!d' file.txt                  # Lines NOT matching "foo"
 sedx '/foo/,+5d' file.txt                # "foo" and 5 lines after (future)
 ```
 
-### 6.3 Special Addresses
+### 7.3 Special Addresses
 
 ```bash
 sedx '$d' file.txt          # Last line
@@ -991,7 +1109,7 @@ sedx '1,$d' file.txt        # All lines
 sedx '0d' file.txt          # First line before any processing (future)
 ```
 
-### 6.4 Stepping Addresses (future)
+### 7.4 Stepping Addresses (future)
 
 ```bash
 sedx '1~2d' file.txt        # Delete odd lines (1, 3, 5, ...)
@@ -999,7 +1117,7 @@ sedx '2~2d' file.txt        # Delete even lines (2, 4, 6, ...)
 sedx '1~3p' file.txt        # Every 3rd line (1, 4, 7, ...)
 ```
 
-### 6.5 Range Semantics
+### 7.5 Range Semantics
 
 **Line number ranges:** `start,end` (inclusive)
 ```bash
@@ -1033,7 +1151,7 @@ line 6
 line 10
 ```
 
-### 6.6 Negation
+### 7.6 Negation
 
 ```bash
 sedx '/foo/!d' file.txt              # Delete lines NOT matching "foo"
@@ -1043,9 +1161,9 @@ sedx '/start/,/end/!s/foo/bar/g'    # Apply except in range
 
 ---
 
-## 7. Backup System
+## 8. Backup System
 
-### 7.1 Overview
+### 8.1 Overview
 
 SedX automatically creates backups before modifying files.
 
@@ -1063,7 +1181,7 @@ SedX automatically creates backups before modifying files.
 
 ---
 
-### 7.2 Backup Metadata
+### 8.2 Backup Metadata
 
 **operation.json:**
 ```json
@@ -1083,7 +1201,7 @@ SedX automatically creates backups before modifying files.
 
 ---
 
-### 7.3 Disk Space Management
+### 8.3 Disk Space Management
 
 #### Checks Before Backup
 
@@ -1132,7 +1250,7 @@ options:
 
 ---
 
-### 7.4 Backup Management
+### 8.4 Backup Management
 
 #### List Backups
 ```bash
@@ -1187,7 +1305,7 @@ Removed 8 old backups, freed 42.1 MB
 
 ---
 
-### 7.5 Disabling Backups
+### 8.5 Disabling Backups
 
 **Not Recommended**, but available:
 
@@ -1206,7 +1324,7 @@ Continue? [y/N] y
 
 ---
 
-### 7.6 Backup Retention
+### 8.6 Backup Retention
 
 **Default policy:** Keep last 50 backups
 
@@ -1223,9 +1341,9 @@ auto_prune = true           # Automatic cleanup
 
 ---
 
-## 8. Usage Patterns
+## 9. Usage Patterns
 
-### 8.1 Basic Substitution
+### 9.1 Basic Substitution
 
 ```bash
 # Preview (default)
@@ -1240,7 +1358,7 @@ sedx --interactive 's/foo/bar/g' file.txt
 
 ---
 
-### 8.2 Multiple Files
+### 9.2 Multiple Files
 
 ```bash
 # Apply to multiple files
@@ -1255,7 +1373,7 @@ sedx --interactive 's/foo/bar/g' *.conf
 
 ---
 
-### 8.3 Pipeline Operations
+### 9.3 Pipeline Operations
 
 ```bash
 # Read from stdin, write to stdout (no backup)
@@ -1273,7 +1391,7 @@ find . -name "*.txt" | sedx 's/\.txt$/.bak/'
 
 ---
 
-### 8.4 Large File Processing
+### 9.4 Large File Processing
 
 **Stream processing (v0.2.0+):**
 ```bash
@@ -1289,7 +1407,7 @@ sedx 's/error/ERROR/g' huge.log | gzip > processed.log.gz
 
 ---
 
-### 8.5 Interactive Editing
+### 9.5 Interactive Editing
 
 ```bash
 # Preview then confirm
@@ -1304,7 +1422,7 @@ sedx -i 's/foo/bar/g' file1.txt file2.txt
 
 ---
 
-### 8.6 CI/CD Integration
+### 9.6 CI/CD Integration
 
 ```bash
 # In CI/CD pipeline (no backup, automatic)
@@ -1319,7 +1437,7 @@ sedx --no-backup -e 's/dev/prod/' -e 's/localhost/db.server/' app.conf
 
 ---
 
-### 8.7 Complex Multi-Command Scripts
+### 9.7 Complex Multi-Command Scripts
 
 ```bash
 # Command grouping
@@ -1344,7 +1462,7 @@ sedx -f script.sed file.txt
 
 ---
 
-### 8.8 Pattern-Scope Operations
+### 9.8 Pattern-Scope Operations
 
 ```bash
 # Only in lines matching "error"
@@ -1359,7 +1477,7 @@ sedx '/\[section\]/,\[\/section\]/s/old/new/' config.ini
 
 ---
 
-### 8.9 Debugging with Dry-Run
+### 9.9 Debugging with Dry-Run
 
 ```bash
 # Show what would change (default)
@@ -1377,9 +1495,9 @@ sedx --color=never 's/foo/bar/g' file.txt | less
 
 ---
 
-## 9. Migration Guide (sed → sedx)
+## 10. Migration Guide (sed → sedx)
 
-### 9.1 Quick Reference
+### 10.1 Quick Reference
 
 | Sed Command | SedX Equivalent | Notes |
 |-------------|-----------------|-------|
@@ -1393,7 +1511,7 @@ sedx --color=never 's/foo/bar/g' file.txt | less
 
 ---
 
-### 9.2 Common Patterns
+### 10.2 Common Patterns
 
 #### Replace all occurrences
 **Sed:**
@@ -1475,7 +1593,7 @@ sedx -f script.sed file.txt         # Same (v0.4.0+)
 
 ---
 
-### 9.3 Incompatibilities
+### 10.3 Incompatibilities
 
 #### Default Regex Behavior
 
@@ -1532,7 +1650,7 @@ sedx --no-backup --force 's/foo/bar/' file.txt
 
 ---
 
-### 9.4 Feature Comparison
+### 10.4 Feature Comparison
 
 | Feature | GNU sed | SedX | Notes |
 |---------|---------|------|-------|
@@ -1549,9 +1667,9 @@ sedx --no-backup --force 's/foo/bar/' file.txt
 
 ---
 
-## 10. Configuration
+## 11. Configuration
 
-### 10.1 Config File Location
+### 11.1 Config File Location
 
 **Path:** `~/.sedx/config.toml`
 
@@ -1562,7 +1680,7 @@ sedx config
 
 ---
 
-### 10.2 Config Structure
+### 11.2 Config Structure
 
 ```toml
 # Backup settings
@@ -1601,7 +1719,7 @@ timeout_sec = 300                            # Operation timeout
 
 ---
 
-### 10.3 Config Command
+### 11.3 Config Command
 
 **Edit config:**
 ```bash
@@ -1628,7 +1746,7 @@ location = "~/.sedx/backups"
 
 ---
 
-### 10.4 Environment Variables
+### 11.4 Environment Variables
 
 SedX respects these environment variables:
 
@@ -1643,7 +1761,7 @@ SedX respects these environment variables:
 
 ---
 
-### 10.5 Per-Project Config
+### 11.5 Per-Project Config
 
 SedX looks for config in this order:
 
