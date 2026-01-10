@@ -232,7 +232,7 @@ run_test "Single line file" \
     "foo"
 
 run_test "Script file with only comments" \
-    "$SEDX -f test_input.txt test_input.txt" \
+    "$SEDX -f test_input.txt test_input.txt 2>&1 | cat" \
     "Error: Script file 'test_input.txt' is empty or contains no valid commands" \
     "# comment\n# another comment"
 
@@ -288,12 +288,12 @@ echo "=== Testing complex scenarios ==="
 
 cat > complex.sed << 'EOF'
 # Convert markdown headers to HTML
-s/^# /<h1>/g
-s/^## /<h2>/g
-s/^### /<h3>/g
+s|^# (.*)|<h1>$1</h1>|g
+s|^## (.*)|<h2>$1</h2>|g
+s|^### (.*)|<h3>$1</h3>|g
 # Remove extra formatting
-s/\*\*//g
-s/__/g
+s|\*\*||g
+s|__||g
 EOF
 
 run_test "Complex script file" \
