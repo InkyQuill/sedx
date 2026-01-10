@@ -36,6 +36,7 @@ TEST_SUITES=(
     "pipeline_tests.sh:Pipeline Tests (stdin/stdout)"
     "streaming_tests.sh:Streaming Mode Tests"
     "holdspace_tests.sh:Hold Space Tests"
+    "phase5_tests.sh:Phase 5 Tests (Flow Control, File I/O, Additional Commands)"
     "edge_tests.sh:Edge Case Tests"
 )
 
