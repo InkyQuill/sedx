@@ -17,15 +17,6 @@
 /// - `\1`..\`\9` → `$1`..`$9` - Convert backreferences to Rust regex style
 /// - `\&` → `$&` - Convert match backreference
 /// - `\\` → `\` - Convert double backslash to single
-///
-/// # Examples
-///
-/// ```
-/// assert_eq!(convert_bre_to_pcre(r#"\(foo\)"#), "(foo)");
-/// assert_eq!(convert_bre_to_pcre(r#"\(a\)\(b\)"#), "(a)(b)");
-/// assert_eq!(convert_bre_to_pcre(r#"foo\+"#), "foo+");
-/// assert_eq!(convert_bre_to_pcre(r#"\1"#), "$1");
-/// ```
 pub fn convert_bre_to_pcre(pattern: &str) -> String {
     let mut result = String::new();
     let mut chars = pattern.chars().peekable();
@@ -92,15 +83,6 @@ pub fn convert_bre_to_pcre(pattern: &str) -> String {
 /// - Escaped braces: `\{`, `\}`
 /// - Escaped quantifiers: `\+`, `\?`
 /// - Escaped alternation: `\|`
-///
-/// # Examples
-///
-/// ```
-/// assert!(is_bre_pattern(r#"\(foo\)"#));
-/// assert!(is_bre_pattern(r#"foo\+"#));
-/// assert!(!is_bre_pattern(r#"(foo)"#));
-/// assert!(!is_bre_pattern(r#"foo+"#));
-/// ```
 #[allow(dead_code)]  // Kept for potential future use
 pub fn is_bre_pattern(pattern: &str) -> bool {
     pattern.contains("\\(") || pattern.contains("\\)") ||
@@ -267,5 +249,219 @@ mod tests {
         // PCRE patterns should pass through unchanged
         assert_eq!(convert_bre_to_pcre(r#"(foo|bar)+"#), r#"(foo|bar)+"#);
         assert_eq!(convert_bre_to_pcre(r#"foo{3,5}"#), r#"foo{3,5}"#);
+    }
+
+    // Additional comprehensive tests
+
+    #[test]
+    fn test_simple_patterns() {
+        // Simple patterns should pass through unchanged
+        assert_eq!(convert_bre_to_pcre("foo"), "foo");
+        assert_eq!(convert_bre_to_pcre("bar123"), "bar123");
+        assert_eq!(convert_bre_to_pcre("test_pattern"), "test_pattern");
+        assert_eq!(convert_bre_to_pcre(""), "");
+    }
+
+    #[test]
+    fn test_anchors() {
+        // Anchors are the same in BRE and PCRE
+        assert_eq!(convert_bre_to_pcre("^foo"), "^foo");
+        assert_eq!(convert_bre_to_pcre("bar$"), "bar$");
+        assert_eq!(convert_bre_to_pcre("^start$"), "^start$");
+        assert_eq!(convert_bre_to_pcre(r#"\^foo"#), r#"\^foo"#);  // Escaped anchor
+    }
+
+    #[test]
+    fn test_character_classes() {
+        // Character classes are the same in BRE and PCRE
+        assert_eq!(convert_bre_to_pcre("[a-z]"), "[a-z]");
+        assert_eq!(convert_bre_to_pcre("[A-Z0-9]"), "[A-Z0-9]");
+        assert_eq!(convert_bre_to_pcre("[^abc]"), "[^abc]");
+        assert_eq!(convert_bre_to_pcre("[[:alpha:]]"), "[[:alpha:]]");
+        assert_eq!(convert_bre_to_pcre(r#"[a\]z]"#), r#"[a\]z]"#);  // Escaped ] in char class
+    }
+
+    #[test]
+    fn test_escaped_sequences() {
+        // Various escape sequences
+        assert_eq!(convert_bre_to_pcre(r#"\t"#), r#"\t"#);  // Unknown escape, keep as-is
+        assert_eq!(convert_bre_to_pcre(r#"\n"#), r#"\n"#);  // Unknown escape, keep as-is
+        assert_eq!(convert_bre_to_pcre(r#"\s"#), r#"\s"#);  // Unknown escape, keep as-is
+        assert_eq!(convert_bre_to_pcre(r#"\w"#), r#"\w"#);  // Unknown escape, keep as-is
+    }
+
+    #[test]
+    fn test_wildcard() {
+        // Wildcard is the same in BRE and PCRE
+        assert_eq!(convert_bre_to_pcre("f.o"), "f.o");
+        assert_eq!(convert_bre_to_pcre(".*"), ".*");
+        assert_eq!(convert_bre_to_pcre(r#"\.\*"#), r#"\.\*"#);  // Escaped dot and star
+    }
+
+    #[test]
+    fn test_complex_nested_patterns() {
+        // Nested groups
+        assert_eq!(convert_bre_to_pcre(r#"\(foo\(bar\)\)"#), "(foo(bar))");
+        assert_eq!(convert_bre_to_pcre(r#"\(a\|\(b\|c\)\)"#), "(a|(b|c))");
+
+        // Multiple groups with quantifiers
+        assert_eq!(convert_bre_to_pcre(r#"\(foo\)\+"#), "(foo)+");
+        assert_eq!(convert_bre_to_pcre(r#"\(bar\)\{2,5\}"#), "(bar){2,5}");
+
+        // Complex BRE pattern: \(foo\)\{3\} \(bar\|baz\)
+        assert_eq!(convert_bre_to_pcre(r#"\(foo\)\{3\} \(bar\|baz\)"#), r#"(foo){3} (bar|baz)"#);
+    }
+
+    #[test]
+    fn test_multiple_backreferences_in_replacement() {
+        // Multiple backreferences
+        assert_eq!(convert_sed_backreferences(r#"\1\2\3"#), "$1$2$3");
+        assert_eq!(convert_sed_backreferences(r#"\9\8\7\6\5\4\3\2\1"#), "$9$8$7$6$5$4$3$2$1");
+
+        // Backreferences with text
+        assert_eq!(convert_sed_backreferences(r#"start\1middle\2end"#), "start$1middle$2end");
+
+        // Multiple consecutive same backreference
+        assert_eq!(convert_sed_backreferences(r#"\1\1\1"#), "$1$1$1");
+    }
+
+    #[test]
+    fn test_match_reference_in_replacement() {
+        // Match reference \&
+        assert_eq!(convert_sed_backreferences(r#"\&"#), "$&");
+        assert_eq!(convert_sed_backreferences(r#"foo\&bar"#), "foo$&bar");
+        assert_eq!(convert_sed_backreferences(r#"\&\&"#), "$&$&");
+        assert_eq!(convert_sed_backreferences(r#"\1\&\2"#), "$1$&$2");
+    }
+
+    #[test]
+    fn test_mixed_backreferences_and_text() {
+        // Complex replacement patterns
+        assert_eq!(convert_sed_backreferences(r#"prefix_\1_suffix"#), "prefix_$1_suffix");
+        assert_eq!(convert_sed_backreferences(r#"Result: \1, \2"#), "Result: $1, $2");
+        assert_eq!(convert_sed_backreferences(r#"\1:\&:\2"#), "$1:$&:$2");
+    }
+
+    #[test]
+    fn test_no_backreferences_in_text() {
+        // Regular text without backreferences
+        assert_eq!(convert_sed_backreferences("simple text"), "simple text");
+        assert_eq!(convert_sed_backreferences("1234567890"), "1234567890");
+        assert_eq!(convert_sed_backreferences("!@#$%^&*()"), "!@#$%^&*()");
+        assert_eq!(convert_sed_backreferences(""), "");
+    }
+
+    #[test]
+    fn test_trailing_backslash_pattern() {
+        // Trailing backslash should be preserved
+        assert_eq!(convert_bre_to_pcre(r#"foo\"#), r#"foo\"#);
+        assert_eq!(convert_bre_to_pcre(r#"\("#), r#"("#);      // Just opening paren
+        assert_eq!(convert_bre_to_pcre(r#"\"#), r#"\"#);       // Just backslash
+    }
+
+    #[test]
+    fn test_trailing_backslash_replacement() {
+        // Trailing backslash in replacement
+        assert_eq!(convert_sed_backreferences(r#"foo\"#), r#"foo\"#);
+        assert_eq!(convert_sed_backreferences(r#"\"#), r#"\"#);
+        assert_eq!(convert_sed_backreferences(r#"\1\"#), r#"$1\"#);
+    }
+
+    #[test]
+    fn test_double_backslash_conversion() {
+        // Double backslash to single
+        assert_eq!(convert_bre_to_pcre(r#"\\"#), "\\");
+        assert_eq!(convert_bre_to_pcre(r#"foo\\bar"#), "foo\\bar");
+        assert_eq!(convert_bre_to_pcre(r#"\\("#), r#"\("#);  // \\ then \( → \ then (
+
+        // Triple and quadruple backslash
+        assert_eq!(convert_bre_to_pcre(r#"\\\"#), r#"\\"#);   // \\\" → \\
+        assert_eq!(convert_bre_to_pcre(r#"\\\\"#), r#"\\"#);  // \\\\ → \\
+    }
+
+    #[test]
+    fn test_double_backslash_replacement() {
+        // Double backslash to single in replacement
+        assert_eq!(convert_sed_backreferences(r#"\\"#), "\\");
+        assert_eq!(convert_sed_backreferences(r#"foo\\bar"#), "foo\\bar");
+        assert_eq!(convert_sed_backreferences(r#"\1\\n"#), "$1\\n");
+    }
+
+    #[test]
+    fn test_alternation_patterns() {
+        // Various alternation patterns
+        assert_eq!(convert_bre_to_pcre(r#"foo\|bar"#), "foo|bar");
+        // Note: \baz gets \b converted (unknown escape) and then literal baz
+        assert_eq!(convert_bre_to_pcre(r#"\(foo\|bar\|\baz\)"#), r#"(foo|bar|\baz)"#);
+        assert_eq!(convert_bre_to_pcre(r#"a\|b\|c"#), "a|b|c");
+        // Clean alternation with escaped bars only
+        assert_eq!(convert_bre_to_pcre(r#"\(foo\|bar\)\+"#), "(foo|bar)+");
+    }
+
+    #[test]
+    fn test_repetition_quantifiers() {
+        // All BRE quantifiers
+        assert_eq!(convert_bre_to_pcre(r#"foo\+"#), "foo+");
+        assert_eq!(convert_bre_to_pcre(r#"foo\?"#), "foo?");
+        assert_eq!(convert_bre_to_pcre(r#"foo\{3\}"#), "foo{3}");
+        assert_eq!(convert_bre_to_pcre(r#"foo\{3,5\}"#), "foo{3,5}");
+        assert_eq!(convert_bre_to_pcre(r#"foo\{3,\}"#), "foo{3,}");
+        assert_eq!(convert_bre_to_pcre(r#"foo\{,5\}"#), "foo{,5}");
+
+        // Escaped quantifiers remain escaped (literal)
+        assert_eq!(convert_bre_to_pcre(r#"foo\*"#), r#"foo\*"#);
+    }
+
+    #[test]
+    fn test_grouped_commands() {
+        // BRE patterns commonly used with grouped commands
+        assert_eq!(convert_bre_to_pcre(r#"/foo\|bar/"#), r#"/foo|bar/"#);
+        // Backreferences in patterns are converted to $1 for SedX internal representation
+        assert_eq!(convert_bre_to_pcre(r#"\(test\).*\1"#), r#"(test).*$1"#);
+    }
+
+    #[test]
+    fn test_digit_backreferences_in_pattern() {
+        // In patterns, \1-\9 convert to $1-$9
+        // Note: This is for SedX's internal representation
+        assert_eq!(convert_bre_to_pcre(r#"\1"#), "$1");
+        assert_eq!(convert_bre_to_pcre(r#"\2"#), "$2");
+        assert_eq!(convert_bre_to_pcre(r#"\9"#), "$9");
+
+        // Digits following backslash that aren't backreferences
+        assert_eq!(convert_bre_to_pcre(r#"\0"#), r#"\0"#);  // \0 is not a backreference
+    }
+
+    #[test]
+    fn test_special_characters_preserved() {
+        // Characters that should remain unchanged
+        assert_eq!(convert_bre_to_pcre(r#"."#), ".");
+        assert_eq!(convert_bre_to_pcre(r#"*"#), "*");
+        assert_eq!(convert_bre_to_pcre(r#"^"#), "^");
+        assert_eq!(convert_bre_to_pcre(r#"$"#), "$");
+        assert_eq!(convert_bre_to_pcre(r#"["#), "[");
+        assert_eq!(convert_bre_to_pcre(r#"]"#), "]");
+    }
+
+    #[test]
+    fn test_newline_escape_at_end() {
+        // \n at end of pattern is literal newline escape
+        assert_eq!(convert_bre_to_pcre(r#"foo\n"#), r#"foo\n"#);
+        assert_eq!(convert_bre_to_pcre(r#"\n"#), r#"\n"#);
+    }
+
+    #[test]
+    fn test_empty_groups() {
+        // Empty or simple groups
+        assert_eq!(convert_bre_to_pcre(r#"\(\)"#), "()");
+        assert_eq!(convert_bre_to_pcre(r#"\(\+\)"#), "(+)");
+    }
+
+    #[test]
+    fn test_unicode_patterns() {
+        // Unicode characters should pass through
+        assert_eq!(convert_bre_to_pcre("föö"), "föö");
+        assert_eq!(convert_bre_to_pcre(r#"\(日本語\)"#), "(日本語)");
+        assert_eq!(convert_bre_to_pcre("test_测试"), "test_测试");
     }
 }

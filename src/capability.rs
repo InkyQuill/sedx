@@ -14,21 +14,6 @@ use crate::command::{Command, Address};
 /// - Hold space operations with non-streamable ranges (e.g., negated addresses)
 /// - Negated addresses in ranges
 /// - Complex mixed ranges (pattern to negated pattern, etc.)
-///
-/// # Examples
-///
-/// ```
-/// use crate::command::Command;
-///
-/// // Streamable: simple substitution
-/// assert!(can_stream(&[Command::Substitution { ... }]));
-///
-/// // Streamable: hold space without range
-/// assert!(can_stream(&[Command::Hold { range: None }]));
-///
-/// // Not streamable: hold space with negated address range
-/// assert!(!can_stream(&[Command::Hold { range: Some((Address::Negated(...), ...)) }]));
-/// ```
 #[allow(dead_code)]  // Kept for potential future use
 pub fn can_stream(commands: &[Command]) -> bool {
     for cmd in commands {

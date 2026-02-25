@@ -318,6 +318,45 @@ Current test coverage:
 
 **Total**: 62+ automated tests
 
+## Stress Tests (`stress_tests.sh`)
+
+Tests performance and resource limits:
+
+**Large File Processing**:
+- 100MB text files with substitutions
+- Multiple chained substitutions
+- Pattern deletions on large files
+- Memory profiling (requires `/usr/bin/time`)
+
+**Many Small Files**:
+- Processing 1,000 files in batch
+- Glob-based batch operations
+
+**Complex Regex Patterns**:
+- 100+ character regex patterns
+- 10+ capture groups
+- Nested capture groups
+
+**Unicode Edge Cases**:
+- Emoji and multi-byte characters
+- CJK (Chinese/Japanese/Korean) text
+- Combining marks and diacritics
+
+**Long Lines**:
+- Single 1MB line processing
+- Multiple 100KB lines
+
+**Performance Benchmarks**:
+- Comparison with GNU sed
+- Timing measurements
+
+Run stress tests:
+```bash
+./tests/stress_tests.sh
+```
+
+Note: Stress tests require `/usr/bin/time` for memory profiling and `python3` for generating test data.
+
 ## CI/CD Integration
 
 Add to your CI pipeline:
