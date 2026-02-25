@@ -77,9 +77,11 @@ proptest! {
         // Count actual occurrences of "foo" in the text (including from prefix/suffix)
         let expected_foo_count = text.matches("foo").count();
 
-        // Apply global substitution
+        // Use a unique replacement that won't appear in prefix/suffix
+        // We use the target "foo" itself as replacement to avoid false positives
+        // when prefix/suffix happen to contain the replacement text
         let parser = Parser::new(RegexFlavor::PCRE);
-        let commands = parser.parse("s/foo/bar/g").unwrap();
+        let commands = parser.parse("s/foo/QUUX_REPLACED/g").unwrap();
 
         let mut processor = FileProcessor::new(commands);
         let result = processor.process_file_with_context(&file_path).unwrap();
@@ -89,10 +91,10 @@ proptest! {
             .collect::<Vec<_>>()
             .join("\n");
 
-        // All "foo" should be replaced with "bar"
+        // All "foo" should be replaced
         prop_assert!(!output.contains("foo"));
-        // Count of "bar" should equal original count of "foo"
-        prop_assert_eq!(output.matches("bar").count(), expected_foo_count);
+        // Count of replacement should equal original count of "foo"
+        prop_assert_eq!(output.matches("QUUX_REPLACED").count(), expected_foo_count);
     }
 
     /// Delete command reduces line count

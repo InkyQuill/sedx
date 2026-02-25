@@ -9,6 +9,7 @@ mod disk_space;
 mod ere_converter;
 mod file_processor;
 mod parser;
+mod regex_error;
 mod sed_parser;
 
 use anyhow::{Context, Result};
@@ -92,7 +93,7 @@ fn execute_stdin(expression: &str, regex_flavor: RegexFlavor, quiet: bool) -> Re
 
     // Process the input using cycle-based or batch processing
     let lines: Vec<String> = input.lines().map(|s| s.to_string()).collect();
-    let mut processor = file_processor::FileProcessor::new(commands.clone());
+    let mut processor = file_processor::FileProcessor::with_regex_flavor(commands.clone(), regex_flavor);
     processor.set_no_default_output(quiet);  // Wire up -n flag
 
     let result_lines = processor.apply_cycle_based(lines)?;
@@ -263,13 +264,13 @@ fn execute_command(
         // Process file with appropriate processor (ALWAYS dry_run for preview)
         let diff = if use_streaming {
             // Use streaming processor with dry_run=true for preview
-            let mut stream_processor = file_processor::StreamProcessor::new(commands.clone())
+            let mut stream_processor = file_processor::StreamProcessor::with_regex_flavor(commands.clone(), regex_flavor)
                 .with_context_size(context)
                 .with_dry_run(true);  // Always preview first
             stream_processor.process_streaming_forced(file_path)
         } else {
             // Use in-memory processor (preview is built-in)
-            let mut processor = file_processor::FileProcessor::new(commands.clone());
+            let mut processor = file_processor::FileProcessor::with_regex_flavor(commands.clone(), regex_flavor);
             processor.set_no_default_output(quiet);  // Wire up -n flag
             processor.process_file_with_context(file_path)
         };
@@ -349,7 +350,7 @@ fn execute_command(
     for file_path in &file_paths {
         if streaming_files.contains(file_path) {
             // Streaming files: Re-process with dry_run=false to apply changes
-            let mut stream_processor = file_processor::StreamProcessor::new(commands.clone())
+            let mut stream_processor = file_processor::StreamProcessor::with_regex_flavor(commands.clone(), regex_flavor)
                 .with_context_size(context)
                 .with_dry_run(false);  // Apply changes now
             match stream_processor.process_streaming_forced(file_path) {
@@ -360,7 +361,7 @@ fn execute_command(
             }
         } else {
             // In-memory files: Apply using apply_to_file()
-            let mut processor = file_processor::FileProcessor::new(commands.clone());
+            let mut processor = file_processor::FileProcessor::with_regex_flavor(commands.clone(), regex_flavor);
             processor.set_no_default_output(quiet);  // Wire up -n flag
             match processor.apply_to_file(file_path) {
                 Ok(_) => {},

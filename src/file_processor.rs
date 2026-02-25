@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use crate::command::{Command, Address, SubstitutionFlags};
-use regex::{Regex, RegexBuilder};
+use crate::regex_error::compile_regex_with_context;
+use regex::Regex;
 use std::fs::{self, File};
 use std::path::Path;
 use std::io::{BufRead, BufReader, BufWriter, Write};
@@ -233,6 +234,8 @@ pub struct FileProcessor {
     // Phase 5: File I/O support
     write_handles: HashMap<String, BufWriter<std::fs::File>>,  // File handles for w/W commands
     read_positions: HashMap<String, usize>,  // Current line position for R command (filename -> line_index)
+    // Regex flavor for enhanced error reporting
+    regex_flavor: crate::cli::RegexFlavor,
 }
 
 /// Result of applying a command in streaming mode
@@ -260,10 +263,17 @@ pub struct StreamProcessor {
     mixed_range_states: HashMap<MixedRangeKey, MixedRangeState>,
     // Dry run mode: if true, don't persist changes to disk
     dry_run: bool,
+    // Regex flavor for enhanced error reporting
+    regex_flavor: crate::cli::RegexFlavor,
 }
 
 impl StreamProcessor {
+    #[allow(dead_code)]  // Part of public API for library users
     pub fn new(commands: Vec<Command>) -> Self {
+        Self::with_regex_flavor(commands, crate::cli::RegexFlavor::PCRE)
+    }
+
+    pub fn with_regex_flavor(commands: Vec<Command>, regex_flavor: crate::cli::RegexFlavor) -> Self {
         Self {
             commands,
             hold_space: String::new(),
@@ -274,6 +284,7 @@ impl StreamProcessor {
             pattern_range_states: HashMap::new(),
             mixed_range_states: HashMap::new(),
             dry_run: false,
+            regex_flavor,
         }
     }
 
@@ -323,15 +334,7 @@ impl StreamProcessor {
         // Process escape sequences in replacement
         let processed_replacement = self.process_replacement_escapes(replacement);
 
-        let re = if case_insensitive {
-            RegexBuilder::new(pattern)
-                .case_insensitive(true)
-                .build()
-                .with_context(|| format!("Invalid regex pattern: {}", pattern))?
-        } else {
-            Regex::new(pattern)
-                .with_context(|| format!("Invalid regex pattern: {}", pattern))?
-        };
+        let re = compile_regex_with_context(pattern, self.regex_flavor, case_insensitive)?;
 
         match nth_occurrence {
             Some(n) if n > 0 => {
@@ -1183,6 +1186,10 @@ impl StreamProcessor {
 
 impl FileProcessor {
     pub fn new(commands: Vec<Command>) -> Self {
+        Self::with_regex_flavor(commands, crate::cli::RegexFlavor::PCRE)
+    }
+
+    pub fn with_regex_flavor(commands: Vec<Command>, regex_flavor: crate::cli::RegexFlavor) -> Self {
         // Build label registry (Phase 5)
         let label_registry = Self::build_label_registry(&commands);
 
@@ -1196,6 +1203,7 @@ impl FileProcessor {
             label_registry,
             write_handles: HashMap::new(),
             read_positions: HashMap::new(),
+            regex_flavor,
         }
     }
 
@@ -2150,16 +2158,8 @@ impl FileProcessor {
         let print_flag = flags.print;
         let nth_occurrence = flags.nth;
 
-        // Compile regex
-        let re = if case_insensitive {
-            RegexBuilder::new(pattern)
-                .case_insensitive(true)
-                .build()
-                .with_context(|| format!("Invalid regex pattern: {}", pattern))?
-        } else {
-            Regex::new(pattern)
-                .with_context(|| format!("Invalid regex pattern: {}", pattern))?
-        };
+        // Compile regex with enhanced error handling
+        let re = compile_regex_with_context(pattern, self.regex_flavor, case_insensitive)?;
 
         // Save original for print flag comparison
         let original = state.pattern_space.clone();
@@ -2335,15 +2335,7 @@ impl FileProcessor {
         let global = flags.global;
         let case_insensitive = flags.case_insensitive;
 
-        let re = if case_insensitive {
-            RegexBuilder::new(pattern)
-                .case_insensitive(true)
-                .build()
-                .with_context(|| format!("Invalid regex pattern: {}", pattern))?
-        } else {
-            Regex::new(pattern)
-                .with_context(|| format!("Invalid regex pattern: {}", pattern))?
-        };
+        let re = compile_regex_with_context(pattern, self.regex_flavor, case_insensitive)?;
 
         // Check for negated pattern range
         if let Some((start, end)) = range
@@ -2351,8 +2343,7 @@ impl FileProcessor {
             && let (Address::Pattern(start_pat), Address::Pattern(_end_pat)) = (start_inner.as_ref(), end_inner.as_ref())
         {
             // Apply substitution to lines NOT matching the pattern
-            let pattern_re = Regex::new(start_pat)
-                .with_context(|| format!("Invalid regex pattern: {}", start_pat))?;
+            let pattern_re = compile_regex_with_context(start_pat, self.regex_flavor, false)?;
 
             for line in lines.iter_mut() {
                 if !pattern_re.is_match(line) {

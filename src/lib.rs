@@ -14,6 +14,7 @@ pub mod disk_space;
 pub mod ere_converter;
 pub mod file_processor;
 pub mod parser;
+pub mod regex_error;
 pub mod sed_parser;
 
 // Re-export commonly used types for convenience
