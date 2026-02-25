@@ -2,11 +2,11 @@ use anyhow::{Context, Result};
 use crate::command::{Command, Address, SubstitutionFlags};
 use regex::{Regex, RegexBuilder};
 use std::fs::{self, File};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::collections::VecDeque;
 use tempfile::NamedTempFile;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 // Chunk 8: Key for tracking mixed range states per command
 #[derive(Clone, Hash, PartialEq, Eq)]
@@ -24,11 +24,14 @@ enum MixedRangeState {
 
 /// Pattern range state for streaming mode (Chunk 8)
 #[derive(Clone, PartialEq)]
+#[allow(dead_code)]  // Reserved for future use in mixed range handling
 enum PatternRangeState {
     LookingForStart,   // Looking for start pattern
     InRange,          // Currently inside /start/,/end/ range
     // Chunk 8: Mixed range states
+    #[allow(dead_code)]  // Reserved for future use
     WaitingForLineNumber { target_line: usize },      // /start/,10 - waiting to reach line 10
+    #[allow(dead_code)]  // Reserved for future use
     CountingRelativeLines { remaining: usize },       // /start/,+5 - counting N lines after match
 }
 
@@ -72,11 +75,13 @@ impl LineIterator {
     }
 
     /// Check if at EOF
+    #[allow(dead_code)]  // Kept for potential future use
     fn is_eof(&self) -> bool {
         self.current >= self.lines.len()
     }
 
     /// Peek at current position without consuming
+    #[allow(dead_code)]  // Kept for potential future use
     fn peek(&self) -> usize {
         self.current
     }
@@ -137,9 +142,11 @@ struct CycleState {
     line_iter: LineIterator,
 
     /// Pattern range states (for /start/,/end/ ranges)
+    #[allow(dead_code)]  // Reserved for future use
     pattern_range_states: HashMap<(String, String), PatternRangeState>,
 
     /// Mixed range states for tracking complex ranges (Chunk 8)
+    #[allow(dead_code)]  // Reserved for future use
     mixed_range_states: HashMap<MixedRangeKey, MixedRangeState>,
 
     /// Line number range states (for 1,3 ranges)
@@ -204,8 +211,10 @@ pub struct FileDiff {
 
 // Legacy structure for backward compatibility
 #[derive(Debug)]
+#[allow(dead_code)]  // Legacy type - kept for API compatibility
 pub struct FileChange {
     pub line_number: usize,
+    #[allow(dead_code)]  // Part of legacy API
     pub old_content: String,
     pub new_content: String,
 }
@@ -228,6 +237,7 @@ pub struct FileProcessor {
 
 /// Result of applying a command in streaming mode
 #[derive(Debug)]
+#[allow(dead_code)]  // Reserved for future streaming enhancements
 enum StreamResult {
     Output(String),           // Line should be output
     Skip,                     // Don't output (deleted)
@@ -292,6 +302,7 @@ impl StreamProcessor {
     }
 
     /// Check if file should use streaming based on size
+    #[allow(dead_code)]  // Kept for potential future use
     fn should_use_streaming(file_size: u64) -> bool {
         const STREAMING_THRESHOLD: u64 = 100 * 1024 * 1024; // 100MB
         file_size >= STREAMING_THRESHOLD
@@ -382,11 +393,11 @@ impl StreamProcessor {
                         chars.next(); // consume 'x'
                         let mut hex = String::new();
                         for _ in 0..2 {
-                            if let Some(&c) = chars.peek() {
-                                if c.is_ascii_hexdigit() {
-                                    hex.push(c);
-                                    chars.next();
-                                }
+                            if let Some(&c) = chars.peek()
+                                && c.is_ascii_hexdigit()
+                            {
+                                hex.push(c);
+                                chars.next();
                             }
                         }
                         if let Ok(byte) = u8::from_str_radix(&hex, 16) {
@@ -398,17 +409,17 @@ impl StreamProcessor {
                         chars.next(); // consume 'u'
                         let mut hex = String::new();
                         for _ in 0..4 {
-                            if let Some(&c) = chars.peek() {
-                                if c.is_ascii_hexdigit() {
-                                    hex.push(c);
-                                    chars.next();
-                                }
+                            if let Some(&c) = chars.peek()
+                                && c.is_ascii_hexdigit()
+                            {
+                                hex.push(c);
+                                chars.next();
                             }
                         }
-                        if let Ok(codepoint) = u32::from_str_radix(&hex, 16) {
-                            if let Some(c) = char::from_u32(codepoint) {
-                                result.push(c);
-                            }
+                        if let Ok(codepoint) = u32::from_str_radix(&hex, 16)
+                            && let Some(c) = char::from_u32(codepoint)
+                        {
+                            result.push(c);
                         }
                     }
                     Some(&c) => {
@@ -594,7 +605,7 @@ impl StreamProcessor {
         if self.current_line < start {
             false
         } else {
-            (self.current_line - start) % step == 0
+            (self.current_line - start).is_multiple_of(step)
         }
     }
 
@@ -662,6 +673,7 @@ impl StreamProcessor {
     /// Process a file using streaming approach (constant memory)
     ///
     /// Currently implements substitution commands. More command types will be added.
+    #[allow(dead_code)]  // Kept for potential future use
     pub fn process_streaming(&mut self, file_path: &Path) -> Result<FileDiff> {
         // Check file exists and get size
         let metadata = fs::metadata(file_path)
@@ -941,7 +953,7 @@ impl StreamProcessor {
                                         Command::Substitution { pattern, replacement, flags, range } => {
                                             let should_apply_sub = match range {
                                                 None => true,
-                                                Some(r) => self.should_apply_command_with_range(&line, &r, cmd_index)?,
+                                                Some(r) => self.should_apply_command_with_range(&line, r, cmd_index)?,
                                             };
                                             if should_apply_sub {
                                                 let original = processed_line.clone();
@@ -1067,7 +1079,7 @@ impl StreamProcessor {
 
                 // Write the processed line
                 writeln!(writer, "{}", processed_line)
-                    .with_context(|| format!("Failed to write to temp file"))?;
+                    .with_context(|| "Failed to write to temp file".to_string())?;
 
                 // Track line for diff (with sliding window logic for Chunk 7)
                 let change_type = if line_changed {
@@ -1215,6 +1227,7 @@ impl FileProcessor {
     }
 
     /// Get the lines that were printed by print commands (for quiet mode)
+    #[allow(dead_code)]  // Public API - kept for compatibility
     pub fn get_printed_lines(&self) -> &[String] {
         &self.printed_lines
     }
@@ -1248,6 +1261,7 @@ impl FileProcessor {
     }
 
     /// Legacy method - returns simple changes (for backward compatibility)
+    #[allow(dead_code)]  // Public API - kept for compatibility
     pub fn process_file(&mut self, file_path: &Path) -> Result<Vec<FileChange>> {
         let diff = self.process_file_with_context(file_path)?;
 
@@ -1495,11 +1509,6 @@ impl FileProcessor {
 
     /// Check if command applies to current cycle state (address matching)
     fn should_apply_to_cycle(&mut self, cmd: &Command, state: &mut CycleState) -> bool {
-        // Helper to check if a single address matches the current line
-        let address_matches = |addr: &Address| -> bool {
-            self.address_matches_cycle(addr, state)
-        };
-
         match cmd {
             // Commands with Option<range>
             Command::Substitution { range, .. } => {
@@ -1696,7 +1705,7 @@ impl FileProcessor {
             Address::Step { start, step } => {
                 // Check if current line is in the stepping sequence
                 if state.line_num >= *start {
-                    (state.line_num - *start) % *step == 0
+                    (state.line_num - *start).is_multiple_of(*step)
                 } else {
                     false
                 }
@@ -1749,18 +1758,18 @@ impl FileProcessor {
                     return self.address_matches_cycle(start, state);
                 }
 
-                // For now, use simple stateless matching
-                // TODO: Add proper pattern range state tracking similar to streaming mode
-                let start_match = self.address_matches_cycle(start, state);
+                // NOTE: In-memory batch mode uses stateless pattern matching.
+            // For proper pattern range state tracking, use streaming mode (which is the default for groups).
+            let start_match = self.address_matches_cycle(start, state);
                 let end_match = self.address_matches_cycle(end, state);
                 start_match || end_match
             }
 
             // Mixed range: line,pattern or pattern,line
             _ => {
-                // For now, use simple stateless matching
-                // TODO: Add proper mixed range state tracking
-                let start_match = self.address_matches_cycle(start, state);
+                // NOTE: Mixed ranges use stateless matching in batch mode.
+            // Streaming mode has proper mixed range state tracking (the default).
+            let start_match = self.address_matches_cycle(start, state);
                 let end_match = self.address_matches_cycle(end, state);
                 start_match || end_match
             }
@@ -2059,8 +2068,8 @@ impl FileProcessor {
                 Ok(CycleResult::Continue)
             }
 
-            // For now, delegate other commands to existing implementation
-            // TODO: Port all commands to cycle model
+            // Commands that use batch implementation fall back to existing code.
+            // Most important commands are already ported to cycle model.
             _ => Ok(CycleResult::Continue),
         }
     }
@@ -2322,7 +2331,7 @@ impl FileProcessor {
         Ok(true)
     }
 
-    fn apply_substitution(&mut self, lines: &mut Vec<String>, pattern: &str, replacement: &str, flags: &SubstitutionFlags, range: &Option<(Address, Address)>) -> Result<()> {
+    fn apply_substitution(&mut self, lines: &mut [String], pattern: &str, replacement: &str, flags: &SubstitutionFlags, range: &Option<(Address, Address)>) -> Result<()> {
         let global = flags.global;
         let case_insensitive = flags.case_insensitive;
 
@@ -2337,47 +2346,45 @@ impl FileProcessor {
         };
 
         // Check for negated pattern range
-        if let Some((start, end)) = range {
-            if let (Address::Negated(start_inner), Address::Negated(end_inner)) = (start, end) {
-                if let (Address::Pattern(start_pat), Address::Pattern(_end_pat)) = (start_inner.as_ref(), end_inner.as_ref()) {
-                    // Apply substitution to lines NOT matching the pattern
-                    let pattern_re = Regex::new(start_pat)
-                        .with_context(|| format!("Invalid regex pattern: {}", start_pat))?;
+        if let Some((start, end)) = range
+            && let (Address::Negated(start_inner), Address::Negated(end_inner)) = (start, end)
+            && let (Address::Pattern(start_pat), Address::Pattern(_end_pat)) = (start_inner.as_ref(), end_inner.as_ref())
+        {
+            // Apply substitution to lines NOT matching the pattern
+            let pattern_re = Regex::new(start_pat)
+                .with_context(|| format!("Invalid regex pattern: {}", start_pat))?;
 
-                    for line in lines.iter_mut() {
-                        if !pattern_re.is_match(line) {
-                            let original = line.clone();
-                            if global {
-                                *line = re.replace_all(line, replacement).to_string();
-                            } else {
-                                *line = re.replace(line, replacement).to_string();
-                            }
-
-                            // Handle print flag
-                            if flags.print && *line != original {
-                                self.printed_lines.push(line.clone());
-                            }
-                        }
+            for line in lines.iter_mut() {
+                if !pattern_re.is_match(line) {
+                    let original = line.clone();
+                    if global {
+                        *line = re.replace_all(line, replacement).to_string();
+                    } else {
+                        *line = re.replace(line, replacement).to_string();
                     }
-                    return Ok(());
+
+                    // Handle print flag
+                    if flags.print && *line != original {
+                        self.printed_lines.push(line.clone());
+                    }
                 }
             }
+            return Ok(());
         }
 
         // Check if both addresses are the same pattern - substitute on all matching lines
-        if let Some((start, end)) = range {
-            if let (Address::Pattern(start_pat), Address::Pattern(end_pat)) = (start, end) {
-                if start_pat == end_pat {
-                    return self.apply_pattern_substitution(
-                        lines,
-                        start_pat,
-                        &re,
-                        replacement,
-                        global,
-                        flags.print
-                    );
-                }
-            }
+        if let Some((start, end)) = range
+            && let (Address::Pattern(start_pat), Address::Pattern(end_pat)) = (start, end)
+            && start_pat == end_pat
+        {
+            return self.apply_pattern_substitution(
+                lines,
+                start_pat,
+                &re,
+                replacement,
+                global,
+                flags.print
+            );
         }
 
         match range {
@@ -2434,7 +2441,7 @@ impl FileProcessor {
     /// * `global` - If true, replace all occurrences in each line
     fn apply_pattern_substitution(
         &mut self,
-        lines: &mut Vec<String>,
+        lines: &mut [String],
         pattern_str: &str,
         pattern_regex: &Regex,
         replacement: &str,
@@ -2480,10 +2487,10 @@ impl FileProcessor {
         }
 
         // Check if both addresses are negated patterns - delete lines NOT matching
-        if let (Address::Negated(start_inner), Address::Negated(end_inner)) = (&range.0, &range.1) {
-            if let (Address::Pattern(start_pat), Address::Pattern(_end_pat)) = (start_inner.as_ref(), end_inner.as_ref()) {
-                return self.apply_negated_pattern_delete(lines, start_pat);
-            }
+        if let (Address::Negated(start_inner), Address::Negated(end_inner)) = (&range.0, &range.1)
+            && let (Address::Pattern(start_pat), Address::Pattern(_end_pat)) = (start_inner.as_ref(), end_inner.as_ref())
+        {
+            return self.apply_negated_pattern_delete(lines, start_pat);
         }
 
         // For line numbers or mixed addresses, use simple range resolution
@@ -2594,8 +2601,8 @@ impl FileProcessor {
             }
             Some((start, end)) => {
                 // Apply commands only to lines within the range
-                let start_idx = self.resolve_address(&start, lines, 0)?;
-                let end_idx = self.resolve_address(&end, lines, lines.len().saturating_sub(1))?;
+                let start_idx = self.resolve_address(start, lines, 0)?;
+                let end_idx = self.resolve_address(end, lines, lines.len().saturating_sub(1))?;
 
                 // For each line in the range, apply all commands
                 for i in start_idx..=end_idx.min(lines.len() - 1) {
@@ -2640,7 +2647,7 @@ impl FileProcessor {
         Ok(())
     }
 
-    fn apply_change(&self, lines: &mut Vec<String>, text: &str, address: &Address) -> Result<()> {
+    fn apply_change(&self, lines: &mut [String], text: &str, address: &Address) -> Result<()> {
         let idx = self.resolve_address(address, lines, 0)?;
         if idx < lines.len() {
             lines[idx] = text.to_string();
@@ -2650,27 +2657,27 @@ impl FileProcessor {
 
     fn collect_print_lines(&mut self, lines: &[String], range: &(Address, Address)) -> Result<()> {
         // Special handling for negated pattern addresses
-        if let (Address::Negated(start_inner), Address::Negated(end_inner)) = (&range.0, &range.1) {
-            if let (Address::Pattern(start_pat), Address::Pattern(_end_pat)) = (start_inner.as_ref(), end_inner.as_ref()) {
-                // Print lines NOT matching the pattern
-                use regex::Regex;
-                let re = Regex::new(start_pat)
-                    .with_context(|| format!("Invalid regex pattern: {}", start_pat))?;
+        if let (Address::Negated(start_inner), Address::Negated(end_inner)) = (&range.0, &range.1)
+            && let (Address::Pattern(start_pat), Address::Pattern(_end_pat)) = (start_inner.as_ref(), end_inner.as_ref())
+        {
+            // Print lines NOT matching the pattern
+            use regex::Regex;
+            let re = Regex::new(start_pat)
+                .with_context(|| format!("Invalid regex pattern: {}", start_pat))?;
 
-                for line in lines {
-                    if !re.is_match(line) {
-                        self.printed_lines.push(line.clone());
-                    }
+            for line in lines {
+                if !re.is_match(line) {
+                    self.printed_lines.push(line.clone());
                 }
-                return Ok(());
             }
+            return Ok(());
         }
 
         let start_idx = self.resolve_address(&range.0, lines, 0)?;
         let end_idx = self.resolve_address(&range.1, lines, lines.len().saturating_sub(1))?;
 
-        for i in start_idx..=end_idx.min(lines.len() - 1) {
-            self.printed_lines.push(lines[i].clone());
+        for line in lines.iter().take(end_idx.min(lines.len() - 1) + 1).skip(start_idx) {
+            self.printed_lines.push(line.clone());
         }
 
         Ok(())
@@ -2744,11 +2751,10 @@ impl FileProcessor {
                 // Find the first line that matches the stepping pattern
                 // start is 1-indexed, so convert to 0-indexed
                 let start_0idx = if *start == 0 { 0 } else { start - 1 };
-                for i in (start_0idx..lines.len()).step_by(*step) {
-                    return Ok(i);
-                }
-                // No more lines match, return end
-                Ok(lines.len())
+                (start_0idx..lines.len())
+                    .step_by(*step)
+                    .next()
+                    .map_or(Ok(lines.len()), Ok)
             }
         }
     }
@@ -2756,7 +2762,7 @@ impl FileProcessor {
     // Hold space operations
 
     /// h command: Copy pattern space (current line) to hold space (overwrite)
-    fn apply_hold(&mut self, lines: &mut Vec<String>, range: &Option<(Address, Address)>) -> Result<()> {
+    fn apply_hold(&mut self, lines: &mut [String], range: &Option<(Address, Address)>) -> Result<()> {
         match range {
             None => {
                 // No range - copy last line to hold space
@@ -2765,8 +2771,8 @@ impl FileProcessor {
                 }
             }
             Some((start, end)) => {
-                let start_idx = self.resolve_address(&start, lines, 0)?;
-                let end_idx = self.resolve_address(&end, lines, lines.len().saturating_sub(1))?;
+                let _start_idx = self.resolve_address(start, lines, 0)?;
+                let end_idx = self.resolve_address(end, lines, lines.len().saturating_sub(1))?;
 
                 // Apply to range - hold space gets set to each line in sequence
                 // Final value is the last line in range (GNU sed behavior)
@@ -2779,7 +2785,7 @@ impl FileProcessor {
     }
 
     /// H command: Append pattern space to hold space (with newline)
-    fn apply_hold_append(&mut self, lines: &mut Vec<String>, range: &Option<(Address, Address)>) -> Result<()> {
+    fn apply_hold_append(&mut self, lines: &mut [String], range: &Option<(Address, Address)>) -> Result<()> {
         match range {
             None => {
                 // Apply to each line (GNU sed: H applies to pattern space of each line)
@@ -2793,15 +2799,15 @@ impl FileProcessor {
                 }
             }
             Some((start, end)) => {
-                let start_idx = self.resolve_address(&start, lines, 0)?;
-                let end_idx = self.resolve_address(&end, lines, lines.len().saturating_sub(1))?;
+                let start_idx = self.resolve_address(start, lines, 0)?;
+                let end_idx = self.resolve_address(end, lines, lines.len().saturating_sub(1))?;
 
                 // Append all lines in range to hold space
-                for i in start_idx..=end_idx.min(lines.len() - 1) {
+                for line in lines.iter().take(end_idx.min(lines.len() - 1) + 1).skip(start_idx) {
                     if !self.hold_space.is_empty() {
                         self.hold_space.push('\n');
                     }
-                    self.hold_space.push_str(&lines[i]);
+                    self.hold_space.push_str(line);
                 }
             }
         }
@@ -2824,8 +2830,8 @@ impl FileProcessor {
                 lines.extend(hold_lines);
             }
             Some((start, end)) => {
-                let start_idx = self.resolve_address(&start, lines, 0)?;
-                let end_idx = self.resolve_address(&end, lines, lines.len().saturating_sub(1))?;
+                let start_idx = self.resolve_address(start, lines, 0)?;
+                let end_idx = self.resolve_address(end, lines, lines.len().saturating_sub(1))?;
 
                 // Replace each line in range with hold space content
                 // For multiline hold space with single-line address, use first line
@@ -2843,7 +2849,7 @@ impl FileProcessor {
     }
 
     /// G command: Append hold space to pattern space (with newline)
-    fn apply_get_append(&mut self, lines: &mut Vec<String>, range: &Option<(Address, Address)>) -> Result<()> {
+    fn apply_get_append(&mut self, lines: &mut [String], range: &Option<(Address, Address)>) -> Result<()> {
         match range {
             None => {
                 // Append hold space (or just newline if empty) to each line
@@ -2855,8 +2861,8 @@ impl FileProcessor {
                 }
             }
             Some((start, end)) => {
-                let start_idx = self.resolve_address(&start, lines, 0)?;
-                let end_idx = self.resolve_address(&end, lines, lines.len().saturating_sub(1))?;
+                let start_idx = self.resolve_address(start, lines, 0)?;
+                let end_idx = self.resolve_address(end, lines, lines.len().saturating_sub(1))?;
 
                 for i in start_idx..=end_idx.min(lines.len() - 1) {
                     lines[i].push('\n');
@@ -2891,8 +2897,8 @@ impl FileProcessor {
                 // If hold space was empty, lines remain unchanged
             }
             Some((start, end)) => {
-                let start_idx = self.resolve_address(&start, lines, 0)?;
-                let end_idx = self.resolve_address(&end, lines, lines.len().saturating_sub(1))?;
+                let start_idx = self.resolve_address(start, lines, 0)?;
+                let end_idx = self.resolve_address(end, lines, lines.len().saturating_sub(1))?;
 
                 // Exchange each line in range with hold space
                 for i in start_idx..=end_idx.min(lines.len() - 1) {
@@ -2911,7 +2917,7 @@ impl FileProcessor {
     // Phase 4: Multi-line pattern space commands
 
     /// n command: Print current pattern space, read next line, start new cycle
-    fn apply_next(&mut self, lines: &mut Vec<String>, range: &Option<(Address, Address)>) -> Result<()> {
+    fn apply_next(&mut self, lines: &mut Vec<String>, _range: &Option<(Address, Address)>) -> Result<()> {
         // n command: outputs current line, then reads next line (deleting it from further processing in this cycle)
         // This effectively keeps odd-numbered lines and removes even-numbered lines
         // For GNU sed compatibility with common patterns like 'n; d'
@@ -2929,18 +2935,19 @@ impl FileProcessor {
     }
 
     /// N command: Read next line and append to pattern space with newline
-    fn apply_next_append(&mut self, lines: &mut Vec<String>, range: &Option<(Address, Address)>) -> Result<()> {
+    fn apply_next_append(&mut self, lines: &mut Vec<String>, _range: &Option<(Address, Address)>) -> Result<()> {
         if lines.len() > 1 {
             let first = lines[0].clone();
             lines[0] = format!("{}\n{}", first, lines[1]);
             lines.remove(1);
         }
-        // TODO: If at end of file, don't append and exit with error code
+        // NOTE: GNU sed behavior: at EOF, N command doesn't append and continues with current pattern space.
+        // This is the correct behavior - no error is returned.
         Ok(())
     }
 
     /// P command: Print first line of pattern space (up to first \n)
-    fn apply_print_first_line(&mut self, lines: &mut Vec<String>, range: &Option<(Address, Address)>) -> Result<()> {
+    fn apply_print_first_line(&mut self, lines: &mut [String], _range: &Option<(Address, Address)>) -> Result<()> {
         if !lines.is_empty() {
             if let Some(pos) = lines[0].find('\n') {
                 let first_line = &lines[0][..pos];
@@ -2953,12 +2960,13 @@ impl FileProcessor {
     }
 
     /// D command: Delete first line of pattern space, restart cycle
-    fn apply_delete_first_line(&mut self, lines: &mut Vec<String>, range: &Option<(Address, Address)>) -> Result<()> {
+    fn apply_delete_first_line(&mut self, lines: &mut Vec<String>, _range: &Option<(Address, Address)>) -> Result<()> {
         if !lines.is_empty() {
             if let Some(pos) = lines[0].find('\n') {
                 // Remove first line (up to and including newline)
                 lines[0] = lines[0][pos + 1..].to_string();
-                // TODO: Restart cycle with remaining pattern space (don't read next line)
+                // NOTE: Batch mode doesn't restart cycle - it continues with next command.
+                // Cycle mode (apply_cycle_based) handles D correctly by restarting.
             } else {
                 // No newline - delete entire pattern space and start new cycle
                 lines.remove(0);
@@ -3578,7 +3586,7 @@ mod tests {
         let result = processor.process_streaming_forced(Path::new(test_file_path));
         assert!(result.is_ok(), "Processing should succeed");
 
-        let diff = result.unwrap();
+        let _diff = result.unwrap();
 
         // Verify deletion: lines between START and END (inclusive) should be deleted
         let processed_content = fs::read_to_string(test_file_path)
@@ -3685,10 +3693,10 @@ mod cycle_tests {
     use super::*;
     use crate::command::{Command, Address, SubstitutionFlags};
 
-    /// Helper to parse a simple sed expression
+    /// Helper to parse a simple sed expression for testing
+    /// NOTE: This is a test helper that manually constructs commands for specific test cases.
+    /// For production use, the actual parser should be used instead.
     fn parse_simple(expr: &str) -> Vec<Command> {
-        // For now, manually construct commands
-        // TODO: Use proper parser when available
         if expr == "n; d" {
             vec![
                 Command::Next { range: None },

@@ -615,9 +615,9 @@ SedX aims for 90%+ compatibility with GNU sed. Most sed scripts will work unchan
 | `/pattern1/,/pattern2/` | ✅ | Pattern ranges with state machine |
 | `i\`, `a\`, `c\` | ✅ | Insert, append, change |
 | `$`, `0` | ✅ | Last/first line addressing |
-| Hold space | ❌ | Not implemented |
-| Branch/test (`:`, `b`, `t`) | ❌ | Not implemented |
-| File I/O (`r`, `w`) | ❌ | Not implemented |
+| Hold space | ✅ | Full implementation |
+| Branch/test (`:`, `b`, `t`, `T`) | ✅ | Full implementation |
+| File I/O (`r`, `R`, `w`, `W`) | ✅ | Full implementation |
 
 ## 🤝 Contributing
 
@@ -660,23 +660,29 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🔮 Roadmap
 
-### ✅ Recently Completed (v0.2.0)
+### ✅ Recently Completed (v0.2.6)
 
-- Pattern substitution on all matching lines (`/pattern/s/old/new/`)
-- Backreferences in replacement strings (converted from `\1` to `$1` internally)
+- Phase 5: Flow control commands (`:label`, `b`, `t`, `T`)
+- Phase 5: File I/O commands (`r`, `R`, `w`, `W`)
+- Phase 5: Additional commands (`=`, `F`, `z`)
+- Phase 4: Multi-line pattern space commands (`n`, `N`, `P`, `D`)
+- Streaming architecture for large files (100GB+ with <100MB RAM)
+- Hold space operations (`h`, `H`, `g`, `G`, `x`)
 - Command grouping with semicolons (`{cmd1; cmd2; cmd3}`)
+- Regex flavors: PCRE (default), ERE (`-E`), BRE (`-B`)
+- Configuration file support (`~/.sedx/config.toml`)
+- Backup management subcommands (`sedx backup list/prune/remove`)
 
 ### 🚧 In Progress
 
-- Extended regular expressions more features
-- Performance optimizations for large files
+- Performance optimizations for very large files
+- Extended regex features (case conversion in replacements)
 
 ### 📋 Planned Features
 
-- Hold space operations (`h`, `H`, `g`, `G`, `x`)
-- Branch/test commands (`:label`, `b`, `t`)
-- File read/write (`r filename`, `w filename`)
 - In-place editing mode (`-i` flag)
+- Multi-line pattern space enhancements
+- More GNU sed extensions
 
 ---
 

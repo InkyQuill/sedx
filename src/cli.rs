@@ -423,10 +423,8 @@ pub fn parse_args() -> Result<Args> {
             // Determine context size
             let context = if cli.no_context {
                 0
-            } else if let Some(n) = cli.context {
-                n
             } else {
-                2 // Default
+                cli.context.unwrap_or(2)
             };
 
             // Determine streaming mode (auto-detect at 100MB)
@@ -464,6 +462,7 @@ pub fn parse_args() -> Result<Args> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(non_snake_case)]  // BRE, ERE, and PCRE are well-known acronyms
 pub enum RegexFlavor {
     /// Basic Regular Expressions (GNU sed compatible)
     BRE,

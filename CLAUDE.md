@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Key difference from GNU sed**: SedX uses **PCRE (Perl-Compatible Regular Expressions)** by default, which is the most modern and powerful regex flavor. For compatibility, SedX also supports ERE (with `-E`) and BRE (with `-B`) modes.
 
-**Streaming Architecture (Phase 1 - In Progress)**: SedX is implementing constant-memory streaming processing for large files (100GB+ with <100MB RAM). See "Streaming Implementation" section below for details.
+**Streaming Architecture**: SedX implements constant-memory streaming processing for large files (100GB+ with <100MB RAM). See "Streaming Implementation" section below for details.
 
 ## Regex Flavor System
 
@@ -138,14 +138,25 @@ cargo test
 # Run unit tests with output
 cargo test -- --nocapture
 
-# Run integration/regression tests (compares with GNU sed)
-./tests/regression_tests.sh
+# Run all tests (integration + comprehensive + phase-specific)
+./tests/run_all_tests.sh
 
-# Run comprehensive test suite
-./tests/comprehensive_tests.sh
+# Run quick tests only
+./tests/run_quick_tests.sh
 
-# Run hold space tests
-./tests/hold_space_tests.sh
+# Run specific test suites
+./tests/regression_tests.sh      # GNU sed compatibility
+./tests/comprehensive_tests.sh   # Extended test suite
+./tests/streaming_tests.sh       # Large file streaming
+./tests/phase4_tests.sh          # Phase 4 features
+./tests/scripts/phase5_tests.sh  # Phase 5 flow control & file I/O
+./tests/hold_space_tests.sh      # Hold space operations
+
+# Memory profiling for streaming
+./tests/memory_profile.sh
+
+# Benchmark against GNU sed
+./tests/benchmark.sh
 
 # Test specific expression patterns
 ./target/release/sedx 's/foo/bar/g' test_file.txt
@@ -173,17 +184,19 @@ The release binary is required for accurate testing:
 
 ### Core Modules
 
-- **main.rs** - Entry point, command routing (execute/rollback/history/status)
+- **main.rs** - Entry point, command routing (execute/rollback/history/status/config/backup subcommands)
 - **cli.rs** - Command-line argument parsing, defines `Args` and `RegexFlavor` enums
 - **command.rs** - Unified `Command` and `Address` enums (core data structures)
 - **parser.rs** - Unified parser with regex flavor support (PCRE/ERE/BRE)
+- **sed_parser.rs** - Legacy sed parser (mostly migrated to parser.rs, but still used)
 - **bre_converter.rs** - Converts BRE patterns to PCRE for compilation
 - **ere_converter.rs** - Converts ERE backreferences to PCRE format
 - **capability.rs** - Streaming capability checks (determines if commands can stream)
-- **sed_parser.rs** - Legacy sed parser (DEPRECATED - being migrated to parser.rs)
 - **file_processor.rs** - Dual-mode processor: in-memory (`FileProcessor`) and streaming (`StreamProcessor`)
 - **diff_formatter.rs** - Formats output (diffs, history, dry-run headers)
 - **backup_manager.rs** - Creates/restores backups using JSON metadata
+- **config.rs** - Configuration file management (~/.sedx/config.toml)
+- **disk_space.rs** - Disk space checking and human-readable size formatting
 
 ### Data Flow
 
@@ -227,7 +240,7 @@ pub enum Command {
     Substitution { pattern, replacement, flags, range },
     Delete { range },
     Print { range },
-    Quit { address },
+    Quit { address }, QuitWithoutPrint { address },
     Insert { text, address },
     Append { text, address },
     Change { text, address },
@@ -235,6 +248,18 @@ pub enum Command {
     Hold { range }, HoldAppend { range },
     Get { range }, GetAppend { range },
     Exchange { range },
+    Next { range }, NextAppend { range },
+    PrintFirstLine { range }, DeleteFirstLine { range },
+    // Phase 5: Flow control
+    Label { name },
+    Branch { label, range },
+    Test { label, range }, TestFalse { label, range },
+    // Phase 5: File I/O
+    ReadFile { filename, range }, WriteFile { filename, range },
+    ReadLine { filename, range }, WriteFirstLine { filename, range },
+    // Phase 5: Additional commands
+    PrintLineNumber { range }, PrintFilename { range },
+    ClearPatternSpace { range },
 }
 ```
 
@@ -322,6 +347,31 @@ The `resolve_address()` method in `file_processor.rs` converts addresses to line
 **Current limitations:**
 - When `g` is used with a single-line address (e.g., `5g`), only the first line of multiline hold space is used
 - Full multiline replacement is supported only when `g` has no range (replaces entire file)
+
+### Cycle-Based Processing
+
+SedX uses a **hybrid architecture** combining batch processing (for simple commands) with cycle-based processing (for flow control):
+
+**Batch mode** (FileProcessor.apply_batch_based()):
+- All commands applied to all lines at once
+- Used for simple substitutions, deletes, etc.
+- Faster for non-branching operations
+
+**Cycle mode** (FileProcessor.apply_cycle_based()):
+- Each line processed through command cycle (like GNU sed)
+- Required for flow control (b, t, T commands)
+- Tracks program counter and substitution flags per line
+- Enables labels and conditional branching
+
+**CycleState** struct tracks:
+- `pattern_space` - Current line being processed
+- `hold_space` - Secondary buffer
+- `substitution_made` - Flag for t/T commands
+- `program_counter` - Current command index (for branching)
+- `stdout_outputs` - Side-effect outputs (=, F commands)
+- `current_filename` - For F command
+- `write_handles` - File handles for w/W commands
+- `read_positions` - File positions for r/R commands
 
 ## File Processing Pipeline
 
@@ -420,10 +470,20 @@ The streaming feature is implemented in small, testable chunks:
 - Chunk 7: Sliding window diff with context (VecDeque buffer)
 - Chunk 8: Pattern ranges (/start/,/end/) with state machine (IN PROGRESS)
 
-**Remaining Chunks**:
+**Completed Chunks**:
+- Chunk 1: Basic streaming infrastructure (BufReader/BufWriter, temp files)
+- Chunk 2: Substitution command (s) with flags (g, i, numbered)
+- Chunk 3: Delete (d) and Print (p) commands
+- Chunk 4-5: Insert (i), Append (a), Change (c), Quit (q) commands
+- Chunk 6: Simple diff generation (changed lines only, no full file storage)
+- Chunk 7: Sliding window diff with context (VecDeque buffer)
+- Chunk 8: Pattern ranges (/start/,/end/) with state machine
 - Chunk 9: Hold space operations (h, H, g, G, x)
 - Chunk 10: Command grouping with ranges ({...})
-- Chunk 11: Testing & optimization (large file tests, memory profiling)
+- Chunk 11: Flow control (b, t, T), File I/O (r, w, R, W), additional commands (=, F, z)
+
+**Remaining Work**:
+- Memory profiling and optimization for very large files (100GB+)
 
 **Each chunk follows this pattern**:
 1. Add state/data structures to StreamProcessor
@@ -460,7 +520,7 @@ Last 50 backups are kept automatically. Old backups cleaned up when creating new
 **Integration tests** (`./tests/*.sh`):
 - Bash scripts comparing SedX output with GNU sed
 - Test against real sed to ensure compatibility
-- Cover: substitutions, deletes, ranges, patterns, negation, grouping, hold space
+- Cover: substitutions, deletes, ranges, patterns, negation, grouping, hold space, flow control, file I/O
 
 **Manual testing workflow**:
 ```bash
@@ -484,19 +544,131 @@ sedx rollback <backup-id>
 - **Backreferences**: Use `$1`, `$2` internally (converted from `\1`, `\2`)
 - **Pattern ranges**: State machine semantics (start pattern → in range → end pattern)
 - **File processing**: Auto-detects streaming vs in-memory based on file size (100MB threshold)
-- **Streaming limitations**: Hold space, complex groups, and negated ranges force in-memory mode
+- **Streaming limitations**: Negated ranges force in-memory mode; most other commands support streaming
+
+## Configuration File
+
+SedX supports a configuration file at `~/.sedx/config.toml`:
+
+```toml
+[backup]
+max_size_gb = 10           # Max backup size limit
+max_disk_usage_percent = 80 # Max disk usage before warning
+backup_dir = "/custom/path" # Custom backup directory
+
+[compatibility]
+mode = "pcre"              # Default regex flavor: pcre, ere, or bre
+show_warnings = true        # Show compatibility warnings
+
+[processing]
+context_lines = 2           # Default diff context
+max_memory_mb = 100         # Streaming threshold
+streaming = true            # Enable streaming mode
+```
+
+Use `sedx config` to edit, `sedx config --show` to view current settings.
 
 ## Common Patterns
 
+### Flow Control Commands (Phase 5)
+
+SedX supports GNU sed-style flow control with labels and branches:
+
+```bash
+# Labels and unconditional branch
+sedx ':top; s/foo/bar/; /condition/b top' file.txt
+
+# Conditional branch (if substitution made)
+sedx 's/foo/bar/; t success; s/baz/qux/; :success' file.txt
+
+# Inverse branch (if NO substitution made)
+sedx 's/foo/bar/; T retry; b done; :retry; s/baz/qux/; :done' file.txt
+```
+
+**Flow control with addresses:**
+```bash
+# Branch only on specific lines
+sedx '1,10{s/foo/bar/; t skip}; s/baz/qux/; :skip' file.txt
+
+# Branch from pattern address
+/error/b skip_error
+s/fallback/fix/
+:skip_error
+s/error/ERROR/
+```
+
+### File I/O Commands (Phase 5)
+
+Read and write files during processing:
+
+```bash
+# Read file contents (r)
+sedx '1r header.txt' file.txt
+
+# Write pattern space to file (w)
+sedx 'w output.txt' file.txt
+
+# Read one line from file (R)
+sedx 'R data.txt' file.txt
+
+# Write first line to file (W)
+sedx 'W errors.log' logfile.txt
+```
+
+**File handles are managed automatically**:
+- Write files are opened in append mode
+- Multiple write commands to same file share handle
+- Read files track position for R command
+
+### Additional Commands (Phase 5)
+
+```bash
+# Print line number (=)
+sedx '=' file.txt  # Prints line numbers before each line
+
+# Print filename (F) - GNU sed extension
+sedx 'F' file.txt  # Prints current filename
+
+# Clear pattern space (z) - GNU sed extension
+sedx '/unwanted/{z; s/EMPTY/now empty/}' file.txt
+```
+
 ### Adding New Sed Commands
 
-**In-Memory Implementation** (easiest):
+**Simple Commands** (no side effects, no flow control):
 1. Add variant to `Command` enum in `command.rs`
-2. Add parsing in `parser.rs` or `sed_parser.rs`
-3. Add `apply_*()` method in `FileProcessor` (in-memory section)
-4. Update `apply_command()` match statement in FileProcessor
-5. Add unit tests in `sed_parser.rs` `#[cfg(test)]` module
-6. Add integration tests in bash scripts under `tests/`
+2. Add parsing in `sed_parser.rs` or `parser.rs`
+3. Add handler in `apply_command_to_cycle()` for cycle-based mode
+4. Add handler in streaming mode if needed (check `capability.rs`)
+5. Update `commands_can_modify_files()` in `main.rs` if command modifies files
+6. Add tests in `tests/scripts/` or appropriate test suite
+
+**Flow Control Commands** (affects program counter):
+1. Add variant to `Command` enum with `range: Option<(Address, Address)>`
+2. Add parsing logic to detect label definitions (`:label`)
+3. Build label registry during parsing (HashMap<String, usize>)
+4. Modify program_counter in CycleState when command executes
+5. Update substitution flag tracking for t/T commands
+6. Test with cycle-based mode (`apply_cycle_based()`)
+
+**File I/O Commands** (r, R, w, W):
+1. Add variant to `Command` enum with filename and optional address
+2. Add parsing with pattern address detection (`is_inside_pattern_address()`)
+3. Add `write_handles: HashMap<String, BufWriter<File>>` to processor struct
+4. Add `read_positions: HashMap<String, usize>` for R command position tracking
+5. Change `apply_command_to_cycle(&self, ...)` to `apply_command_to_cycle(&mut self, ...)`
+6. Flush write handles at end of processing
+
+**Side-Effect Commands** (=, F, output to stdout):
+1. Add to `stdout_outputs: Vec<String>` in CycleState
+2. Ensure output appears in correct order (usually before pattern space)
+3. Track `current_filename` for F command
+
+**Legacy Batch Commands** (if not using cycle-based):
+1. Add `apply_*()` method in `FileProcessor`
+2. Update `apply_command()` match statement
+3. Add unit tests in `sed_parser.rs` `#[cfg(test)]` module
+4. Add integration tests in bash scripts under `tests/`
 
 **Streaming Implementation** (for large file support):
 1. Update `capability.rs::can_stream()` to check if command supports streaming

@@ -130,9 +130,9 @@ pub fn parse_sed_expression(expr: &str) -> Result<Vec<SedCommand>> {
     // But skip semicolons inside braces { ... }
     let mut current_expr = String::new();
     let mut in_braces = 0;
-    let mut chars = expr.chars().peekable();
+    let chars = expr.chars().peekable();
 
-    while let Some(c) = chars.next() {
+    for c in chars {
         match c {
             '{' => {
                 in_braces += 1;
@@ -299,13 +299,14 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
         // For "b", "b label", "10b", "10b label" - the b/t/T should be followed by space or end of string
         let b_pos = trimmed.find('b');
         let t_pos = trimmed.find('t');
-        let T_pos = trimmed.find('T');
+        let t_upper_pos = trimmed.find('T');
 
         // Find which position comes first
-        let min_pos = [b_pos, t_pos, T_pos].iter().filter_map(|&p| p).min();
+        let min_pos = [b_pos, t_pos, t_upper_pos].iter().filter_map(|&p| p).min();
 
         if let Some(pos) = min_pos {
-            let char_at_pos = trimmed.chars().nth(pos).unwrap();
+            let char_at_pos = trimmed.chars().nth(pos)
+                .ok_or_else(|| anyhow!("Invalid position {} in command: {}", pos, cmd))?;
             let rest = &trimmed[pos + 1..];
 
             // Check if after b/t/T there's only whitespace, label, or end of string
@@ -354,18 +355,33 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
         // Clear pattern space (z) - GNU sed extension
         // Examples: "z", "5z", "/pat/z"
         // Make sure it's not part of a substitution
-        if !cmd.starts_with('s') && cmd.chars().filter(|&c| c == 's').count() <= 1 {
-            if let Some(z_pos) = trimmed.find('z') {
-                let rest = &trimmed[z_pos + 1..];
-                if rest.trim().is_empty() {
-                    // Valid z command (nothing after z except maybe whitespace)
-                    return parse_clear_pattern_space(cmd);
-                }
+        if !cmd.starts_with('s') && cmd.chars().filter(|&c| c == 's').count() <= 1
+            && let Some(z_pos) = trimmed.find('z') {
+            let rest = &trimmed[z_pos + 1..];
+            if rest.trim().is_empty() {
+                // Valid z command (nothing after z except maybe whitespace)
+                return parse_clear_pattern_space(cmd);
             }
         }
     }
 
-    // Check for r/R/w/W commands (file I/O)
+    // IMPORTANT: Check for insert/append/change commands BEFORE file I/O
+    // because i\a\c commands use backslash followed by text, and the text may
+    // contain letters like 'r', 'R', 'w', 'W' that would be misidentified as file I/O
+    if cmd.contains("i\\") {
+        // Insert command: addr i\text
+        return parse_insert(cmd);
+    }
+    if cmd.contains("a\\") {
+        // Append command: addr a\text
+        return parse_append(cmd);
+    }
+    if cmd.contains("c\\") {
+        // Change command: addr c\text
+        return parse_change(cmd);
+    }
+
+    // Check for r/R/w/W commands (file I/O) - AFTER i/a/c checks
     // Examples: "r /path/file", "5r file.txt", "/pat/r file"
     // These commands have filenames after them, so they don't "end with" the command char
     // IMPORTANT: Must check that the command char is NOT part of a pattern address like /pat/
@@ -373,22 +389,22 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
     if trimmed.contains('r') || trimmed.contains('R') || trimmed.contains('w') || trimmed.contains('W') {
         // Find all positions of each command character
         let mut r_positions: Vec<usize> = trimmed.match_indices('r').map(|(i, _)| i).collect();
-        let mut R_positions: Vec<usize> = trimmed.match_indices('R').map(|(i, _)| i).collect();
+        let mut r_upper_positions: Vec<usize> = trimmed.match_indices('R').map(|(i, _)| i).collect();
         let mut w_positions: Vec<usize> = trimmed.match_indices('w').map(|(i, _)| i).collect();
-        let mut W_positions: Vec<usize> = trimmed.match_indices('W').map(|(i, _)| i).collect();
+        let mut w_upper_positions: Vec<usize> = trimmed.match_indices('W').map(|(i, _)| i).collect();
 
         // Filter out positions that are inside pattern addresses (between '/' characters)
         // Pattern addresses have the form /pattern/ or \pattern\
         r_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
-        R_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
+        r_upper_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
         w_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
-        W_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
+        w_upper_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
 
         // Find which position comes first among the remaining (non-pattern) positions
         let all_positions: Vec<(usize, char)> = r_positions.into_iter().map(|p| (p, 'r'))
-            .chain(R_positions.into_iter().map(|p| (p, 'R')))
+            .chain(r_upper_positions.into_iter().map(|p| (p, 'R')))
             .chain(w_positions.into_iter().map(|p| (p, 'w')))
-            .chain(W_positions.into_iter().map(|p| (p, 'W')))
+            .chain(w_upper_positions.into_iter().map(|p| (p, 'W')))
             .collect();
 
         if let Some(&(pos, char_at_pos)) = all_positions.iter().min_by_key(|(p, _)| p) {
@@ -398,13 +414,13 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
             // The filename can be anything, so if there's content after, it's likely a file I/O command
             if !rest.trim().is_empty() {
                 // Has content after command char - likely filename
-                match char_at_pos {
-                    'r' => return parse_read_file(cmd),
-                    'R' => return parse_read_line(cmd),
-                    'w' => return parse_write_file(cmd),
-                    'W' => return parse_write_first_line(cmd),
-                    _ => {}
-                }
+                return match char_at_pos {
+                    'r' => parse_read_file(cmd),
+                    'R' => parse_read_line(cmd),
+                    'w' => parse_write_file(cmd),
+                    'W' => parse_write_first_line(cmd),
+                    _ => unreachable!(),
+                };
             }
         }
     }
@@ -422,15 +438,6 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
     } else if cmd.ends_with('p') && !cmd.starts_with('s') {
         // Print command (but not s/pattern/replacement/p which is a flag)
         parse_print(cmd)
-    } else if cmd.contains("i\\") {
-        // Insert command
-        parse_insert(cmd)
-    } else if cmd.contains("a\\") {
-        // Append command
-        parse_append(cmd)
-    } else if cmd.contains("c\\") {
-        // Change command
-        parse_change(cmd)
     } else {
         // Try to determine by last character for other commands
         let command_char = cmd.chars().last()
@@ -495,15 +502,13 @@ fn parse_substitution(cmd: &str) -> Result<SedCommand> {
         .ok_or_else(|| anyhow!("Missing delimiter"))?;
 
     // Find all delimiter positions
-    let mut delimiter_positions = Vec::new();
-    let mut chars = rest.chars().peekable();
-    let mut i = 0;
+    let mut delimiter_positions: Vec<usize> = Vec::new();
 
-    while let Some(c) = chars.next() {
+    // Use char_indices() to get correct byte positions for UTF-8 strings
+    for (byte_pos, c) in rest.char_indices() {
         if c == delimiter {
-            delimiter_positions.push(i);
+            delimiter_positions.push(byte_pos);
         }
-        i += 1;
     }
 
     if delimiter_positions.len() < 3 {
@@ -933,9 +938,9 @@ fn parse_address(addr: &str) -> Result<Address> {
     }
 
     // Check for negation operator (! as suffix)
-    if addr.ends_with('!') {
-        let inner_addr = parse_address(&addr[..addr.len() - 1])?;
-        return Ok(Address::Negated(Box::new(inner_addr)));
+    if let Some(inner_addr) = addr.strip_suffix('!') {
+        let parsed = parse_address(inner_addr)?;
+        return Ok(Address::Negated(Box::new(parsed)));
     }
 
     // Special address: 0 (for first-match substitution)

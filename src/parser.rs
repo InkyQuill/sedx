@@ -265,6 +265,8 @@ impl Parser {
                 'i' | 'I' => result.case_insensitive = true,
                 '0'..='9' => {
                     // Nth occurrence flag (e.g., 2 for second occurrence)
+                    // SAFETY: The match pattern '0'..='9' guarantees flag is an ASCII digit,
+                    // so to_digit(10) will always return Some(digit_value).
                     let n = flag.to_digit(10).unwrap() as usize;
                     result.nth = Some(n);
                 }

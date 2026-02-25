@@ -1,6 +1,6 @@
-/// Cross-platform disk space checking
-///
-/// Provides functionality to check available disk space before creating backups
+//! Cross-platform disk space checking
+//!
+//! Provides functionality to check available disk space before creating backups
 
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -13,8 +13,10 @@ pub struct DiskSpaceInfo {
     /// Available disk space in bytes
     pub available_bytes: u64,
     /// Used disk space in bytes
+    #[allow(dead_code)]  // Kept for API completeness and potential future use
     pub used_bytes: u64,
     /// Percentage of disk used
+    #[allow(dead_code)]  // Kept for API completeness and potential future use
     pub used_percent: f64,
 }
 
@@ -71,6 +73,13 @@ pub fn get_disk_space(path: &Path) -> Result<DiskSpaceInfo> {
         .context("Failed to convert path to CString")?;
 
     // Get statvfs structure
+    // # Safety
+    //
+    // `std::mem::zeroed()` is safe for `libc::statvfs` because it's a C struct
+    // containing only primitive integer types and arrays of integers.
+    // `libc::statvfs` is a POSIX system call that writes to the provided mutable reference.
+    // The `c_path` pointer is valid because it comes from a `CString` whose lifetime
+    // exceeds this function call. Return value is checked for errors.
     let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
 
     unsafe {
@@ -84,7 +93,7 @@ pub fn get_disk_space(path: &Path) -> Result<DiskSpaceInfo> {
     }
 
     // Calculate values from statvfs
-    let frsize = stat.f_frsize as u64; // File system block size
+    let frsize = stat.f_frsize; // File system block size
     let total_bytes = stat.f_blocks * frsize;
     let available_bytes = stat.f_bavail * frsize;
     let used_bytes = total_bytes - available_bytes;

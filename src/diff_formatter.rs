@@ -152,6 +152,9 @@ impl DiffFormatter {
         let mut groups: Vec<Vec<usize>> = vec![vec![changed_indices[0]]];
 
         for &idx in &changed_indices[1..] {
+            // SAFETY: groups is always non-empty because we return early above if changed_indices is empty,
+            // and we initialize groups with vec![changed_indices[0]].
+            // Each group is also always non-empty because we only push non-empty vectors.
             let last_group = groups.last_mut().unwrap();
             let last_idx = *last_group.last().unwrap();
 
@@ -168,13 +171,14 @@ impl DiffFormatter {
         let mut result = Vec::new();
         let mut last_included_end = None;
 
-        for (_group_idx, group) in groups.iter().enumerate() {
-            let group_start = group.first().unwrap();
-            let group_end = group.last().unwrap();
+        for group in groups.iter() {
+            // SAFETY: Each group is always non-empty (created as vec![idx] or via push)
+            let group_start = *group.first().unwrap();
+            let group_end = *group.last().unwrap();
 
             // Calculate the range to include (with context)
-            let start = if *group_start >= context_size { *group_start - context_size } else { 0 };
-            let end = (*group_end + context_size + 1).min(lines.len());
+            let start = group_start.saturating_sub(context_size);
+            let end = (group_end + context_size + 1).min(lines.len());
 
             // Add "..." between distant groups (but not before the first group)
             if let Some(last_end) = last_included_end {
@@ -212,6 +216,7 @@ impl DiffFormatter {
     }
 
     /// Legacy method - format simple preview (backward compatibility)
+    #[allow(dead_code)]  // Kept for API compatibility
     pub fn format_preview(expression: &str, files_changes: Vec<(String, Vec<FileChange>)>) -> String {
         let use_color = Self::should_use_color();
         let mut output = String::new();
@@ -226,11 +231,7 @@ impl DiffFormatter {
         let file_count = files_changes.iter().filter(|(_, c)| !c.is_empty()).count();
 
         if total_changes == 0 {
-            if use_color {
-                output.push_str("No changes would be made.\n");
-            } else {
-                output.push_str("No changes would be made.\n");
-            }
+            output.push_str("No changes would be made.\n");
             return output;
         }
 
@@ -273,6 +274,7 @@ impl DiffFormatter {
         output
     }
 
+    #[allow(dead_code)]  // Used by format_preview
     fn format_legacy_change(change: &FileChange, use_color: bool) -> String {
         if use_color {
             format!(
@@ -296,6 +298,7 @@ impl DiffFormatter {
     }
 
     /// Format execute result with backup ID
+    #[allow(dead_code)]  // Kept for API compatibility
     pub fn format_execute_result(expression: &str, backup_id: &str, files_changes: Vec<(String, Vec<FileChange>)>) -> String {
         let use_color = Self::should_use_color();
         let mut output = String::new();
@@ -347,11 +350,7 @@ impl DiffFormatter {
         let mut output = String::new();
 
         if backups.is_empty() {
-            if use_color {
-                output.push_str("No backup history found.\n");
-            } else {
-                output.push_str("No backup history found.\n");
-            }
+            output.push_str("No backup history found.\n");
             return output;
         }
 

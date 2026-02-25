@@ -1,12 +1,13 @@
-/// Configuration management for SedX
-///
-/// SedX stores configuration in ~/.sedx/config.toml
+//! Configuration management for SedX
+//!
+//! SedX stores configuration in ~/.sedx/config.toml
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+#[allow(dead_code)]  // Default config template for future use
 const DEFAULT_CONFIG: &str = r#"# SedX Configuration File
 # See 'sedx config' command to edit this file
 
@@ -54,6 +55,7 @@ pub struct Config {
     pub processing: ProcessingConfig,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -269,6 +271,7 @@ pub fn ensure_complete_config() -> Result<()> {
 }
 
 /// Save configuration to file
+#[allow(dead_code)]  // Public API - kept for future use
 pub fn save_config(config: &Config) -> Result<()> {
     let config_path = config_file_path()?;
 
@@ -284,36 +287,31 @@ pub fn save_config(config: &Config) -> Result<()> {
 /// Validate configuration values
 pub fn validate_config(config: &Config) -> Result<()> {
     // Validate backup settings
-    if let Some(max_gb) = config.backup.max_size_gb {
-        if max_gb < 0.0 {
-            anyhow::bail!("Invalid max_size_gb: {} (must be positive)", max_gb);
-        }
+    if let Some(max_gb) = config.backup.max_size_gb
+        && max_gb < 0.0 {
+        anyhow::bail!("Invalid max_size_gb: {} (must be positive)", max_gb);
     }
 
-    if let Some(max_percent) = config.backup.max_disk_usage_percent {
-        if max_percent < 0.0 || max_percent > 100.0 {
-            anyhow::bail!("Invalid max_disk_usage_percent: {} (must be 0-100)", max_percent);
-        }
+    if let Some(max_percent) = config.backup.max_disk_usage_percent
+        && !(0.0..=100.0).contains(&max_percent) {
+        anyhow::bail!("Invalid max_disk_usage_percent: {} (must be 0-100)", max_percent);
     }
 
     // Validate compatibility mode
-    if let Some(mode) = &config.compatibility.mode {
-        if !["pcre", "ere", "bre"].contains(&mode.as_str()) {
-            anyhow::bail!("Invalid mode: {} (must be 'pcre', 'ere', or 'bre')", mode);
-        }
+    if let Some(mode) = &config.compatibility.mode
+        && !["pcre", "ere", "bre"].contains(&mode.as_str()) {
+        anyhow::bail!("Invalid mode: {} (must be 'pcre', 'ere', or 'bre')", mode);
     }
 
     // Validate processing settings
-    if let Some(context) = config.processing.context_lines {
-        if context > 10 {
-            anyhow::bail!("Invalid context_lines: {} (max 10)", context);
-        }
+    if let Some(context) = config.processing.context_lines
+        && context > 10 {
+        anyhow::bail!("Invalid context_lines: {} (max 10)", context);
     }
 
-    if let Some(max_mb) = config.processing.max_memory_mb {
-        if max_mb < 10 {
-            anyhow::bail!("Invalid max_memory_mb: {} (min 10 MB)", max_mb);
-        }
+    if let Some(max_mb) = config.processing.max_memory_mb
+        && max_mb < 10 {
+        anyhow::bail!("Invalid max_memory_mb: {} (min 10 MB)", max_mb);
     }
 
     Ok(())

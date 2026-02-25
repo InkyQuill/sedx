@@ -101,6 +101,7 @@ pub fn convert_bre_to_pcre(pattern: &str) -> String {
 /// assert!(!is_bre_pattern(r#"(foo)"#));
 /// assert!(!is_bre_pattern(r#"foo+"#));
 /// ```
+#[allow(dead_code)]  // Kept for potential future use
 pub fn is_bre_pattern(pattern: &str) -> bool {
     pattern.contains("\\(") || pattern.contains("\\)") ||
     pattern.contains("\\{") || pattern.contains("\\}") ||
@@ -126,10 +127,10 @@ pub fn is_bre_pattern(pattern: &str) -> bool {
 /// have slightly different rules than patterns.
 pub fn convert_sed_backreferences(replacement: &str) -> String {
     let mut result = String::new();
-    let mut chars = replacement.chars().peekable();
+    let chars = replacement.chars().peekable();
     let mut escape_next = false;
 
-    while let Some(c) = chars.next() {
+    for c in chars {
         if escape_next {
             match c {
                 '1'..='9' => {

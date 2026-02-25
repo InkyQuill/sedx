@@ -68,6 +68,7 @@ impl BackupManager {
         // Default: warn if backup > 2GB or > 40% of free space
         // Error if backup > 60% of free space
         const MAX_BACKUP_SIZE_GB: u64 = 2;
+        #[allow(dead_code)]  // Documented threshold for future warning implementation
         const WARN_PERCENT: f64 = 40.0;
         const ERROR_PERCENT: f64 = 60.0;
 
@@ -219,6 +220,7 @@ impl BackupManager {
     }
 
     /// Remove a backup by its ID (used for cleanup when no changes are made)
+    #[allow(dead_code)]  // Public API - kept for future use
     pub fn remove_backup_by_id(&self, backup_id: &str) -> Result<()> {
         let backup_dir = self.backups_dir.join(backup_id);
         fs::remove_dir_all(&backup_dir)

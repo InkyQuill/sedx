@@ -18,7 +18,7 @@ use config::{load_config, config_file_path, ensure_complete_config};
 use parser::Parser;
 use std::fs;
 use std::io::{self, Write, Read};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command as ProcessCommand;
 
 fn main() -> Result<()> {
@@ -122,19 +122,17 @@ fn can_use_streaming(commands: &[Command]) -> bool {
             Hold { .. } | HoldAppend { .. } | Get { .. } | GetAppend { .. } | Exchange { .. } => {
                 // These are now supported in streaming mode
                 // But need to check address types
-                if let Some(range) = get_command_range_option(cmd) {
-                    if !is_range_supported_in_streaming(&range) {
-                        return false;
-                    }
+                if let Some(range) = get_command_range_option(cmd)
+                    && !is_range_supported_in_streaming(&range) {
+                    return false;
                 }
             }
             _ => {
                 // s, d, p, a, i, c, q are supported
                 // But need to check address types
-                if let Some(range) = get_command_range_option(cmd) {
-                    if !is_range_supported_in_streaming(&range) {
-                        return false;
-                    }
+                if let Some(range) = get_command_range_option(cmd)
+                    && !is_range_supported_in_streaming(&range) {
+                    return false;
                 }
             }
         }
@@ -146,42 +144,21 @@ fn can_use_streaming(commands: &[Command]) -> bool {
 /// Extract range from a command (if any)
 fn get_command_range_option(cmd: &Command) -> Option<(Address, Address)> {
     match cmd {
-        Command::Substitution { range, .. } => {
-            if let Some(r) = range {
-                Some((r.0.clone(), r.1.clone()))
-            } else {
-                None
-            }
-        }
+        Command::Substitution { range, .. } => range.as_ref().map(|r| (r.0.clone(), r.1.clone())),
         Command::Delete { range } => Some(range.clone()),
         Command::Print { range } => Some(range.clone()),
-        Command::Insert { address, .. } => {
-            // Single address - check if it's line number
-            match address {
-                Address::LineNumber(_) => Some((Address::LineNumber(0), Address::LineNumber(0))),
-                _ => None,  // Complex addresses delegate to in-memory
-            }
+        Command::Insert { address: Address::LineNumber(_), .. } => {
+            Some((Address::LineNumber(0), Address::LineNumber(0)))
         }
-        Command::Append { address, .. } => {
-            match address {
-                Address::LineNumber(_) => Some((Address::LineNumber(0), Address::LineNumber(0))),
-                _ => None,
-            }
+        Command::Append { address: Address::LineNumber(_), .. } => {
+            Some((Address::LineNumber(0), Address::LineNumber(0)))
         }
-        Command::Change { address, .. } => {
-            match address {
-                Address::LineNumber(_) => Some((Address::LineNumber(0), Address::LineNumber(0))),
-                _ => None,
-            }
+        Command::Change { address: Address::LineNumber(_), .. } => {
+            Some((Address::LineNumber(0), Address::LineNumber(0)))
         }
-        Command::Quit { address } => {
-            match address {
-                Some(Address::LineNumber(_)) | Some(Address::LastLine) => {
-                    Some((Address::LineNumber(0), Address::LineNumber(0)))
-                }
-                None => Some((Address::LineNumber(0), Address::LineNumber(0))),
-                _ => None,
-            }
+        Command::Quit { address: Some(Address::LineNumber(_)) | None, .. }
+        | Command::Quit { address: Some(Address::LastLine), .. } => {
+            Some((Address::LineNumber(0), Address::LineNumber(0)))
         }
         _ => None,
     }
@@ -209,6 +186,7 @@ fn is_range_supported_in_streaming(range: &(Address, Address)) -> bool {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute_command(
     expression: &str,
     files: &[String],
@@ -633,7 +611,7 @@ fn backup_prune(keep: Option<usize>, keep_days: Option<usize>, force: bool) -> R
         backups_by_date.sort_by_key(|(_, b)| b.timestamp);
 
         // Keep the N most recent
-        for (idx, backup) in backups_by_date.into_iter().rev().skip(keep) {
+        for (_idx, backup) in backups_by_date.into_iter().rev().skip(keep) {
             to_remove.push(backup);
         }
 
@@ -734,7 +712,7 @@ fn config_show() -> Result<()> {
 }
 
 fn config_edit() -> Result<()> {
-    use config::{save_config, Config, validate_config};
+    use config::{Config, validate_config};
 
     let config_path = config_file_path()?;
 

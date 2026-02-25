@@ -29,14 +29,13 @@ use crate::command::{Command, Address};
 /// // Not streamable: hold space with negated address range
 /// assert!(!can_stream(&[Command::Hold { range: Some((Address::Negated(...), ...)) }]));
 /// ```
+#[allow(dead_code)]  // Kept for potential future use
 pub fn can_stream(commands: &[Command]) -> bool {
     for cmd in commands {
         match cmd {
             Command::Substitution { range, .. } => {
-                if let Some(range) = range {
-                    if !is_range_streamable(range) {
-                        return false;
-                    }
+                if let Some(range) = range && !is_range_streamable(range) {
+                    return false;
                 }
             }
             Command::Delete { range } | Command::Print { range } => {
@@ -51,10 +50,8 @@ pub fn can_stream(commands: &[Command]) -> bool {
             }
             Command::Group { range, commands: inner_cmds } => {
                 // Chunk 10: Groups are streamable if range is streamable and inner commands are streamable
-                if let Some(r) = range {
-                    if !is_range_streamable(r) {
-                        return false;
-                    }
+                if let Some(r) = range && !is_range_streamable(r) {
+                    return false;
                 }
                 // Check inner commands
                 if !can_stream(inner_cmds) {
@@ -68,10 +65,8 @@ pub fn can_stream(commands: &[Command]) -> bool {
             | Command::Exchange { range } => {
                 // Chunk 9: Hold space operations are streamable
                 // Check if range is streamable
-                if let Some(r) = range {
-                    if !is_range_streamable(r) {
-                        return false;
-                    }
+                if let Some(r) = range && !is_range_streamable(r) {
+                    return false;
                 }
             }
             Command::Quit { .. } => {
@@ -132,6 +127,7 @@ pub fn can_stream(commands: &[Command]) -> bool {
 ///
 /// - Negated addresses: `!/pattern/`
 /// - Complex mixed negated ranges
+#[allow(dead_code)]  // Used by can_stream
 fn is_range_streamable(range: &(Address, Address)) -> bool {
     use Address::*;
 
