@@ -35,7 +35,8 @@ jobs:
             artifact_name: sedx
             asset_name: sedx-linux-aarch64
             use_cross: true
-          - os: macos-13
+            strip_cmd: aarch64-linux-gnu-strip
+          - os: macos-latest
             target: x86_64-apple-darwin
             artifact_name: sedx
             asset_name: sedx-darwin-x86_64
@@ -70,9 +71,15 @@ jobs:
           fi
         shell: bash
 
-      - name: Strip binary (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Strip binary (Linux only, skip cross-compiled)
+        if: runner.os == 'Linux' && !matrix.use_cross
         run: strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+
+      - name: Strip binary (cross-compiled aarch64)
+        if: matrix.use_cross == true
+        run: |
+          sudo apt-get update && sudo apt-get install -y binutils-aarch64-linux-gnu
+          aarch64-linux-gnu-strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -234,26 +241,6 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Publish to crates.io
-  publish:
-    name: Publish to crates.io
-    needs: [build, test]
-    runs-on: ubuntu-latest
-    if: "!contains(github.ref, 'alpha') && !contains(github.ref, 'beta') && !contains(github.ref, 'rc')"
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Login to crates.io
-        run: cargo login ${{ secrets.CRATES_IO_TOKEN }}
-
-      - name: Publish to crates.io
-        run: cargo publish
 
   # Build and upload Homebrew bottle (macOS)
   homebrew:
