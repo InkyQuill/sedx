@@ -7,6 +7,7 @@ use std::path::Path;
 
 /// Information about disk space usage
 #[derive(Debug, Clone)]
+#[cfg_attr(windows, allow(dead_code))] // Fields only used on Unix
 pub struct DiskSpaceInfo {
     /// Total disk space in bytes
     pub total_bytes: u64,
@@ -20,6 +21,7 @@ pub struct DiskSpaceInfo {
     pub used_percent: f64,
 }
 
+#[cfg_attr(windows, allow(dead_code))] // Methods only used on Unix
 impl DiskSpaceInfo {
     /// Convert bytes to human-readable format (e.g., "1.5 GB")
     pub fn bytes_to_human(bytes: u64) -> String {
@@ -118,6 +120,7 @@ pub fn get_disk_space(path: &Path) -> Result<DiskSpaceInfo> {
 ///
 /// Windows implementation not yet available - always returns error
 #[cfg(windows)]
+#[allow(dead_code)] // Stub function on Windows, used on Unix
 pub fn get_disk_space(_path: &Path) -> Result<DiskSpaceInfo> {
     Err(anyhow::anyhow!(
         "Windows disk space checking not yet implemented. \
@@ -170,6 +173,20 @@ pub fn check_disk_space_for_backup(
         ));
     }
 
+    Ok(())
+}
+
+/// Check if there's enough disk space for a backup (Windows stub)
+///
+/// Windows version - skips disk space checking
+#[cfg(windows)]
+#[allow(dead_code)] // Stub function on Windows, used on Unix
+pub fn check_disk_space_for_backup(
+    _backup_dir: &Path,
+    _file_size: u64,
+    _max_percent: f64,
+) -> Result<()> {
+    // Skip disk space checking on Windows
     Ok(())
 }
 

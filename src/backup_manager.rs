@@ -82,6 +82,7 @@ impl BackupManager {
         const MAX_BACKUP_SIZE_GB: u64 = 2;
         #[allow(dead_code)] // Documented threshold for future warning implementation
         const WARN_PERCENT: f64 = 40.0;
+        #[cfg_attr(windows, allow(dead_code))] // Only used on Unix
         const ERROR_PERCENT: f64 = 60.0;
 
         // Warn if backup is very large
