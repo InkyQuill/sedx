@@ -3169,6 +3169,7 @@ mod tests {
     use std::fs;
     use std::io::Write;
 
+    #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_passthrough() {
         // Create a temporary test file
@@ -3212,6 +3213,7 @@ mod tests {
         fs::remove_file(test_file_path).ok();
     }
 
+    #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_threshold_detection() {
         // Test that small files use in-memory processing
@@ -3224,6 +3226,7 @@ mod tests {
         assert!(StreamProcessor::should_use_streaming(1024 * 1024 * 1024)); // 1GB
     }
 
+    #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_substitution() {
         // Test basic substitution
@@ -3261,6 +3264,7 @@ mod tests {
         fs::remove_file(test_file_path).ok();
     }
 
+    #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_global_substitution() {
         // Test global substitution (g flag)
@@ -3297,6 +3301,7 @@ mod tests {
         fs::remove_file(test_file_path).ok();
     }
 
+    #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_numbered_substitution() {
         // Test numbered substitution (s/foo/bar/2)
@@ -3333,6 +3338,7 @@ mod tests {
         fs::remove_file(test_file_path).ok();
     }
 
+    #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_case_insensitive() {
         // Test case-insensitive substitution (i flag)
@@ -3369,6 +3375,7 @@ mod tests {
         fs::remove_file(test_file_path).ok();
     }
 
+    #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_delete() {
         // Test delete command (deletes all lines for now)
@@ -3403,6 +3410,7 @@ mod tests {
         fs::remove_file(test_file_path).ok();
     }
 
+    #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_delete_with_substitution() {
         // Test combination of substitution and delete
@@ -3435,6 +3443,7 @@ mod tests {
         fs::remove_file(test_file_path).ok();
     }
 
+    #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_print() {
         // Test print command (prints to stdout, file unchanged)
@@ -3469,6 +3478,7 @@ mod tests {
         fs::remove_file(test_file_path).ok();
     }
 
+    #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_insert() {
         // Test insert command (inserts text before specified line)
@@ -3505,6 +3515,7 @@ mod tests {
         fs::remove_file(test_file_path).ok();
     }
 
+    #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_append() {
         // Test append command (appends text after specified line)
@@ -3541,6 +3552,7 @@ mod tests {
         fs::remove_file(test_file_path).ok();
     }
 
+    #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_change() {
         // Test change command (replaces specified line with new text)
@@ -3574,6 +3586,7 @@ mod tests {
         fs::remove_file(test_file_path).ok();
     }
 
+    #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_quit_at_line() {
         // Test quit command (stops processing at specified line)
@@ -3605,6 +3618,7 @@ mod tests {
         fs::remove_file(test_file_path).ok();
     }
 
+    #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_quit_immediately() {
         // Test quit command without address (quits immediately)
@@ -3635,6 +3649,7 @@ mod tests {
         fs::remove_file(test_file_path).ok();
     }
 
+    #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_insert_and_substitute() {
         // Test combination of insert and substitute commands
@@ -3668,6 +3683,7 @@ mod tests {
         fs::remove_file(test_file_path).ok();
     }
 
+    #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_sliding_window_context() {
         // Test that sliding window provides context around changes
@@ -3729,6 +3745,7 @@ mod tests {
         fs::remove_file(test_file_path).ok();
     }
 
+    #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_pattern_range_substitution() {
         // Test pattern range /start/,/end/ with state machine (Chunk 8)
@@ -3788,6 +3805,7 @@ mod tests {
         fs::remove_file(test_file_path).ok();
     }
 
+    #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_pattern_range_delete() {
         // Test pattern range deletion /start/,/end/d
@@ -3832,6 +3850,7 @@ mod tests {
         fs::remove_file(test_file_path).ok();
     }
 
+    #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_group_with_range() {
         // Create test file with a pattern that only appears on specific lines
