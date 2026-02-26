@@ -48,7 +48,10 @@ mod tests {
     #[test]
     fn test_pattern_pass_through() {
         // ERE patterns should pass through unchanged
-        assert_eq!(convert_ere_to_pcre_pattern(r#"(foo|bar)+"#), r#"(foo|bar)+"#);
+        assert_eq!(
+            convert_ere_to_pcre_pattern(r#"(foo|bar)+"#),
+            r#"(foo|bar)+"#
+        );
         assert_eq!(convert_ere_to_pcre_pattern(r#"foo{3,5}"#), r#"foo{3,5}"#);
         assert_eq!(convert_ere_to_pcre_pattern(r#"foo+"#), r#"foo+"#);
         assert_eq!(convert_ere_to_pcre_pattern(r#"foo?"#), r#"foo?"#);
@@ -68,7 +71,7 @@ mod tests {
     fn test_no_backreference_conversion() {
         assert_eq!(convert_ere_backreferences(r#"foo"#), "foo");
         assert_eq!(convert_ere_backreferences(r#"foo bar"#), "foo bar");
-        assert_eq!(convert_ere_backreferences(r#"$1$2"#), "$1$2");  // Already PCRE format
+        assert_eq!(convert_ere_backreferences(r#"$1$2"#), "$1$2"); // Already PCRE format
     }
 
     #[test]
@@ -90,7 +93,7 @@ mod tests {
     fn test_escape_sequences() {
         assert_eq!(convert_ere_backreferences(r#"\n"#), "\\n");
         assert_eq!(convert_ere_backreferences(r#"\t"#), "\\t");
-        assert_eq!(convert_ere_backreferences(r#"\\\n"#), "\\\\n");  // \\n → \n (escaped backslash becomes single)
+        assert_eq!(convert_ere_backreferences(r#"\\\n"#), "\\\\n"); // \\n → \n (escaped backslash becomes single)
     }
 
     // Additional comprehensive tests
@@ -145,7 +148,10 @@ mod tests {
     fn test_alternation_in_patterns() {
         // Alternation is the same in ERE and PCRE
         assert_eq!(convert_ere_to_pcre_pattern("foo|bar"), "foo|bar");
-        assert_eq!(convert_ere_to_pcre_pattern("(foo|bar|baz)"), "(foo|bar|baz)");
+        assert_eq!(
+            convert_ere_to_pcre_pattern("(foo|bar|baz)"),
+            "(foo|bar|baz)"
+        );
         assert_eq!(convert_ere_to_pcre_pattern("a|b|c"), "a|b|c");
     }
 
@@ -154,16 +160,31 @@ mod tests {
         // Grouping is the same in ERE and PCRE
         assert_eq!(convert_ere_to_pcre_pattern("(foo)"), "(foo)");
         assert_eq!(convert_ere_to_pcre_pattern("(foo)+(bar)?"), "(foo)+(bar)?");
-        assert_eq!(convert_ere_to_pcre_pattern("((foo|bar)baz)"), "((foo|bar)baz)");
+        assert_eq!(
+            convert_ere_to_pcre_pattern("((foo|bar)baz)"),
+            "((foo|bar)baz)"
+        );
     }
 
     #[test]
     fn test_complex_ere_patterns() {
         // Complex patterns combining multiple ERE features
-        assert_eq!(convert_ere_to_pcre_pattern(r#"(foo|bar)+[0-9]{3}"#), r#"(foo|bar)+[0-9]{3}"#);
-        assert_eq!(convert_ere_to_pcre_pattern(r#"^([a-z]+)([0-9]+)$"#), r#"^([a-z]+)([0-9]+)$"#);
-        assert_eq!(convert_ere_to_pcre_pattern(r#"(?:foo|bar)"#), r#"(?:foo|bar)"#);  // Non-capturing group
-        assert_eq!(convert_ere_to_pcre_pattern(r#"a{1,3}.b{2,}"#), r#"a{1,3}.b{2,}"#);
+        assert_eq!(
+            convert_ere_to_pcre_pattern(r#"(foo|bar)+[0-9]{3}"#),
+            r#"(foo|bar)+[0-9]{3}"#
+        );
+        assert_eq!(
+            convert_ere_to_pcre_pattern(r#"^([a-z]+)([0-9]+)$"#),
+            r#"^([a-z]+)([0-9]+)$"#
+        );
+        assert_eq!(
+            convert_ere_to_pcre_pattern(r#"(?:foo|bar)"#),
+            r#"(?:foo|bar)"#
+        ); // Non-capturing group
+        assert_eq!(
+            convert_ere_to_pcre_pattern(r#"a{1,3}.b{2,}"#),
+            r#"a{1,3}.b{2,}"#
+        );
     }
 
     #[test]
@@ -195,7 +216,10 @@ mod tests {
         // Multiple backreferences in various combinations
         assert_eq!(convert_ere_backreferences(r#"\1\2\3"#), "$1$2$3");
         assert_eq!(convert_ere_backreferences(r#"\3\2\1"#), "$3$2$1");
-        assert_eq!(convert_ere_backreferences(r#"\9\8\7\6\5\4\3\2\1"#), "$9$8$7$6$5$4$3$2$1");
+        assert_eq!(
+            convert_ere_backreferences(r#"\9\8\7\6\5\4\3\2\1"#),
+            "$9$8$7$6$5$4$3$2$1"
+        );
         assert_eq!(convert_ere_backreferences(r#"\1\1\1"#), "$1$1$1");
     }
 
@@ -203,9 +227,18 @@ mod tests {
     fn test_backreferences_with_text() {
         // Backreferences interspersed with text
         assert_eq!(convert_ere_backreferences(r#"foo\1bar"#), "foo$1bar");
-        assert_eq!(convert_ere_backreferences(r#"start\1middle\2end"#), "start$1middle$2end");
-        assert_eq!(convert_ere_backreferences(r#"Result: \1, \2, \3"#), "Result: $1, $2, $3");
-        assert_eq!(convert_ere_backreferences(r#"prefix_\1_suffix"#), "prefix_$1_suffix");
+        assert_eq!(
+            convert_ere_backreferences(r#"start\1middle\2end"#),
+            "start$1middle$2end"
+        );
+        assert_eq!(
+            convert_ere_backreferences(r#"Result: \1, \2, \3"#),
+            "Result: $1, $2, $3"
+        );
+        assert_eq!(
+            convert_ere_backreferences(r#"prefix_\1_suffix"#),
+            "prefix_$1_suffix"
+        );
     }
 
     #[test]
@@ -214,7 +247,10 @@ mod tests {
         assert_eq!(convert_ere_backreferences(r#"\&"#), "$&");
         assert_eq!(convert_ere_backreferences(r#"foo\&bar"#), "foo$&bar");
         assert_eq!(convert_ere_backreferences(r#"\&\&"#), "$&$&");
-        assert_eq!(convert_ere_backreferences(r#"start:\&:end"#), "start:$&:end");
+        assert_eq!(
+            convert_ere_backreferences(r#"start:\&:end"#),
+            "start:$&:end"
+        );
         assert_eq!(convert_ere_backreferences(r#"\1\&\2"#), "$1$&$2");
     }
 
@@ -233,8 +269,8 @@ mod tests {
         assert_eq!(convert_ere_backreferences(r#"foo\\bar"#), "foo\\bar");
         assert_eq!(convert_ere_backreferences(r#"\n"#), "\\n");
         assert_eq!(convert_ere_backreferences(r#"\t"#), "\\t");
-        assert_eq!(convert_ere_backreferences(r#"\\\n"#), "\\\\n");  // \\n → \n
-        assert_eq!(convert_ere_backreferences(r#"\\\\\1"#), "\\\\$1");  // \\\\1 → \\$1
+        assert_eq!(convert_ere_backreferences(r#"\\\n"#), "\\\\n"); // \\n → \n
+        assert_eq!(convert_ere_backreferences(r#"\\\\\1"#), "\\\\$1"); // \\\\1 → \\$1
     }
 
     #[test]
@@ -269,8 +305,14 @@ mod tests {
         // Complex real-world replacement patterns
         assert_eq!(convert_ere_backreferences(r#"\1:\2"#), "$1:$2");
         assert_eq!(convert_ere_backreferences(r#"[\1] [\2]"#), "[$1] [$2]");
-        assert_eq!(convert_ere_backreferences(r#""\1" -> "\2""#), r#""$1" -> "$2""#);
-        assert_eq!(convert_ere_backreferences(r#"function(\1, \2)"#), "function($1, $2)");
+        assert_eq!(
+            convert_ere_backreferences(r#""\1" -> "\2""#),
+            r#""$1" -> "$2""#
+        );
+        assert_eq!(
+            convert_ere_backreferences(r#"function(\1, \2)"#),
+            "function($1, $2)"
+        );
     }
 
     #[test]
@@ -298,18 +340,39 @@ mod tests {
     #[test]
     fn test_lookahead_lookbehind_patterns() {
         // PCRE-specific constructs should pass through
-        assert_eq!(convert_ere_to_pcre_pattern(r#"foo(?=bar)"#), r#"foo(?=bar)"#);
-        assert_eq!(convert_ere_to_pcre_pattern(r#"foo(?!bar)"#), r#"foo(?!bar)"#);
-        assert_eq!(convert_ere_to_pcre_pattern(r#"(?<=foo)bar"#), r#"(?<=foo)bar"#);
-        assert_eq!(convert_ere_to_pcre_pattern(r#"(?<!foo)bar"#), r#"(?<!foo)bar"#);
+        assert_eq!(
+            convert_ere_to_pcre_pattern(r#"foo(?=bar)"#),
+            r#"foo(?=bar)"#
+        );
+        assert_eq!(
+            convert_ere_to_pcre_pattern(r#"foo(?!bar)"#),
+            r#"foo(?!bar)"#
+        );
+        assert_eq!(
+            convert_ere_to_pcre_pattern(r#"(?<=foo)bar"#),
+            r#"(?<=foo)bar"#
+        );
+        assert_eq!(
+            convert_ere_to_pcre_pattern(r#"(?<!foo)bar"#),
+            r#"(?<!foo)bar"#
+        );
     }
 
     #[test]
     fn test_non_capturing_groups() {
         // Non-capturing and other special groups
-        assert_eq!(convert_ere_to_pcre_pattern(r#"(?:foo|bar)"#), r#"(?:foo|bar)"#);
-        assert_eq!(convert_ere_to_pcre_pattern(r#"(?P<name>foo)"#), r#"(?P<name>foo)"#);
-        assert_eq!(convert_ere_to_pcre_pattern(r#"(?<name>foo)"#), r#"(?<name>foo)"#);
+        assert_eq!(
+            convert_ere_to_pcre_pattern(r#"(?:foo|bar)"#),
+            r#"(?:foo|bar)"#
+        );
+        assert_eq!(
+            convert_ere_to_pcre_pattern(r#"(?P<name>foo)"#),
+            r#"(?P<name>foo)"#
+        );
+        assert_eq!(
+            convert_ere_to_pcre_pattern(r#"(?<name>foo)"#),
+            r#"(?<name>foo)"#
+        );
     }
 
     #[test]

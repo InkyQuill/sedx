@@ -17,42 +17,25 @@ pub enum Command {
     },
 
     /// Delete lines (sed: 1,10d)
-    Delete {
-        range: (Address, Address),
-    },
+    Delete { range: (Address, Address) },
 
     /// Print lines (sed: 1,10p)
-    Print {
-        range: (Address, Address),
-    },
+    Print { range: (Address, Address) },
 
     /// Quit processing (sed: 10q)
-    Quit {
-        address: Option<Address>,
-    },
+    Quit { address: Option<Address> },
 
     /// Quit without printing (sed: 10Q) - Phase 4
-    QuitWithoutPrint {
-        address: Option<Address>,
-    },
+    QuitWithoutPrint { address: Option<Address> },
 
     /// Insert text before line (sed: 5i\text)
-    Insert {
-        text: String,
-        address: Address,
-    },
+    Insert { text: String, address: Address },
 
     /// Append text after line (sed: 5a\text)
-    Append {
-        text: String,
-        address: Address,
-    },
+    Append { text: String, address: Address },
 
     /// Change line (sed: 5c\text)
-    Change {
-        text: String,
-        address: Address,
-    },
+    Change { text: String, address: Address },
 
     /// Command group (sed: {s/foo/bar/; p})
     Group {
@@ -61,54 +44,34 @@ pub enum Command {
     },
 
     /// Hold space operation: copy pattern space to hold space
-    Hold {
-        range: Option<(Address, Address)>,
-    },
+    Hold { range: Option<(Address, Address)> },
 
     /// Hold append: append pattern space to hold space
-    HoldAppend {
-        range: Option<(Address, Address)>,
-    },
+    HoldAppend { range: Option<(Address, Address)> },
 
     /// Get: copy hold space to pattern space
-    Get {
-        range: Option<(Address, Address)>,
-    },
+    Get { range: Option<(Address, Address)> },
 
     /// Get append: append hold space to pattern space
-    GetAppend {
-        range: Option<(Address, Address)>,
-    },
+    GetAppend { range: Option<(Address, Address)> },
 
     /// Exchange: swap pattern space and hold space
-    Exchange {
-        range: Option<(Address, Address)>,
-    },
+    Exchange { range: Option<(Address, Address)> },
 
     /// Next: print current pattern space, read next line, start new cycle (Phase 4)
-    Next {
-        range: Option<(Address, Address)>,
-    },
+    Next { range: Option<(Address, Address)> },
 
     /// Next with append: read next line and append to pattern space (Phase 4)
-    NextAppend {
-        range: Option<(Address, Address)>,
-    },
+    NextAppend { range: Option<(Address, Address)> },
 
     /// Print first line: print up to first newline in pattern space (Phase 4)
-    PrintFirstLine {
-        range: Option<(Address, Address)>,
-    },
+    PrintFirstLine { range: Option<(Address, Address)> },
 
     /// Delete first line: delete up to first newline, restart cycle (Phase 4)
-    DeleteFirstLine {
-        range: Option<(Address, Address)>,
-    },
+    DeleteFirstLine { range: Option<(Address, Address)> },
 
     /// Label definition (Phase 5): :label - defines a branch target
-    Label {
-        name: String,
-    },
+    Label { name: String },
 
     /// Branch (Phase 5): b [label] - unconditional branch to label
     /// If no label specified, branches to end of script
@@ -164,21 +127,15 @@ pub enum Command {
 
     /// Print line number (Phase 5): = - print current line number to stdout
     /// Can have optional address: addr =
-    PrintLineNumber {
-        range: Option<Address>,
-    },
+    PrintLineNumber { range: Option<Address> },
 
     /// Print filename (Phase 5): F - print current filename to stdout
     /// GNU sed extension
-    PrintFilename {
-        range: Option<Address>,
-    },
+    PrintFilename { range: Option<Address> },
 
     /// Clear pattern space (Phase 5): z - clear pattern space (GNU sed extension)
     /// Sets pattern space to empty string
-    ClearPatternSpace {
-        range: Option<Address>,
-    },
+    ClearPatternSpace { range: Option<Address> },
 }
 
 /// Substitution flags (unified across sed and sd)
@@ -216,16 +173,10 @@ pub enum Address {
     Negated(Box<Address>),
 
     /// Relative offset (e.g., /pattern/,+5)
-    Relative {
-        base: Box<Address>,
-        offset: isize,
-    },
+    Relative { base: Box<Address>, offset: isize },
 
     /// Step addressing (e.g., 1~2 for every 2nd line from line 1)
-    Step {
-        start: usize,
-        step: usize,
-    },
+    Step { start: usize, step: usize },
 }
 
 #[cfg(test)]

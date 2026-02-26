@@ -3,9 +3,9 @@
 //! This module provides parsing for traditional sed expressions with
 //! configurable regex flavor support (PCRE, ERE, BRE).
 
-use crate::command::{Command, Address, SubstitutionFlags};
 use crate::cli::RegexFlavor;
-use crate::sed_parser::{SedCommand as LegacySedCommand, Address as LegacyAddress};
+use crate::command::{Address, Command, SubstitutionFlags};
+use crate::sed_parser::{Address as LegacyAddress, SedCommand as LegacySedCommand};
 use anyhow::Result;
 
 /// Unified parser that supports sed syntax with configurable regex flavor
@@ -37,7 +37,12 @@ impl Parser {
     /// Convert legacy SedCommand to unified Command
     fn convert_legacy_command(&self, legacy: LegacySedCommand) -> Result<Command> {
         match legacy {
-            LegacySedCommand::Substitution { pattern, replacement, flags, range } => {
+            LegacySedCommand::Substitution {
+                pattern,
+                replacement,
+                flags,
+                range,
+            } => {
                 // Convert pattern based on regex flavor
                 let pattern = self.convert_pattern(&pattern);
                 let replacement = self.convert_replacement(&replacement);
@@ -49,49 +54,33 @@ impl Parser {
                     pattern,
                     replacement,
                     flags: substitution_flags,
-                    range: range.map(|(a, b)| {
-                        (self.convert_address(a), self.convert_address(b))
-                    }),
+                    range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
                 })
             }
-            LegacySedCommand::Delete { range } => {
-                Ok(Command::Delete {
-                    range: (self.convert_address(range.0), self.convert_address(range.1)),
-                })
-            }
-            LegacySedCommand::Print { range } => {
-                Ok(Command::Print {
-                    range: (self.convert_address(range.0), self.convert_address(range.1)),
-                })
-            }
-            LegacySedCommand::Quit { address } => {
-                Ok(Command::Quit {
-                    address: address.map(|a| self.convert_address(a)),
-                })
-            }
-            LegacySedCommand::QuitWithoutPrint { address } => {
-                Ok(Command::QuitWithoutPrint {
-                    address: address.map(|a| self.convert_address(a)),
-                })
-            }
-            LegacySedCommand::Insert { text, address } => {
-                Ok(Command::Insert {
-                    text,
-                    address: self.convert_address(address),
-                })
-            }
-            LegacySedCommand::Append { text, address } => {
-                Ok(Command::Append {
-                    text,
-                    address: self.convert_address(address),
-                })
-            }
-            LegacySedCommand::Change { text, address } => {
-                Ok(Command::Change {
-                    text,
-                    address: self.convert_address(address),
-                })
-            }
+            LegacySedCommand::Delete { range } => Ok(Command::Delete {
+                range: (self.convert_address(range.0), self.convert_address(range.1)),
+            }),
+            LegacySedCommand::Print { range } => Ok(Command::Print {
+                range: (self.convert_address(range.0), self.convert_address(range.1)),
+            }),
+            LegacySedCommand::Quit { address } => Ok(Command::Quit {
+                address: address.map(|a| self.convert_address(a)),
+            }),
+            LegacySedCommand::QuitWithoutPrint { address } => Ok(Command::QuitWithoutPrint {
+                address: address.map(|a| self.convert_address(a)),
+            }),
+            LegacySedCommand::Insert { text, address } => Ok(Command::Insert {
+                text,
+                address: self.convert_address(address),
+            }),
+            LegacySedCommand::Append { text, address } => Ok(Command::Append {
+                text,
+                address: self.convert_address(address),
+            }),
+            LegacySedCommand::Change { text, address } => Ok(Command::Change {
+                text,
+                address: self.convert_address(address),
+            }),
             LegacySedCommand::Group { range, commands } => {
                 let converted_commands = commands
                     .into_iter()
@@ -100,141 +89,75 @@ impl Parser {
 
                 Ok(Command::Group {
                     commands: converted_commands,
-                    range: range.map(|(a, b)| {
-                        (self.convert_address(a), self.convert_address(b))
-                    }),
+                    range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
                 })
             }
-            LegacySedCommand::Hold { range } => {
-                Ok(Command::Hold {
-                    range: range.map(|(a, b)| {
-                        (self.convert_address(a), self.convert_address(b))
-                    }),
-                })
-            }
-            LegacySedCommand::HoldAppend { range } => {
-                Ok(Command::HoldAppend {
-                    range: range.map(|(a, b)| {
-                        (self.convert_address(a), self.convert_address(b))
-                    }),
-                })
-            }
-            LegacySedCommand::Get { range } => {
-                Ok(Command::Get {
-                    range: range.map(|(a, b)| {
-                        (self.convert_address(a), self.convert_address(b))
-                    }),
-                })
-            }
-            LegacySedCommand::GetAppend { range } => {
-                Ok(Command::GetAppend {
-                    range: range.map(|(a, b)| {
-                        (self.convert_address(a), self.convert_address(b))
-                    }),
-                })
-            }
-            LegacySedCommand::Exchange { range } => {
-                Ok(Command::Exchange {
-                    range: range.map(|(a, b)| {
-                        (self.convert_address(a), self.convert_address(b))
-                    }),
-                })
-            }
-            LegacySedCommand::Next { range } => {
-                Ok(Command::Next {
-                    range: range.map(|(a, b)| {
-                        (self.convert_address(a), self.convert_address(b))
-                    }),
-                })
-            }
-            LegacySedCommand::NextAppend { range } => {
-                Ok(Command::NextAppend {
-                    range: range.map(|(a, b)| {
-                        (self.convert_address(a), self.convert_address(b))
-                    }),
-                })
-            }
-            LegacySedCommand::PrintFirstLine { range } => {
-                Ok(Command::PrintFirstLine {
-                    range: range.map(|(a, b)| {
-                        (self.convert_address(a), self.convert_address(b))
-                    }),
-                })
-            }
-            LegacySedCommand::DeleteFirstLine { range } => {
-                Ok(Command::DeleteFirstLine {
-                    range: range.map(|(a, b)| {
-                        (self.convert_address(a), self.convert_address(b))
-                    }),
-                })
-            }
+            LegacySedCommand::Hold { range } => Ok(Command::Hold {
+                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
+            }),
+            LegacySedCommand::HoldAppend { range } => Ok(Command::HoldAppend {
+                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
+            }),
+            LegacySedCommand::Get { range } => Ok(Command::Get {
+                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
+            }),
+            LegacySedCommand::GetAppend { range } => Ok(Command::GetAppend {
+                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
+            }),
+            LegacySedCommand::Exchange { range } => Ok(Command::Exchange {
+                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
+            }),
+            LegacySedCommand::Next { range } => Ok(Command::Next {
+                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
+            }),
+            LegacySedCommand::NextAppend { range } => Ok(Command::NextAppend {
+                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
+            }),
+            LegacySedCommand::PrintFirstLine { range } => Ok(Command::PrintFirstLine {
+                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
+            }),
+            LegacySedCommand::DeleteFirstLine { range } => Ok(Command::DeleteFirstLine {
+                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
+            }),
             // Phase 5: Flow control commands
-            LegacySedCommand::Label { name } => {
-                Ok(Command::Label { name })
-            }
-            LegacySedCommand::Branch { label, range } => {
-                Ok(Command::Branch {
-                    label,
-                    range: range.map(|(a, b)| {
-                        (self.convert_address(a), self.convert_address(b))
-                    }),
-                })
-            }
-            LegacySedCommand::Test { label, range } => {
-                Ok(Command::Test {
-                    label,
-                    range: range.map(|(a, b)| {
-                        (self.convert_address(a), self.convert_address(b))
-                    }),
-                })
-            }
-            LegacySedCommand::TestFalse { label, range } => {
-                Ok(Command::TestFalse {
-                    label,
-                    range: range.map(|(a, b)| {
-                        (self.convert_address(a), self.convert_address(b))
-                    }),
-                })
-            }
-            LegacySedCommand::ReadFile { filename, range } => {
-                Ok(Command::ReadFile {
-                    filename,
-                    range: range.map(|a| self.convert_address(a)),
-                })
-            }
-            LegacySedCommand::WriteFile { filename, range } => {
-                Ok(Command::WriteFile {
-                    filename,
-                    range: range.map(|a| self.convert_address(a)),
-                })
-            }
-            LegacySedCommand::ReadLine { filename, range } => {
-                Ok(Command::ReadLine {
-                    filename,
-                    range: range.map(|a| self.convert_address(a)),
-                })
-            }
-            LegacySedCommand::WriteFirstLine { filename, range } => {
-                Ok(Command::WriteFirstLine {
-                    filename,
-                    range: range.map(|a| self.convert_address(a)),
-                })
-            }
-            LegacySedCommand::PrintLineNumber { range } => {
-                Ok(Command::PrintLineNumber {
-                    range: range.map(|a| self.convert_address(a)),
-                })
-            }
-            LegacySedCommand::PrintFilename { range } => {
-                Ok(Command::PrintFilename {
-                    range: range.map(|a| self.convert_address(a)),
-                })
-            }
-            LegacySedCommand::ClearPatternSpace { range } => {
-                Ok(Command::ClearPatternSpace {
-                    range: range.map(|a| self.convert_address(a)),
-                })
-            }
+            LegacySedCommand::Label { name } => Ok(Command::Label { name }),
+            LegacySedCommand::Branch { label, range } => Ok(Command::Branch {
+                label,
+                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
+            }),
+            LegacySedCommand::Test { label, range } => Ok(Command::Test {
+                label,
+                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
+            }),
+            LegacySedCommand::TestFalse { label, range } => Ok(Command::TestFalse {
+                label,
+                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
+            }),
+            LegacySedCommand::ReadFile { filename, range } => Ok(Command::ReadFile {
+                filename,
+                range: range.map(|a| self.convert_address(a)),
+            }),
+            LegacySedCommand::WriteFile { filename, range } => Ok(Command::WriteFile {
+                filename,
+                range: range.map(|a| self.convert_address(a)),
+            }),
+            LegacySedCommand::ReadLine { filename, range } => Ok(Command::ReadLine {
+                filename,
+                range: range.map(|a| self.convert_address(a)),
+            }),
+            LegacySedCommand::WriteFirstLine { filename, range } => Ok(Command::WriteFirstLine {
+                filename,
+                range: range.map(|a| self.convert_address(a)),
+            }),
+            LegacySedCommand::PrintLineNumber { range } => Ok(Command::PrintLineNumber {
+                range: range.map(|a| self.convert_address(a)),
+            }),
+            LegacySedCommand::PrintFilename { range } => Ok(Command::PrintFilename {
+                range: range.map(|a| self.convert_address(a)),
+            }),
+            LegacySedCommand::ClearPatternSpace { range } => Ok(Command::ClearPatternSpace {
+                range: range.map(|a| self.convert_address(a)),
+            }),
         }
     }
 
@@ -339,10 +262,15 @@ mod tests {
         assert_eq!(commands.len(), 1);
 
         match &commands[0] {
-            Command::Substitution { pattern, replacement, flags, .. } => {
+            Command::Substitution {
+                pattern,
+                replacement,
+                flags,
+                ..
+            } => {
                 assert_eq!(pattern, "foo");
                 assert_eq!(replacement, "bar");
-                assert!(!flags.global);  // 'g' flag not specified
+                assert!(!flags.global); // 'g' flag not specified
             }
             _ => panic!("Expected Substitution command"),
         }

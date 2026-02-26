@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-#[allow(dead_code)]  // Default config template for future use
+#[allow(dead_code)] // Default config template for future use
 const DEFAULT_CONFIG: &str = r#"# SedX Configuration File
 # See 'sedx config' command to edit this file
 
@@ -137,22 +137,40 @@ impl Default for ProcessingConfig {
 }
 
 // Default functions for serde
-fn default_max_size_gb() -> Option<f64> { Some(2.0) }
-fn default_max_disk_usage_percent() -> Option<f64> { Some(60.0) }
-fn default_mode() -> Option<String> { Some("pcre".to_string()) }
-fn default_show_warnings() -> Option<bool> { Some(true) }
-fn default_context_lines() -> Option<usize> { Some(2) }
-fn default_max_memory_mb() -> Option<usize> { Some(100) }
-fn default_streaming() -> Option<bool> { Some(true) }
+fn default_max_size_gb() -> Option<f64> {
+    Some(2.0)
+}
+fn default_max_disk_usage_percent() -> Option<f64> {
+    Some(60.0)
+}
+fn default_mode() -> Option<String> {
+    Some("pcre".to_string())
+}
+fn default_show_warnings() -> Option<bool> {
+    Some(true)
+}
+fn default_context_lines() -> Option<usize> {
+    Some(2)
+}
+fn default_max_memory_mb() -> Option<usize> {
+    Some(100)
+}
+fn default_streaming() -> Option<bool> {
+    Some(true)
+}
 
 /// Get the configuration file path
 pub fn config_file_path() -> Result<PathBuf> {
-    let home_dir = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+    let home_dir =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
 
     let config_dir = home_dir.join(".sedx");
-    fs::create_dir_all(&config_dir)
-        .with_context(|| format!("Failed to create config directory: {}", config_dir.display()))?;
+    fs::create_dir_all(&config_dir).with_context(|| {
+        format!(
+            "Failed to create config directory: {}",
+            config_dir.display()
+        )
+    })?;
 
     Ok(config_dir.join("config.toml"))
 }
@@ -211,8 +229,12 @@ streaming = true
 pub fn save_default_config() -> Result<()> {
     let config_path = config_file_path()?;
 
-    fs::write(&config_path, get_default_config_content())
-        .with_context(|| format!("Failed to write default config file: {}", config_path.display()))?;
+    fs::write(&config_path, get_default_config_content()).with_context(|| {
+        format!(
+            "Failed to write default config file: {}",
+            config_path.display()
+        )
+    })?;
 
     Ok(())
 }
@@ -271,12 +293,11 @@ pub fn ensure_complete_config() -> Result<()> {
 }
 
 /// Save configuration to file
-#[allow(dead_code)]  // Public API - kept for future use
+#[allow(dead_code)] // Public API - kept for future use
 pub fn save_config(config: &Config) -> Result<()> {
     let config_path = config_file_path()?;
 
-    let config_str = toml::to_string_pretty(config)
-        .context("Failed to serialize config")?;
+    let config_str = toml::to_string_pretty(config).context("Failed to serialize config")?;
 
     fs::write(&config_path, config_str)
         .with_context(|| format!("Failed to write config file: {}", config_path.display()))?;
@@ -288,29 +309,37 @@ pub fn save_config(config: &Config) -> Result<()> {
 pub fn validate_config(config: &Config) -> Result<()> {
     // Validate backup settings
     if let Some(max_gb) = config.backup.max_size_gb
-        && max_gb < 0.0 {
+        && max_gb < 0.0
+    {
         anyhow::bail!("Invalid max_size_gb: {} (must be positive)", max_gb);
     }
 
     if let Some(max_percent) = config.backup.max_disk_usage_percent
-        && !(0.0..=100.0).contains(&max_percent) {
-        anyhow::bail!("Invalid max_disk_usage_percent: {} (must be 0-100)", max_percent);
+        && !(0.0..=100.0).contains(&max_percent)
+    {
+        anyhow::bail!(
+            "Invalid max_disk_usage_percent: {} (must be 0-100)",
+            max_percent
+        );
     }
 
     // Validate compatibility mode
     if let Some(mode) = &config.compatibility.mode
-        && !["pcre", "ere", "bre"].contains(&mode.as_str()) {
+        && !["pcre", "ere", "bre"].contains(&mode.as_str())
+    {
         anyhow::bail!("Invalid mode: {} (must be 'pcre', 'ere', or 'bre')", mode);
     }
 
     // Validate processing settings
     if let Some(context) = config.processing.context_lines
-        && context > 10 {
+        && context > 10
+    {
         anyhow::bail!("Invalid context_lines: {} (max 10)", context);
     }
 
     if let Some(max_mb) = config.processing.max_memory_mb
-        && max_mb < 10 {
+        && max_mb < 10
+    {
         anyhow::bail!("Invalid max_memory_mb: {} (min 10 MB)", max_mb);
     }
 
@@ -358,11 +387,11 @@ mod tests {
     fn test_validate_config_valid_boundary_values() {
         let mut config = Config::default();
         // Test boundary values that should be valid
-        config.backup.max_size_gb = Some(0.0);  // Zero is allowed (no limit)
-        config.backup.max_disk_usage_percent = Some(0.0);  // Zero is allowed
-        config.backup.max_disk_usage_percent = Some(100.0);  // 100% is allowed
-        config.processing.context_lines = Some(10);  // Max is allowed
-        config.processing.max_memory_mb = Some(10);  // Min is allowed
+        config.backup.max_size_gb = Some(0.0); // Zero is allowed (no limit)
+        config.backup.max_disk_usage_percent = Some(0.0); // Zero is allowed
+        config.backup.max_disk_usage_percent = Some(100.0); // 100% is allowed
+        config.processing.context_lines = Some(10); // Max is allowed
+        config.processing.max_memory_mb = Some(10); // Min is allowed
         assert!(validate_config(&config).is_ok());
     }
 
@@ -389,7 +418,12 @@ mod tests {
         config.backup.max_disk_usage_percent = Some(-1.0);
         let result = validate_config(&config);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("max_disk_usage_percent"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("max_disk_usage_percent")
+        );
     }
 
     #[test]
@@ -398,7 +432,12 @@ mod tests {
         config.backup.max_disk_usage_percent = Some(101.0);
         let result = validate_config(&config);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("max_disk_usage_percent"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("max_disk_usage_percent")
+        );
     }
 
     #[test]
@@ -424,7 +463,11 @@ mod tests {
         for mode in modes {
             let mut config = Config::default();
             config.compatibility.mode = Some(mode.to_string());
-            assert!(validate_config(&config).is_ok(), "Mode '{}' should be valid", mode);
+            assert!(
+                validate_config(&config).is_ok(),
+                "Mode '{}' should be valid",
+                mode
+            );
         }
     }
 
@@ -439,7 +482,7 @@ mod tests {
     #[test]
     fn test_validate_config_invalid_mode_case_sensitive() {
         let mut config = Config::default();
-        config.compatibility.mode = Some("PCRE".to_string());  // uppercase
+        config.compatibility.mode = Some("PCRE".to_string()); // uppercase
         let result = validate_config(&config);
         assert!(result.is_err());
     }
@@ -447,7 +490,7 @@ mod tests {
     #[test]
     fn test_validate_config_invalid_context_lines() {
         let mut config = Config::default();
-        config.processing.context_lines = Some(11);  // Max is 10
+        config.processing.context_lines = Some(11); // Max is 10
         let result = validate_config(&config);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("context_lines"));
@@ -464,7 +507,7 @@ mod tests {
     #[test]
     fn test_validate_config_invalid_max_memory_mb() {
         let mut config = Config::default();
-        config.processing.max_memory_mb = Some(9);  // Min is 10
+        config.processing.max_memory_mb = Some(9); // Min is 10
         let result = validate_config(&config);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("max_memory_mb"));
@@ -522,12 +565,27 @@ mod tests {
         let toml_str = toml::to_string_pretty(&original).unwrap();
         let deserialized: Config = toml::from_str(&toml_str).unwrap();
         assert_eq!(original.backup.max_size_gb, deserialized.backup.max_size_gb);
-        assert_eq!(original.backup.max_disk_usage_percent, deserialized.backup.max_disk_usage_percent);
+        assert_eq!(
+            original.backup.max_disk_usage_percent,
+            deserialized.backup.max_disk_usage_percent
+        );
         assert_eq!(original.compatibility.mode, deserialized.compatibility.mode);
-        assert_eq!(original.compatibility.show_warnings, deserialized.compatibility.show_warnings);
-        assert_eq!(original.processing.context_lines, deserialized.processing.context_lines);
-        assert_eq!(original.processing.max_memory_mb, deserialized.processing.max_memory_mb);
-        assert_eq!(original.processing.streaming, deserialized.processing.streaming);
+        assert_eq!(
+            original.compatibility.show_warnings,
+            deserialized.compatibility.show_warnings
+        );
+        assert_eq!(
+            original.processing.context_lines,
+            deserialized.processing.context_lines
+        );
+        assert_eq!(
+            original.processing.max_memory_mb,
+            deserialized.processing.max_memory_mb
+        );
+        assert_eq!(
+            original.processing.streaming,
+            deserialized.processing.streaming
+        );
     }
 
     #[test]
@@ -573,22 +631,22 @@ mod tests {
         assert_eq!(config.backup.max_size_gb, Some(10.0));
         assert_eq!(config.compatibility.mode, Some("bre".to_string()));
         // Default values for unspecified fields
-        assert_eq!(config.backup.max_disk_usage_percent, Some(60.0));  // default
-        assert_eq!(config.compatibility.show_warnings, Some(true));  // default
-        assert_eq!(config.processing.context_lines, Some(2));  // default
+        assert_eq!(config.backup.max_disk_usage_percent, Some(60.0)); // default
+        assert_eq!(config.compatibility.show_warnings, Some(true)); // default
+        assert_eq!(config.processing.context_lines, Some(2)); // default
     }
 
     #[test]
     fn test_config_parse_empty_toml_all_defaults() {
         let empty_toml = "";
         let config: Config = toml::from_str(empty_toml).unwrap();
-        assert_eq!(config.backup.max_size_gb, Some(2.0));  // default
-        assert_eq!(config.backup.max_disk_usage_percent, Some(60.0));  // default
-        assert_eq!(config.compatibility.mode, Some("pcre".to_string()));  // default
-        assert_eq!(config.compatibility.show_warnings, Some(true));  // default
-        assert_eq!(config.processing.context_lines, Some(2));  // default
-        assert_eq!(config.processing.max_memory_mb, Some(100));  // default
-        assert_eq!(config.processing.streaming, Some(true));  // default
+        assert_eq!(config.backup.max_size_gb, Some(2.0)); // default
+        assert_eq!(config.backup.max_disk_usage_percent, Some(60.0)); // default
+        assert_eq!(config.compatibility.mode, Some("pcre".to_string())); // default
+        assert_eq!(config.compatibility.show_warnings, Some(true)); // default
+        assert_eq!(config.processing.context_lines, Some(2)); // default
+        assert_eq!(config.processing.max_memory_mb, Some(100)); // default
+        assert_eq!(config.processing.streaming, Some(true)); // default
     }
 
     #[test]
@@ -698,10 +756,10 @@ mod tests {
         "#;
         let config: Config = toml::from_str(partial).unwrap();
 
-        assert_eq!(config.backup.max_size_gb, Some(10.0));  // Custom
-        assert_eq!(config.backup.max_disk_usage_percent, Some(60.0));  // Default
-        assert_eq!(config.compatibility.mode, Some("pcre".to_string()));  // Default
-        assert_eq!(config.processing.context_lines, Some(2));  // Default
+        assert_eq!(config.backup.max_size_gb, Some(10.0)); // Custom
+        assert_eq!(config.backup.max_disk_usage_percent, Some(60.0)); // Default
+        assert_eq!(config.compatibility.mode, Some("pcre".to_string())); // Default
+        assert_eq!(config.processing.context_lines, Some(2)); // Default
     }
 
     // =========================================================================
@@ -867,7 +925,7 @@ mod tests {
     fn test_config_very_large_values() {
         let mut config = Config::default();
         config.backup.max_size_gb = Some(999999.0);
-        config.backup.max_disk_usage_percent = Some(100.0);  // Max valid
+        config.backup.max_disk_usage_percent = Some(100.0); // Max valid
         config.processing.max_memory_mb = Some(999999);
         assert!(validate_config(&config).is_ok());
     }
@@ -883,8 +941,8 @@ mod tests {
             "regex",
             "javascript",
             "",
-            "pcre ",  // trailing space
-            " pcre",  // leading space
+            "pcre ", // trailing space
+            " pcre", // leading space
         ];
         for mode in invalid_modes {
             let mut config = Config::default();

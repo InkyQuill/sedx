@@ -3,8 +3,8 @@
 //! This module provides enhanced error messages for regex compilation failures,
 //! helping users understand and fix their regex patterns.
 
-use regex::Error as RegexError;
 use crate::cli::RegexFlavor;
+use regex::Error as RegexError;
 
 /// Enhanced regex error with helpful context
 #[derive(Debug, Clone, PartialEq)]
@@ -28,13 +28,10 @@ pub enum RegexErrorType {
         position: Option<usize>,
     },
     /// Invalid escape sequence
-    InvalidEscape {
-        sequence: String,
-        position: usize,
-    },
+    InvalidEscape { sequence: String, position: usize },
     /// Unclosed group/bracket/brace
     UnclosedDelimiter {
-        delimiter: char,  // '(', '[', '{'
+        delimiter: char, // '(', '[', '{'
         position: usize,
     },
     /// Invalid quantifier (e.g., `**`, `*?+`, nothing to repeat)
@@ -53,10 +50,8 @@ pub enum RegexErrorType {
         position: Option<usize>,
     },
     /// Other regex error
-    #[allow(dead_code)]  // Fallback variant for future error types
-    Other {
-        message: String,
-    },
+    #[allow(dead_code)] // Fallback variant for future error types
+    Other { message: String },
 }
 
 impl EnhancedRegexError {
@@ -119,7 +114,10 @@ impl EnhancedRegexError {
         }
 
         // Check for invalid quantifiers
-        if lower_msg.contains("quantifier") || lower_msg.contains("repeat") || lower_msg.contains("repetition operator") {
+        if lower_msg.contains("quantifier")
+            || lower_msg.contains("repeat")
+            || lower_msg.contains("repetition operator")
+        {
             // Find the problematic quantifier
             if let Some(pos) = find_invalid_quantifier(pattern) {
                 return RegexErrorType::InvalidQuantifier {
@@ -134,7 +132,10 @@ impl EnhancedRegexError {
         }
 
         // Check for lookaround errors
-        if lower_msg.contains("lookaround") || lower_msg.contains("lookahead") || lower_msg.contains("lookbehind") {
+        if lower_msg.contains("lookaround")
+            || lower_msg.contains("lookahead")
+            || lower_msg.contains("lookbehind")
+        {
             return RegexErrorType::LookaroundError {
                 message: error_msg.to_string(),
                 position: None,
@@ -157,9 +158,16 @@ impl EnhancedRegexError {
     }
 
     /// Generate a helpful suggestion based on the error type and regex flavor
-    fn generate_suggestion(error_type: &RegexErrorType, pattern: &str, flavor: RegexFlavor) -> Option<String> {
+    fn generate_suggestion(
+        error_type: &RegexErrorType,
+        pattern: &str,
+        flavor: RegexFlavor,
+    ) -> Option<String> {
         match error_type {
-            RegexErrorType::UnclosedDelimiter { delimiter, position } => {
+            RegexErrorType::UnclosedDelimiter {
+                delimiter,
+                position,
+            } => {
                 let closer = match delimiter {
                     '(' => ')',
                     '[' => ']',
@@ -173,100 +181,80 @@ impl EnhancedRegexError {
                 ))
             }
 
-            RegexErrorType::InvalidEscape { sequence, position: _ } => {
+            RegexErrorType::InvalidEscape {
+                sequence,
+                position: _,
+            } => {
                 match (sequence.as_str(), flavor) {
                     // BRE-specific issues
-                    ("\\(", RegexFlavor::PCRE) => {
-                        Some(format!(
-                            "In PCRE mode (default), parentheses are meta-characters. \
+                    ("\\(", RegexFlavor::PCRE) => Some(format!(
+                        "In PCRE mode (default), parentheses are meta-characters. \
                             Use '(' directly, or use -B (BRE mode) if you meant '\\('. \
                             For a literal '(', use '\\('."
-                        ))
-                    }
-                    ("\\)", RegexFlavor::PCRE) => {
-                        Some(format!(
-                            "In PCRE mode (default), ')' is a meta-character. \
+                    )),
+                    ("\\)", RegexFlavor::PCRE) => Some(format!(
+                        "In PCRE mode (default), ')' is a meta-character. \
                             Use ')' directly, or use -B (BRE mode) if you meant '\\)'. \
                             For a literal ')', use '\\)'."
-                        ))
-                    }
-                    ("\\{", RegexFlavor::PCRE) => {
-                        Some(format!(
-                            "In PCRE mode (default), '{{' starts a quantifier. \
+                    )),
+                    ("\\{", RegexFlavor::PCRE) => Some(format!(
+                        "In PCRE mode (default), '{{' starts a quantifier. \
                             Use '{{' directly for quantifiers like 'a{{3}}', or use -B (BRE mode) if you meant '\\{{'."
-                        ))
-                    }
-                    ("\\+", RegexFlavor::PCRE) => {
-                        Some(format!(
-                            "In PCRE mode (default), '+' is a meta-character (one or more). \
+                    )),
+                    ("\\+", RegexFlavor::PCRE) => Some(format!(
+                        "In PCRE mode (default), '+' is a meta-character (one or more). \
                             Use '+' directly, or use -B (BRE mode) if you meant '\\+' as a quantifier. \
                             For a literal '+', use '\\+'."
-                        ))
-                    }
-                    ("\\?", RegexFlavor::PCRE) => {
-                        Some(format!(
-                            "In PCRE mode (default), '?' is a meta-character (zero or one). \
+                    )),
+                    ("\\?", RegexFlavor::PCRE) => Some(format!(
+                        "In PCRE mode (default), '?' is a meta-character (zero or one). \
                             Use '?' directly, or use -B (BRE mode) if you meant '\\?'. \
                             For a literal '?', use '\\?'."
-                        ))
-                    }
-                    ("\\|", RegexFlavor::PCRE) => {
-                        Some(format!(
-                            "In PCRE mode (default), '|' is the alternation operator. \
+                    )),
+                    ("\\|", RegexFlavor::PCRE) => Some(format!(
+                        "In PCRE mode (default), '|' is the alternation operator. \
                             Use '|' directly, or use -B (BRE mode) if you meant '\\|'. \
                             For a literal '|', use '\\|'."
-                        ))
-                    }
+                    )),
                     // BRE-specific issues
-                    ("(", RegexFlavor::BRE) => {
-                        Some(format!(
-                            "In BRE mode (-B), parentheses must be escaped: '\\(' not '('. \
+                    ("(", RegexFlavor::BRE) => Some(format!(
+                        "In BRE mode (-B), parentheses must be escaped: '\\(' not '('. \
                             Use -E (ERE mode) or remove -B for PCRE mode to use '(' directly."
-                        ))
-                    }
-                    (")", RegexFlavor::BRE) => {
-                        Some(format!(
-                            "In BRE mode (-B), parentheses must be escaped: '\\)' not ')'. \
+                    )),
+                    (")", RegexFlavor::BRE) => Some(format!(
+                        "In BRE mode (-B), parentheses must be escaped: '\\)' not ')'. \
                             Use -E (ERE mode) or remove -B for PCRE mode to use ')' directly."
-                        ))
-                    }
-                    ("{", RegexFlavor::BRE) => {
-                        Some(format!(
-                            "In BRE mode (-B), braces must be escaped: '\\{{' not '{{'. \
+                    )),
+                    ("{", RegexFlavor::BRE) => Some(format!(
+                        "In BRE mode (-B), braces must be escaped: '\\{{' not '{{'. \
                             Use -E (ERE mode) or remove -B for PCRE mode."
-                        ))
-                    }
-                    ("+", RegexFlavor::BRE) => {
-                        Some(format!(
-                            "In BRE mode (-B), '+' is a literal character. \
+                    )),
+                    ("+", RegexFlavor::BRE) => Some(format!(
+                        "In BRE mode (-B), '+' is a literal character. \
                             Use '\\+' for the quantifier (one or more), or use -E for ERE mode."
-                        ))
-                    }
-                    ("?", RegexFlavor::BRE) => {
-                        Some(format!(
-                            "In BRE mode (-B), '?' is a literal character. \
+                    )),
+                    ("?", RegexFlavor::BRE) => Some(format!(
+                        "In BRE mode (-B), '?' is a literal character. \
                             Use '\\?' for the quantifier (zero or one), or use -E for ERE mode."
-                        ))
-                    }
-                    ("|", RegexFlavor::BRE) => {
-                        Some(format!(
-                            "In BRE mode (-B), '|' is a literal character. \
+                    )),
+                    ("|", RegexFlavor::BRE) => Some(format!(
+                        "In BRE mode (-B), '|' is a literal character. \
                             Use '\\|' for alternation, or use -E for ERE mode."
-                        ))
-                    }
+                    )),
                     // Generic escape issues
-                    (seq, _) => {
-                        Some(format!(
-                            "The escape sequence '{}' is not recognized. \
+                    (seq, _) => Some(format!(
+                        "The escape sequence '{}' is not recognized. \
                             In PCRE mode, common escapes are: \\n, \\t, \\r, \\xHH, \\uHHHH, \\x{{HHHHHH}}. \
                             For a literal '{}', use '\\{}'.",
-                            seq, seq, seq
-                        ))
-                    }
+                        seq, seq, seq
+                    )),
                 }
             }
 
-            RegexErrorType::InvalidQuantifier { message, position: _ } => {
+            RegexErrorType::InvalidQuantifier {
+                message,
+                position: _,
+            } => {
                 if message.to_lowercase().contains("nothing to repeat") {
                     Some(format!(
                         "A quantifier (*, +, ?, {{n}}) has nothing to repeat. \
@@ -284,39 +272,29 @@ impl EnhancedRegexError {
                 }
             }
 
-            RegexErrorType::LookaroundError { message: _, .. } => {
-                Some(format!(
-                    "Rust's regex crate (used by SedX) has limited lookaround support. \
+            RegexErrorType::LookaroundError { message: _, .. } => Some(format!(
+                "Rust's regex crate (used by SedX) has limited lookaround support. \
                     Fixed-width lookbehinds are supported: (?<=pattern), (?<!pattern). \
                     Lookaheads are supported: (?=pattern), (?!pattern). \
                     Variable-width lookbehinds are NOT supported."
-                ))
-            }
+            )),
 
-            RegexErrorType::InvalidBackreference { message: _, .. } => {
-                match flavor {
-                    RegexFlavor::BRE => {
-                        Some(format!(
-                            "In BRE mode, backreferences use \\1, \\2, etc. in patterns. \
+            RegexErrorType::InvalidBackreference { message: _, .. } => match flavor {
+                RegexFlavor::BRE => Some(format!(
+                    "In BRE mode, backreferences use \\1, \\2, etc. in patterns. \
                             Make sure you have capturing groups \\(...\\) before referencing them. \
                             Note: SedX converts BRE to PCRE internally, so \\1 becomes $1."
-                        ))
-                    }
-                    RegexFlavor::ERE => {
-                        Some(format!(
-                            "In ERE mode, backreferences use \\1, \\2, etc. in replacement strings. \
+                )),
+                RegexFlavor::ERE => Some(format!(
+                    "In ERE mode, backreferences use \\1, \\2, etc. in replacement strings. \
                             In patterns, use $1, $2, etc. for backreferences. \
                             Make sure you have capturing groups before referencing them."
-                        ))
-                    }
-                    RegexFlavor::PCRE => {
-                        Some(format!(
-                            "In PCRE mode, backreferences use $1, $2, etc. in both patterns and replacements. \
+                )),
+                RegexFlavor::PCRE => Some(format!(
+                    "In PCRE mode, backreferences use $1, $2, etc. in both patterns and replacements. \
                             Make sure you have capturing groups (...) before referencing them."
-                        ))
-                    }
-                }
-            }
+                )),
+            },
 
             RegexErrorType::Syntax { message: _, .. } => {
                 // Try to provide a more helpful message based on the pattern
@@ -336,12 +314,10 @@ impl EnhancedRegexError {
                 }
             }
 
-            RegexErrorType::Other { message } => {
-                Some(format!(
-                    "Error: {}. For help, visit: https://docs.rs/regex/latest/regex/",
-                    message
-                ))
-            }
+            RegexErrorType::Other { message } => Some(format!(
+                "Error: {}. For help, visit: https://docs.rs/regex/latest/regex/",
+                message
+            )),
         }
     }
 
@@ -357,17 +333,27 @@ impl EnhancedRegexError {
         output.push_str(&format!("  Pattern: \"{}\"\n", self.pattern));
 
         match &self.error_type {
-            RegexErrorType::Syntax { message, position: _ } => {
+            RegexErrorType::Syntax {
+                message,
+                position: _,
+            } => {
                 output.push_str(&format!("  Type: Syntax error\n"));
                 output.push_str(&format!("  Details: {}\n", message));
             }
             RegexErrorType::InvalidEscape { sequence, position } => {
                 output.push_str(&format!("  Type: Invalid escape sequence\n"));
-                output.push_str(&format!("  Sequence: '{}' at position {}\n", sequence, position));
+                output.push_str(&format!(
+                    "  Sequence: '{}' at position {}\n",
+                    sequence, position
+                ));
             }
-            RegexErrorType::UnclosedDelimiter { delimiter, position } => {
+            RegexErrorType::UnclosedDelimiter {
+                delimiter,
+                position,
+            } => {
                 output.push_str(&format!("  Type: Unclosed delimiter\n"));
-                output.push_str(&format!("  Missing closing '{}' for opening '{}' at position {}\n",
+                output.push_str(&format!(
+                    "  Missing closing '{}' for opening '{}' at position {}\n",
                     match delimiter {
                         '(' => ')',
                         '[' => ']',
@@ -378,7 +364,10 @@ impl EnhancedRegexError {
                     position
                 ));
             }
-            RegexErrorType::InvalidQuantifier { message, position: _ } => {
+            RegexErrorType::InvalidQuantifier {
+                message,
+                position: _,
+            } => {
                 output.push_str(&format!("  Type: Invalid quantifier\n"));
                 output.push_str(&format!("  Details: {}\n", message));
             }
@@ -450,11 +439,7 @@ fn find_unclosed_delimiter(pattern: &str, open: char, close: char) -> Option<usi
             }
         }
 
-        if depth > 0 {
-            Some(last_open_pos)
-        } else {
-            None
-        }
+        if depth > 0 { Some(last_open_pos) } else { None }
     } else {
         None
     }
@@ -475,13 +460,18 @@ fn find_invalid_escape(pattern: &str, flavor: RegexFlavor) -> Option<usize> {
                 // Special characters that are always valid escapes
                 'n' | 't' | 'r' | 'f' | '0' => true,
                 // Meta-characters that are valid to escape
-                '\\' | '.' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|' => true,
+                '\\' | '.' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}'
+                | '|' => true,
                 // Hex and Unicode escapes
                 'x' | 'u' | 'U' => true,
                 // Word/non-word/digit/non-digit/space/non-space
                 'w' | 'W' | 'd' | 'D' | 's' | 'S' | 'b' | 'B' => true,
                 // In BRE mode, these ARE valid escapes
-                _ if matches!(flavor, RegexFlavor::BRE) && matches!(next, '(' | ')' | '{' | '}' | '+' | '?' | '|') => true,
+                _ if matches!(flavor, RegexFlavor::BRE)
+                    && matches!(next, '(' | ')' | '{' | '}' | '+' | '?' | '|') =>
+                {
+                    true
+                }
                 // In BRE/ERE, backreferences
                 '1'..='9' => true,
                 '&' if matches!(flavor, RegexFlavor::BRE | RegexFlavor::ERE) => true,
@@ -535,13 +525,20 @@ fn find_invalid_quantifier(pattern: &str) -> Option<usize> {
                 // Check for invalid brace quantifier syntax
                 // This is a simplified check
                 let rest: String = chars[i..].iter().collect();
-                if !rest.starts_with("{0}") && !rest.starts_with("{1") &&
-                   !rest.contains(',') && !rest.starts_with("{0,") &&
-                   !rest.starts_with("{1,") && !rest.starts_with("{2,") &&
-                   !rest.starts_with("{3,") && !rest.starts_with("{4,") &&
-                   !rest.starts_with("{5,") && !rest.starts_with("{6,") &&
-                   !rest.starts_with("{7,") && !rest.starts_with("{8,") &&
-                   !rest.starts_with("{9,") {
+                if !rest.starts_with("{0}")
+                    && !rest.starts_with("{1")
+                    && !rest.contains(',')
+                    && !rest.starts_with("{0,")
+                    && !rest.starts_with("{1,")
+                    && !rest.starts_with("{2,")
+                    && !rest.starts_with("{3,")
+                    && !rest.starts_with("{4,")
+                    && !rest.starts_with("{5,")
+                    && !rest.starts_with("{6,")
+                    && !rest.starts_with("{7,")
+                    && !rest.starts_with("{8,")
+                    && !rest.starts_with("{9,")
+                {
                     // Check if it's a valid quantifier like {3}, {3,}, {3,5}
                     let closing = rest.find('}');
                     if closing.is_none() || (closing.is_some() && closing.unwrap() < 2) {
@@ -557,7 +554,11 @@ fn find_invalid_quantifier(pattern: &str) -> Option<usize> {
 }
 
 /// Convert a regex error to a helpful anyhow::Error
-pub fn enhanced_regex_error_to_anyhow(err: &regex::Error, pattern: &str, flavor: RegexFlavor) -> anyhow::Error {
+pub fn enhanced_regex_error_to_anyhow(
+    err: &regex::Error,
+    pattern: &str,
+    flavor: RegexFlavor,
+) -> anyhow::Error {
     let enhanced = EnhancedRegexError::from_regex_error(err, pattern, flavor);
     anyhow::anyhow!("{}", enhanced.display())
 }
@@ -571,9 +572,7 @@ pub fn compile_regex_with_context(
     use regex::{Regex, RegexBuilder};
 
     let result = if case_insensitive {
-        RegexBuilder::new(pattern)
-            .case_insensitive(true)
-            .build()
+        RegexBuilder::new(pattern).case_insensitive(true).build()
     } else {
         Regex::new(pattern)
     };
@@ -594,7 +593,10 @@ mod tests {
         let err = regex::Regex::new(pattern).unwrap_err();
         let enhanced = EnhancedRegexError::from_regex_error(&err, pattern, RegexFlavor::PCRE);
 
-        assert!(matches!(enhanced.error_type, RegexErrorType::UnclosedDelimiter { .. }));
+        assert!(matches!(
+            enhanced.error_type,
+            RegexErrorType::UnclosedDelimiter { .. }
+        ));
         assert!(enhanced.suggestion.is_some());
     }
 
@@ -604,7 +606,10 @@ mod tests {
         let err = regex::Regex::new(pattern).unwrap_err();
         let enhanced = EnhancedRegexError::from_regex_error(&err, pattern, RegexFlavor::PCRE);
 
-        assert!(matches!(enhanced.error_type, RegexErrorType::UnclosedDelimiter { .. }));
+        assert!(matches!(
+            enhanced.error_type,
+            RegexErrorType::UnclosedDelimiter { .. }
+        ));
     }
 
     #[test]
@@ -613,7 +618,10 @@ mod tests {
         let err = regex::Regex::new(pattern).unwrap_err();
         let enhanced = EnhancedRegexError::from_regex_error(&err, pattern, RegexFlavor::PCRE);
 
-        assert!(matches!(enhanced.error_type, RegexErrorType::InvalidQuantifier { .. }));
+        assert!(matches!(
+            enhanced.error_type,
+            RegexErrorType::InvalidQuantifier { .. }
+        ));
         assert!(enhanced.suggestion.is_some());
     }
 
@@ -659,6 +667,10 @@ mod tests {
         assert!(enhanced.suggestion.is_some());
         // The suggestion should mention the pattern and BRE mode
         let suggestion = enhanced.suggestion.unwrap();
-        assert!(suggestion.contains("BRE mode") || suggestion.contains("-B") || suggestion.contains("("));
+        assert!(
+            suggestion.contains("BRE mode")
+                || suggestion.contains("-B")
+                || suggestion.contains("(")
+        );
     }
 }

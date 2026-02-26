@@ -22,5 +22,5 @@ pub use backup_manager::{BackupManager, BackupMetadata, FileBackup};
 pub use capability::can_stream;
 pub use cli::RegexFlavor;
 pub use command::{Address, Command, SubstitutionFlags};
-pub use file_processor::{FileProcessor, StreamProcessor, LineChange, ChangeType};
+pub use file_processor::{ChangeType, FileProcessor, LineChange, StreamProcessor};
 pub use parser::Parser;

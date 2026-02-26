@@ -14,7 +14,8 @@ Rust Edition: 2024"
 #[derive(Parser)]
 #[command(name = "sedx")]
 #[command(about = "Safe sed with preview, context, and automatic rollback")]
-#[command(long_about = "SedX is a modern replacement for GNU sed written in Rust.
+#[command(
+    long_about = "SedX is a modern replacement for GNU sed written in Rust.
 
 It provides safe file editing with automatic backups, dry-run mode, and easy rollback.
 Unlike sed, sedx shows you exactly what will change before applying modifications.
@@ -49,7 +50,8 @@ EXAMPLES:
   sedx '/error/s/test/fix/' file.txt       Only in lines matching 'error'
   sedx '5,10d' file.txt                    Delete lines 5-10
   sedx '{s/a/A/g; s/b/B/g}' file.txt      Multiple commands
-  sedx --rollback backup.ID                Undo last change")]
+  sedx --rollback backup.ID                Undo last change"
+)]
 #[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(long_version = LONG_VERSION)]
 #[command(propagate_version = true)]
@@ -60,12 +62,16 @@ struct Cli {
 
     /// Add an expression (can be used multiple times)
     #[arg(short = 'e', long = "expression", value_name = "EXPR")]
-    #[arg(help = "Add a sed expression (can be specified multiple times)\nExpressions are applied in the order given\nExample: sedx -e 's/foo/bar/' -e 's/baz/qux/' file.txt")]
+    #[arg(
+        help = "Add a sed expression (can be specified multiple times)\nExpressions are applied in the order given\nExample: sedx -e 's/foo/bar/' -e 's/baz/qux/' file.txt"
+    )]
     expressions: Vec<String>,
 
     /// Read script from file
     #[arg(short = 'f', long = "file", value_name = "SCRIPT_FILE")]
-    #[arg(help = "Read sed script from a file\nThe file should contain sed commands, one per line\nSupports shebang: #!/usr/bin/sedx -f\nExample: sedx -f script.sed file.txt")]
+    #[arg(
+        help = "Read sed script from a file\nThe file should contain sed commands, one per line\nSupports shebang: #!/usr/bin/sedx -f\nExample: sedx -f script.sed file.txt"
+    )]
     script_file: Option<String>,
 
     /// Files to process
@@ -74,7 +80,9 @@ struct Cli {
 
     /// Dry run mode (preview changes without applying)
     #[arg(short = 'd', long, alias = "dry-run")]
-    #[arg(help = "Preview changes without modifying files\nThis is the default behavior. Use --execute to apply changes.")]
+    #[arg(
+        help = "Preview changes without modifying files\nThis is the default behavior. Use --execute to apply changes."
+    )]
     dry_run: bool,
 
     /// Interactive mode (ask before applying changes)
@@ -84,12 +92,16 @@ struct Cli {
 
     /// Number of context lines to show (default: 2)
     #[arg(long, value_name = "NUM")]
-    #[arg(help = "Number of context lines to show around changes\nUse 0 to show only changed lines (equivalent to --no-context)")]
+    #[arg(
+        help = "Number of context lines to show around changes\nUse 0 to show only changed lines (equivalent to --no-context)"
+    )]
     context: Option<usize>,
 
     /// Quiet mode (suppress automatic output in stdin mode)
     #[arg(short = 'n', long = "quiet", alias = "silent")]
-    #[arg(help = "Suppress automatic output (only lines printed with 'p' command are shown)\nUseful with -p flag in expressions like: sedx -n '1,10p'")]
+    #[arg(
+        help = "Suppress automatic output (only lines printed with 'p' command are shown)\nUseful with -p flag in expressions like: sedx -n '1,10p'"
+    )]
     quiet: bool,
 
     /// No context (show only changed lines)
@@ -99,7 +111,9 @@ struct Cli {
 
     /// Enable streaming mode for large files (>=100MB)
     #[arg(long, alias = "force-streaming")]
-    #[arg(help = "Enable streaming mode for large files (auto-detects at 100MB)\nUse --no-streaming to disable")]
+    #[arg(
+        help = "Enable streaming mode for large files (auto-detects at 100MB)\nUse --no-streaming to disable"
+    )]
     streaming: bool,
 
     /// Disable streaming mode
@@ -109,7 +123,9 @@ struct Cli {
 
     /// Use Basic Regular Expressions (BRE) - GNU sed compatible
     #[arg(short = 'B', long, conflicts_with = "ere")]
-    #[arg(help = "Use Basic Regular Expressions (BRE)\nLike GNU sed: \\( \\), \\{ \\}, \\+, \\?, \\|")]
+    #[arg(
+        help = "Use Basic Regular Expressions (BRE)\nLike GNU sed: \\( \\), \\{ \\}, \\+, \\?, \\|"
+    )]
     bre: bool,
 
     /// Use Extended Regular Expressions (ERE)
@@ -119,17 +135,23 @@ struct Cli {
 
     /// Skip backup creation (requires --force)
     #[arg(long = "no-backup", requires = "force")]
-    #[arg(help = "Skip creating a backup (requires --force)\n⚠️  USE WITH CAUTION: Changes cannot be undone!\nRecommended only for files under version control")]
+    #[arg(
+        help = "Skip creating a backup (requires --force)\n⚠️  USE WITH CAUTION: Changes cannot be undone!\nRecommended only for files under version control"
+    )]
     no_backup: bool,
 
     /// Force dangerous operations (use with --no-backup)
     #[arg(long = "force", requires = "no_backup")]
-    #[arg(help = "Force dangerous operations (required for --no-backup)\nConfirms you understand the risks")]
+    #[arg(
+        help = "Force dangerous operations (required for --no-backup)\nConfirms you understand the risks"
+    )]
     force: bool,
 
     /// Custom backup directory
     #[arg(long, value_name = "DIR")]
-    #[arg(help = "Use custom directory for backups\nDefault: ~/.sedx/backups/\nUseful when backup partition is full")]
+    #[arg(
+        help = "Use custom directory for backups\nDefault: ~/.sedx/backups/\nUseful when backup partition is full"
+    )]
     backup_dir: Option<String>,
 
     /// Subcommands
@@ -365,7 +387,15 @@ pub fn parse_args() -> Result<Args> {
             BackupAction::Show { id } => Ok(Args::BackupShow { id }),
             BackupAction::Restore { id } => Ok(Args::BackupRestore { id }),
             BackupAction::Remove { id, force } => Ok(Args::BackupRemove { id, force }),
-            BackupAction::Prune { keep, keep_days, force } => Ok(Args::BackupPrune { keep, keep_days, force }),
+            BackupAction::Prune {
+                keep,
+                keep_days,
+                force,
+            } => Ok(Args::BackupPrune {
+                keep,
+                keep_days,
+                force,
+            }),
         },
         None => {
             // Combine expressions from script file (-f), -e flags, and/or positional argument
@@ -390,7 +420,10 @@ pub fn parse_args() -> Result<Args> {
                 }
 
                 if all_exprs.is_empty() {
-                    anyhow::bail!("Script file '{}' is empty or contains no valid commands", script_path);
+                    anyhow::bail!(
+                        "Script file '{}' is empty or contains no valid commands",
+                        script_path
+                    );
                 }
 
                 // Join with semicolons (sed syntax for multiple commands)
@@ -429,11 +462,11 @@ pub fn parse_args() -> Result<Args> {
 
             // Determine streaming mode (auto-detect at 100MB)
             let streaming = if cli.no_streaming {
-                false  // Explicitly disabled
+                false // Explicitly disabled
             } else if cli.streaming {
-                true   // Explicitly enabled
+                true // Explicitly enabled
             } else {
-                false  // Auto-detect (will check file size in main.rs)
+                false // Auto-detect (will check file size in main.rs)
             };
 
             // Determine regex flavor
@@ -442,7 +475,7 @@ pub fn parse_args() -> Result<Args> {
             } else if cli.ere {
                 RegexFlavor::ERE
             } else {
-                RegexFlavor::PCRE  // Default
+                RegexFlavor::PCRE // Default
             };
 
             Ok(Args::Execute {
@@ -462,7 +495,7 @@ pub fn parse_args() -> Result<Args> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(non_snake_case)]  // BRE, ERE, and PCRE are well-known acronyms
+#[allow(non_snake_case)] // BRE, ERE, and PCRE are well-known acronyms
 pub enum RegexFlavor {
     /// Basic Regular Expressions (GNU sed compatible)
     BRE,

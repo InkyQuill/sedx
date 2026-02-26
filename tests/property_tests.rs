@@ -7,9 +7,7 @@
 use std::fs;
 use tempfile::TempDir;
 
-use sedx::{
-    BackupManager, Command, FileProcessor, StreamProcessor, Parser, RegexFlavor,
-};
+use sedx::{BackupManager, Command, FileProcessor, Parser, RegexFlavor, StreamProcessor};
 
 // Import proptest macro
 use proptest::prelude::*;
@@ -592,7 +590,8 @@ fn test_simple_substitution_works() {
 
     let mut processor = FileProcessor::new(commands);
     let result = processor.process_file_with_context(&file_path).unwrap();
-    let output: String = result.all_lines
+    let output: String = result
+        .all_lines
         .iter()
         .map(|(_, content, _)| content.clone())
         .collect::<Vec<_>>()
@@ -616,7 +615,8 @@ fn test_delete_command_works() {
 
     let mut processor = FileProcessor::new(commands);
     let result = processor.process_file_with_context(&file_path).unwrap();
-    let output: Vec<String> = result.all_lines
+    let output: Vec<String> = result
+        .all_lines
         .iter()
         .map(|(_, content, _)| content.clone())
         .collect();
@@ -641,7 +641,8 @@ fn test_streaming_matches_memory_complex() {
     // In-memory (on copy)
     let mut memory_proc = FileProcessor::new(commands.clone());
     let memory_result = memory_proc.process_file_with_context(&copy_path).unwrap();
-    let memory_lines: Vec<String> = memory_result.all_lines
+    let memory_lines: Vec<String> = memory_result
+        .all_lines
         .iter()
         .map(|(_, content, _)| content.clone())
         .collect();

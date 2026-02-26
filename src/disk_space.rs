@@ -13,10 +13,10 @@ pub struct DiskSpaceInfo {
     /// Available disk space in bytes
     pub available_bytes: u64,
     /// Used disk space in bytes
-    #[allow(dead_code)]  // Kept for API completeness and potential future use
+    #[allow(dead_code)] // Kept for API completeness and potential future use
     pub used_bytes: u64,
     /// Percentage of disk used
-    #[allow(dead_code)]  // Kept for API completeness and potential future use
+    #[allow(dead_code)] // Kept for API completeness and potential future use
     pub used_percent: f64,
 }
 
@@ -69,8 +69,8 @@ pub fn get_disk_space(path: &Path) -> Result<DiskSpaceInfo> {
     use std::os::unix::ffi::OsStrExt;
 
     // Convert path to CString for statvfs
-    let c_path = CString::new(path.as_os_str().as_bytes())
-        .context("Failed to convert path to CString")?;
+    let c_path =
+        CString::new(path.as_os_str().as_bytes()).context("Failed to convert path to CString")?;
 
     // Get statvfs structure
     // # Safety
@@ -136,8 +136,7 @@ pub fn check_disk_space_for_backup(
     file_size: u64,
     max_percent: f64,
 ) -> Result<()> {
-    let space = get_disk_space(backup_dir)
-        .context("Failed to check disk space")?;
+    let space = get_disk_space(backup_dir).context("Failed to check disk space")?;
 
     // Calculate what percentage of free space the backup would use
     let percent_of_free = if space.available_bytes > 0 {

@@ -1,5 +1,6 @@
-use crate::file_processor::{FileDiff, ChangeType, FileChange};
+use crate::file_processor::{ChangeType, FileChange, FileDiff};
 use colored::*;
+use std::io::IsTerminal;
 
 pub struct DiffFormatter;
 
@@ -11,12 +12,16 @@ impl DiffFormatter {
             return false;
         }
 
-        // Check if terminal supports color
-        atty::is(atty::Stream::Stdout)
+        // Check if terminal supports color (Rust 1.70+)
+        std::io::stdout().is_terminal()
     }
 
     /// Format file diff with context and new indicators
-    pub fn format_diff_with_context(diff: &FileDiff, context_size: usize, _expression: &str) -> String {
+    pub fn format_diff_with_context(
+        diff: &FileDiff,
+        context_size: usize,
+        _expression: &str,
+    ) -> String {
         let use_color = Self::should_use_color();
         let mut output = String::new();
 
@@ -75,10 +80,30 @@ impl DiffFormatter {
 
             if use_color {
                 let colored_line = match change_type {
-                    ChangeType::Unchanged => format!("L{}: {} {}\n", line_num, indicator.dimmed(), content.dimmed()),
-                    ChangeType::Modified => format!("L{}: {} {}\n", line_num, indicator.yellow().bold(), content.yellow().bold()),
-                    ChangeType::Added => format!("L{}: {} {}\n", line_num, indicator.green().bold(), content.green().bold()),
-                    ChangeType::Deleted => format!("L{}: {} {}\n", line_num, indicator.red().bold(), content.red()),
+                    ChangeType::Unchanged => format!(
+                        "L{}: {} {}\n",
+                        line_num,
+                        indicator.dimmed(),
+                        content.dimmed()
+                    ),
+                    ChangeType::Modified => format!(
+                        "L{}: {} {}\n",
+                        line_num,
+                        indicator.yellow().bold(),
+                        content.yellow().bold()
+                    ),
+                    ChangeType::Added => format!(
+                        "L{}: {} {}\n",
+                        line_num,
+                        indicator.green().bold(),
+                        content.green().bold()
+                    ),
+                    ChangeType::Deleted => format!(
+                        "L{}: {} {}\n",
+                        line_num,
+                        indicator.red().bold(),
+                        content.red()
+                    ),
                 };
                 output.push_str(&colored_line);
             } else {
@@ -87,13 +112,28 @@ impl DiffFormatter {
         }
 
         // Summary
-        let modified_count = diff.changes.iter().filter(|c| c.change_type == ChangeType::Modified).count();
-        let added_count = diff.changes.iter().filter(|c| c.change_type == ChangeType::Added).count();
-        let deleted_count = diff.changes.iter().filter(|c| c.change_type == ChangeType::Deleted).count();
+        let modified_count = diff
+            .changes
+            .iter()
+            .filter(|c| c.change_type == ChangeType::Modified)
+            .count();
+        let added_count = diff
+            .changes
+            .iter()
+            .filter(|c| c.change_type == ChangeType::Added)
+            .count();
+        let deleted_count = diff
+            .changes
+            .iter()
+            .filter(|c| c.change_type == ChangeType::Deleted)
+            .count();
         let total = modified_count + added_count + deleted_count;
 
         if use_color {
-            output.push_str(&format!("\nTotal: {} change", total.to_string().bold().white()));
+            output.push_str(&format!(
+                "\nTotal: {} change",
+                total.to_string().bold().white()
+            ));
             if total != 1 {
                 output.push('s');
             }
@@ -114,7 +154,10 @@ impl DiffFormatter {
         } else {
             output.push_str(&format!("\nTotal: {} changes", total));
             if modified_count > 0 || added_count > 0 || deleted_count > 0 {
-                output.push_str(&format!(" ({} modified, {} added, {} deleted)", modified_count, added_count, deleted_count));
+                output.push_str(&format!(
+                    " ({} modified, {} added, {} deleted)",
+                    modified_count, added_count, deleted_count
+                ));
             }
             output.push('\n');
         }
@@ -125,18 +168,20 @@ impl DiffFormatter {
     /// Filter lines to show only changed lines with context, grouping close changes
     fn filter_lines_with_context(
         lines: &[(usize, String, ChangeType)],
-        context_size: usize
+        context_size: usize,
     ) -> Vec<(usize, String, ChangeType)> {
         if context_size == 0 {
             // Show only changed lines
-            return lines.iter()
+            return lines
+                .iter()
                 .filter(|(_, _, ct)| *ct != ChangeType::Unchanged)
                 .cloned()
                 .collect();
         }
 
         // Find indices of all changed lines
-        let changed_indices: Vec<usize> = lines.iter()
+        let changed_indices: Vec<usize> = lines
+            .iter()
             .enumerate()
             .filter(|(_, (_, _, ct))| *ct != ChangeType::Unchanged)
             .map(|(i, _)| i)
@@ -206,23 +251,31 @@ impl DiffFormatter {
     /// For Chunk 6: Simple diff showing only changed lines without context
     fn format_changes_streaming(
         changes: &[crate::file_processor::LineChange],
-        _context_size: usize
+        _context_size: usize,
     ) -> Vec<(usize, String, ChangeType)> {
         // In streaming mode (Chunk 6), we show only changed lines without context
         // This saves memory for large files
-        changes.iter()
+        changes
+            .iter()
             .map(|c| (c.line_number, c.content.clone(), c.change_type.clone()))
             .collect()
     }
 
     /// Legacy method - format simple preview (backward compatibility)
-    #[allow(dead_code)]  // Kept for API compatibility
-    pub fn format_preview(expression: &str, files_changes: Vec<(String, Vec<FileChange>)>) -> String {
+    #[allow(dead_code)] // Kept for API compatibility
+    pub fn format_preview(
+        expression: &str,
+        files_changes: Vec<(String, Vec<FileChange>)>,
+    ) -> String {
         let use_color = Self::should_use_color();
         let mut output = String::new();
 
         if use_color {
-            output.push_str(&format!("{} {}\n\n", "🔍 Preview:".bold().green(), expression.white().bold()));
+            output.push_str(&format!(
+                "{} {}\n\n",
+                "🔍 Preview:".bold().green(),
+                expression.white().bold()
+            ));
         } else {
             output.push_str(&format!("Preview: {}\n\n", expression));
         }
@@ -254,7 +307,8 @@ impl DiffFormatter {
         }
 
         if use_color {
-            output.push_str(&format!("Total: {} changes across {} file{}\n\n",
+            output.push_str(&format!(
+                "Total: {} changes across {} file{}\n\n",
                 total_changes.to_string().bold().white(),
                 file_count,
                 if file_count == 1 { "" } else { "s" }
@@ -263,7 +317,8 @@ impl DiffFormatter {
             output.push_str(&"Apply with: ".white());
             output.push_str(&format!("sedx '{}'\n", expression).bold().yellow());
         } else {
-            output.push_str(&format!("Total: {} changes across {} file{}\n\n",
+            output.push_str(&format!(
+                "Total: {} changes across {} file{}\n\n",
                 total_changes,
                 file_count,
                 if file_count == 1 { "" } else { "s" }
@@ -274,7 +329,7 @@ impl DiffFormatter {
         output
     }
 
-    #[allow(dead_code)]  // Used by format_preview
+    #[allow(dead_code)] // Used by format_preview
     fn format_legacy_change(change: &FileChange, use_color: bool) -> String {
         if use_color {
             format!(
@@ -289,23 +344,32 @@ impl DiffFormatter {
         } else {
             format!(
                 "  Line {}: - {}\n  Line {}: + {}\n",
-                change.line_number,
-                change.old_content,
-                change.line_number,
-                change.new_content
+                change.line_number, change.old_content, change.line_number, change.new_content
             )
         }
     }
 
     /// Format execute result with backup ID
-    #[allow(dead_code)]  // Kept for API compatibility
-    pub fn format_execute_result(expression: &str, backup_id: &str, files_changes: Vec<(String, Vec<FileChange>)>) -> String {
+    #[allow(dead_code)] // Kept for API compatibility
+    pub fn format_execute_result(
+        expression: &str,
+        backup_id: &str,
+        files_changes: Vec<(String, Vec<FileChange>)>,
+    ) -> String {
         let use_color = Self::should_use_color();
         let mut output = String::new();
 
         if use_color {
-            output.push_str(&format!("{} {}\n", "✅ Applied:".bold().green(), expression.white().bold()));
-            output.push_str(&format!("{} {}\n\n", "Backup ID:".white(), backup_id.yellow().bold()));
+            output.push_str(&format!(
+                "{} {}\n",
+                "✅ Applied:".bold().green(),
+                expression.white().bold()
+            ));
+            output.push_str(&format!(
+                "{} {}\n\n",
+                "Backup ID:".white(),
+                backup_id.yellow().bold()
+            ));
         } else {
             output.push_str(&format!("Applied: {}\n", expression));
             output.push_str(&format!("Backup ID: {}\n\n", backup_id));
@@ -363,12 +427,18 @@ impl DiffFormatter {
         for backup in backups {
             if use_color {
                 output.push_str(&format!("ID: {}\n", backup.id.yellow()));
-                output.push_str(&format!("  Time: {}\n", backup.timestamp.format("%Y-%m-%d %H:%M:%S")));
+                output.push_str(&format!(
+                    "  Time: {}\n",
+                    backup.timestamp.format("%Y-%m-%d %H:%M:%S")
+                ));
                 output.push_str(&format!("  Command: {}\n", backup.expression.cyan()));
                 output.push_str(&format!("  Files: {}\n", backup.files.len()));
             } else {
                 output.push_str(&format!("ID: {}\n", backup.id));
-                output.push_str(&format!("  Time: {}\n", backup.timestamp.format("%Y-%m-%d %H:%M:%S")));
+                output.push_str(&format!(
+                    "  Time: {}\n",
+                    backup.timestamp.format("%Y-%m-%d %H:%M:%S")
+                ));
                 output.push_str(&format!("  Command: {}\n", backup.expression));
                 output.push_str(&format!("  Files: {}\n", backup.files.len()));
             }
@@ -383,7 +453,11 @@ impl DiffFormatter {
         let use_color = Self::should_use_color();
 
         if use_color {
-            format!("{} {}\n\n", "🔍 Dry run:".bold().cyan(), expression.white().bold())
+            format!(
+                "{} {}\n\n",
+                "🔍 Dry run:".bold().cyan(),
+                expression.white().bold()
+            )
         } else {
             format!("Dry run: {}\n\n", expression)
         }
@@ -393,8 +467,8 @@ impl DiffFormatter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::file_processor::{LineChange, FileDiff, ChangeType, FileChange};
     use crate::backup_manager::{BackupMetadata, FileBackup};
+    use crate::file_processor::{ChangeType, FileChange, FileDiff, LineChange};
     use chrono::Utc;
     use std::path::PathBuf;
 
@@ -404,15 +478,22 @@ mod tests {
             id: id.to_string(),
             timestamp: Utc::now(),
             expression: expression.to_string(),
-            files: files.into_iter().map(|f| FileBackup {
-                original_path: PathBuf::from(f),
-                backup_path: PathBuf::from(format!("/tmp/backup/{}", f)),
-            }).collect(),
+            files: files
+                .into_iter()
+                .map(|f| FileBackup {
+                    original_path: PathBuf::from(f),
+                    backup_path: PathBuf::from(format!("/tmp/backup/{}", f)),
+                })
+                .collect(),
         }
     }
 
     // Helper function to create a test file diff
-    fn create_test_diff(file_path: &str, all_lines: Vec<(usize, String, ChangeType)>, changes: Vec<LineChange>) -> FileDiff {
+    fn create_test_diff(
+        file_path: &str,
+        all_lines: Vec<(usize, String, ChangeType)>,
+        changes: Vec<LineChange>,
+    ) -> FileDiff {
         FileDiff {
             file_path: file_path.to_string(),
             changes,
@@ -423,7 +504,11 @@ mod tests {
     }
 
     // Helper function to create a test line change
-    fn create_test_line_change(line_number: usize, content: &str, change_type: ChangeType) -> LineChange {
+    fn create_test_line_change(
+        line_number: usize,
+        content: &str,
+        change_type: ChangeType,
+    ) -> LineChange {
         LineChange {
             line_number,
             change_type,
@@ -439,7 +524,11 @@ mod tests {
             (2, "modified line".to_string(), ChangeType::Modified),
             (3, "line 3".to_string(), ChangeType::Unchanged),
         ];
-        let changes = vec![create_test_line_change(2, "modified line", ChangeType::Modified)];
+        let changes = vec![create_test_line_change(
+            2,
+            "modified line",
+            ChangeType::Modified,
+        )];
         let diff = create_test_diff("test.txt", all_lines, changes);
 
         let result = DiffFormatter::format_diff_with_context(&diff, 0, "s/old/new/");
@@ -490,7 +579,11 @@ mod tests {
             (4, "context after".to_string(), ChangeType::Unchanged),
             (5, "context after 2".to_string(), ChangeType::Unchanged),
         ];
-        let changes = vec![create_test_line_change(3, "modified line", ChangeType::Modified)];
+        let changes = vec![create_test_line_change(
+            3,
+            "modified line",
+            ChangeType::Modified,
+        )];
         let diff = create_test_diff("test.txt", all_lines, changes);
 
         let result = DiffFormatter::format_diff_with_context(&diff, 2, "s/old/new/");
@@ -551,9 +644,9 @@ mod tests {
         let diff = FileDiff {
             file_path: "test.txt".to_string(),
             changes,
-            all_lines: vec![],  // Empty for streaming mode
+            all_lines: vec![], // Empty for streaming mode
             printed_lines: vec![],
-            is_streaming: true,  // Streaming mode
+            is_streaming: true, // Streaming mode
         };
 
         let result = DiffFormatter::format_diff_with_context(&diff, 2, "s/old/new/");
@@ -629,7 +722,8 @@ mod tests {
     #[test]
     fn test_format_history_multiple_backups() {
         let backup1 = create_test_backup("backup-001", "s/foo/bar/", vec!["file1.txt"]);
-        let backup2 = create_test_backup("backup-002", "s/baz/qux/", vec!["file2.txt", "file3.txt"]);
+        let backup2 =
+            create_test_backup("backup-002", "s/baz/qux/", vec!["file2.txt", "file3.txt"]);
         let result = DiffFormatter::format_history(vec![backup1, backup2]);
 
         assert!(result.contains("backup-001"));
@@ -673,12 +767,16 @@ mod tests {
 
     #[test]
     fn test_format_execute_result_single_file() {
-        let files_changes = vec![
-            ("test.txt".to_string(), vec![
-                FileChange { line_number: 1, old_content: "old".to_string(), new_content: "new".to_string() },
-            ]),
-        ];
-        let result = DiffFormatter::format_execute_result("s/old/new/", "backup-123", files_changes);
+        let files_changes = vec![(
+            "test.txt".to_string(),
+            vec![FileChange {
+                line_number: 1,
+                old_content: "old".to_string(),
+                new_content: "new".to_string(),
+            }],
+        )];
+        let result =
+            DiffFormatter::format_execute_result("s/old/new/", "backup-123", files_changes);
 
         assert!(result.contains("Applied"));
         assert!(result.contains("s/old/new/"));
@@ -690,15 +788,32 @@ mod tests {
     #[test]
     fn test_format_execute_result_multiple_files() {
         let files_changes = vec![
-            ("file1.txt".to_string(), vec![
-                FileChange { line_number: 1, old_content: "old".to_string(), new_content: "new".to_string() },
-            ]),
-            ("file2.txt".to_string(), vec![
-                FileChange { line_number: 1, old_content: "foo".to_string(), new_content: "bar".to_string() },
-                FileChange { line_number: 2, old_content: "baz".to_string(), new_content: "qux".to_string() },
-            ]),
+            (
+                "file1.txt".to_string(),
+                vec![FileChange {
+                    line_number: 1,
+                    old_content: "old".to_string(),
+                    new_content: "new".to_string(),
+                }],
+            ),
+            (
+                "file2.txt".to_string(),
+                vec![
+                    FileChange {
+                        line_number: 1,
+                        old_content: "foo".to_string(),
+                        new_content: "bar".to_string(),
+                    },
+                    FileChange {
+                        line_number: 2,
+                        old_content: "baz".to_string(),
+                        new_content: "qux".to_string(),
+                    },
+                ],
+            ),
         ];
-        let result = DiffFormatter::format_execute_result("s/foo/bar/", "backup-456", files_changes);
+        let result =
+            DiffFormatter::format_execute_result("s/foo/bar/", "backup-456", files_changes);
 
         assert!(result.contains("file1.txt"));
         assert!(result.contains("1 changes"));
@@ -709,10 +824,9 @@ mod tests {
 
     #[test]
     fn test_format_execute_result_no_changes() {
-        let files_changes = vec![
-            ("test.txt".to_string(), vec![]),
-        ];
-        let result = DiffFormatter::format_execute_result("s/nochange/", "backup-789", files_changes);
+        let files_changes = vec![("test.txt".to_string(), vec![])];
+        let result =
+            DiffFormatter::format_execute_result("s/nochange/", "backup-789", files_changes);
 
         assert!(result.contains("Applied"));
         assert!(result.contains("backup-789"));
@@ -723,11 +837,14 @@ mod tests {
 
     #[test]
     fn test_format_preview_with_changes() {
-        let files_changes = vec![
-            ("test.txt".to_string(), vec![
-                FileChange { line_number: 1, old_content: "old".to_string(), new_content: "new".to_string() },
-            ]),
-        ];
+        let files_changes = vec![(
+            "test.txt".to_string(),
+            vec![FileChange {
+                line_number: 1,
+                old_content: "old".to_string(),
+                new_content: "new".to_string(),
+            }],
+        )];
         let result = DiffFormatter::format_preview("s/old/new/", files_changes);
 
         assert!(result.contains("Preview"));
@@ -740,9 +857,7 @@ mod tests {
 
     #[test]
     fn test_format_preview_no_changes() {
-        let files_changes = vec![
-            ("test.txt".to_string(), vec![]),
-        ];
+        let files_changes = vec![("test.txt".to_string(), vec![])];
         let result = DiffFormatter::format_preview("s/nochange/", files_changes);
 
         assert!(result.contains("No changes would be made"));
@@ -751,11 +866,14 @@ mod tests {
 
     #[test]
     fn test_preview_single_file_pluralization() {
-        let files_changes = vec![
-            ("test.txt".to_string(), vec![
-                FileChange { line_number: 1, old_content: "old".to_string(), new_content: "new".to_string() },
-            ]),
-        ];
+        let files_changes = vec![(
+            "test.txt".to_string(),
+            vec![FileChange {
+                line_number: 1,
+                old_content: "old".to_string(),
+                new_content: "new".to_string(),
+            }],
+        )];
         let result = DiffFormatter::format_preview("s/old/new/", files_changes);
 
         // Should say "1 file" (singular)
@@ -765,12 +883,22 @@ mod tests {
     #[test]
     fn test_preview_multiple_files_pluralization() {
         let files_changes = vec![
-            ("file1.txt".to_string(), vec![
-                FileChange { line_number: 1, old_content: "old".to_string(), new_content: "new".to_string() },
-            ]),
-            ("file2.txt".to_string(), vec![
-                FileChange { line_number: 1, old_content: "old".to_string(), new_content: "new".to_string() },
-            ]),
+            (
+                "file1.txt".to_string(),
+                vec![FileChange {
+                    line_number: 1,
+                    old_content: "old".to_string(),
+                    new_content: "new".to_string(),
+                }],
+            ),
+            (
+                "file2.txt".to_string(),
+                vec![FileChange {
+                    line_number: 1,
+                    old_content: "old".to_string(),
+                    new_content: "new".to_string(),
+                }],
+            ),
         ];
         let result = DiffFormatter::format_preview("s/old/new/", files_changes);
 
@@ -829,7 +957,7 @@ mod tests {
         // With context_size=1, threshold is 1*2+1=3
         // Changes at indices 1 and 3 are within threshold (3-1=2 <= 3)
         // So they should be in the same group with context
-        assert!(result.len() > 2);  // Should include both changes and context
+        assert!(result.len() > 2); // Should include both changes and context
     }
 
     #[test]
@@ -846,7 +974,10 @@ mod tests {
 
         // Should contain "..." for distant groups
         let has_ellipsis = result.iter().any(|(_, content, _)| content == "...");
-        assert!(has_ellipsis, "Expected '...' placeholder in result for distant groups");
+        assert!(
+            has_ellipsis,
+            "Expected '...' placeholder in result for distant groups"
+        );
     }
 
     #[test]
@@ -989,7 +1120,10 @@ mod tests {
 
         // With context_size=0, unchanged lines are filtered out
         // Check for indicators on changed lines
-        assert!(result.contains("L2:"), "Should contain L2 for modified line");
+        assert!(
+            result.contains("L2:"),
+            "Should contain L2 for modified line"
+        );
         assert!(result.contains("L3:"), "Should contain L3 for added line");
         assert!(result.contains("L4:"), "Should contain L4 for deleted line");
 
@@ -1029,9 +1163,9 @@ mod tests {
 
         // Should include the change and context
         assert!(result.len() >= 1);
-        let has_modified = result.iter().any(|(_, content, ct)| {
-            content == "modified" && *ct == ChangeType::Modified
-        });
+        let has_modified = result
+            .iter()
+            .any(|(_, content, ct)| content == "modified" && *ct == ChangeType::Modified);
         assert!(has_modified);
     }
 
@@ -1047,7 +1181,7 @@ mod tests {
         let result = DiffFormatter::filter_lines_with_context(&all_lines, 10);
 
         // With large context, should include most/all lines
-        assert!(result.len() >= 3);  // At minimum: the change and some context
+        assert!(result.len() >= 3); // At minimum: the change and some context
     }
 
     #[test]

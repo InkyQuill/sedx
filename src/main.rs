@@ -13,12 +13,12 @@ mod regex_error;
 mod sed_parser;
 
 use anyhow::{Context, Result};
-use cli::{parse_args, Args, RegexFlavor};
-use command::{Command, Address};
-use config::{load_config, config_file_path, ensure_complete_config};
+use cli::{Args, RegexFlavor, parse_args};
+use command::{Address, Command};
+use config::{config_file_path, ensure_complete_config, load_config};
 use parser::Parser;
 use std::fs;
-use std::io::{self, Write, Read};
+use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::process::Command as ProcessCommand;
 
@@ -42,7 +42,18 @@ fn main() -> Result<()> {
             if files.is_empty() {
                 execute_stdin(&expression, regex_flavor, quiet)?;
             } else {
-                execute_command(&expression, &files, dry_run, interactive, context, streaming, regex_flavor, no_backup, backup_dir, quiet)?;
+                execute_command(
+                    &expression,
+                    &files,
+                    dry_run,
+                    interactive,
+                    context,
+                    streaming,
+                    regex_flavor,
+                    no_backup,
+                    backup_dir,
+                    quiet,
+                )?;
             }
         }
         Args::Rollback { id } => {
@@ -66,7 +77,11 @@ fn main() -> Result<()> {
         Args::BackupRemove { id, force } => {
             backup_remove(&id, force)?;
         }
-        Args::BackupPrune { keep, keep_days, force } => {
+        Args::BackupPrune {
+            keep,
+            keep_days,
+            force,
+        } => {
             backup_prune(keep, keep_days, force)?;
         }
         Args::Config { show } => {
@@ -93,8 +108,9 @@ fn execute_stdin(expression: &str, regex_flavor: RegexFlavor, quiet: bool) -> Re
 
     // Process the input using cycle-based or batch processing
     let lines: Vec<String> = input.lines().map(|s| s.to_string()).collect();
-    let mut processor = file_processor::FileProcessor::with_regex_flavor(commands.clone(), regex_flavor);
-    processor.set_no_default_output(quiet);  // Wire up -n flag
+    let mut processor =
+        file_processor::FileProcessor::with_regex_flavor(commands.clone(), regex_flavor);
+    processor.set_no_default_output(quiet); // Wire up -n flag
 
     let result_lines = processor.apply_cycle_based(lines)?;
 
@@ -124,7 +140,8 @@ fn can_use_streaming(commands: &[Command]) -> bool {
                 // These are now supported in streaming mode
                 // But need to check address types
                 if let Some(range) = get_command_range_option(cmd)
-                    && !is_range_supported_in_streaming(&range) {
+                    && !is_range_supported_in_streaming(&range)
+                {
                     return false;
                 }
             }
@@ -132,7 +149,8 @@ fn can_use_streaming(commands: &[Command]) -> bool {
                 // s, d, p, a, i, c, q are supported
                 // But need to check address types
                 if let Some(range) = get_command_range_option(cmd)
-                    && !is_range_supported_in_streaming(&range) {
+                    && !is_range_supported_in_streaming(&range)
+                {
                     return false;
                 }
             }
@@ -148,19 +166,26 @@ fn get_command_range_option(cmd: &Command) -> Option<(Address, Address)> {
         Command::Substitution { range, .. } => range.as_ref().map(|r| (r.0.clone(), r.1.clone())),
         Command::Delete { range } => Some(range.clone()),
         Command::Print { range } => Some(range.clone()),
-        Command::Insert { address: Address::LineNumber(_), .. } => {
-            Some((Address::LineNumber(0), Address::LineNumber(0)))
+        Command::Insert {
+            address: Address::LineNumber(_),
+            ..
+        } => Some((Address::LineNumber(0), Address::LineNumber(0))),
+        Command::Append {
+            address: Address::LineNumber(_),
+            ..
+        } => Some((Address::LineNumber(0), Address::LineNumber(0))),
+        Command::Change {
+            address: Address::LineNumber(_),
+            ..
+        } => Some((Address::LineNumber(0), Address::LineNumber(0))),
+        Command::Quit {
+            address: Some(Address::LineNumber(_)) | None,
+            ..
         }
-        Command::Append { address: Address::LineNumber(_), .. } => {
-            Some((Address::LineNumber(0), Address::LineNumber(0)))
-        }
-        Command::Change { address: Address::LineNumber(_), .. } => {
-            Some((Address::LineNumber(0), Address::LineNumber(0)))
-        }
-        Command::Quit { address: Some(Address::LineNumber(_)) | None, .. }
-        | Command::Quit { address: Some(Address::LastLine), .. } => {
-            Some((Address::LineNumber(0), Address::LineNumber(0)))
-        }
+        | Command::Quit {
+            address: Some(Address::LastLine),
+            ..
+        } => Some((Address::LineNumber(0), Address::LineNumber(0))),
         _ => None,
     }
 }
@@ -171,18 +196,18 @@ fn is_range_supported_in_streaming(range: &(Address, Address)) -> bool {
 
     match (&range.0, &range.1) {
         // Chunk 8: Supported ranges
-        (Pattern(_), Pattern(_)) => true,  // /start/,/end/
-        (LineNumber(1), LastLine) => true,  // 1,$
-        (LineNumber(_), LineNumber(_)) => true,  // 5,10
-        (Pattern(_), LineNumber(_)) => true,  // /start/,10 (Chunk 8)
-        (LineNumber(_), Pattern(_)) => true,  // 5,/end/ (Chunk 8)
-        (Pattern(_), Relative { base: _, offset: _ }) => true,  // /start/,+5 (Chunk 8)
+        (Pattern(_), Pattern(_)) => true,       // /start/,/end/
+        (LineNumber(1), LastLine) => true,      // 1,$
+        (LineNumber(_), LineNumber(_)) => true, // 5,10
+        (Pattern(_), LineNumber(_)) => true,    // /start/,10 (Chunk 8)
+        (LineNumber(_), Pattern(_)) => true,    // 5,/end/ (Chunk 8)
+        (Pattern(_), Relative { base: _, offset: _ }) => true, // /start/,+5 (Chunk 8)
 
         // Stepping addresses (Chunk 8)
-        (Step { .. }, _) | (_, Step { .. }) => true,  // 1~2
+        (Step { .. }, _) | (_, Step { .. }) => true, // 1~2
 
         // Not supported (delegate to in-memory):
-        (Negated(_), _) | (_, Negated(_)) => false,  // /pattern/!s/foo/bar/
+        (Negated(_), _) | (_, Negated(_)) => false, // /pattern/!s/foo/bar/
         _ => false,
     }
 }
@@ -222,7 +247,7 @@ fn execute_command(
     // Process all files and generate diffs (PREVIEW PHASE - always dry_run)
     // For each file, decide whether to use streaming or in-memory processing
     let mut diffs = Vec::new();
-    let mut streaming_files: Vec<PathBuf> = Vec::new();  // Track which files should use streaming
+    let mut streaming_files: Vec<PathBuf> = Vec::new(); // Track which files should use streaming
 
     for file_path in &file_paths {
         // Get file metadata to check size
@@ -242,13 +267,17 @@ fn execute_command(
 
         // Decide: use streaming if (streaming flag OR file >= threshold OR commands support it)
         let use_streaming = if !supports_streaming {
-            false  // Commands don't support streaming
+            false // Commands don't support streaming
         } else if streaming {
-            true  // Explicitly enabled
+            true // Explicitly enabled
         } else if metadata.len() >= streaming_threshold_bytes {
             // Auto-detect: file >= threshold
-            eprintln!("📊 Streaming mode activated for {} ({} MB, threshold: {} MB)",
-                     file_path.display(), file_size_mb, streaming_threshold_mb);
+            eprintln!(
+                "📊 Streaming mode activated for {} ({} MB, threshold: {} MB)",
+                file_path.display(),
+                file_size_mb,
+                streaming_threshold_mb
+            );
             true
         } else {
             // Chunk 10: Use streaming for small files too if commands support it
@@ -264,14 +293,16 @@ fn execute_command(
         // Process file with appropriate processor (ALWAYS dry_run for preview)
         let diff = if use_streaming {
             // Use streaming processor with dry_run=true for preview
-            let mut stream_processor = file_processor::StreamProcessor::with_regex_flavor(commands.clone(), regex_flavor)
-                .with_context_size(context)
-                .with_dry_run(true);  // Always preview first
+            let mut stream_processor =
+                file_processor::StreamProcessor::with_regex_flavor(commands.clone(), regex_flavor)
+                    .with_context_size(context)
+                    .with_dry_run(true); // Always preview first
             stream_processor.process_streaming_forced(file_path)
         } else {
             // Use in-memory processor (preview is built-in)
-            let mut processor = file_processor::FileProcessor::with_regex_flavor(commands.clone(), regex_flavor);
-            processor.set_no_default_output(quiet);  // Wire up -n flag
+            let mut processor =
+                file_processor::FileProcessor::with_regex_flavor(commands.clone(), regex_flavor);
+            processor.set_no_default_output(quiet); // Wire up -n flag
             processor.process_file_with_context(file_path)
         };
 
@@ -298,7 +329,8 @@ fn execute_command(
         println!("{}", header);
 
         for diff in &diffs {
-            let output = diff_formatter::DiffFormatter::format_diff_with_context(diff, context, expression);
+            let output =
+                diff_formatter::DiffFormatter::format_diff_with_context(diff, context, expression);
             print!("{}", output);
         }
     }
@@ -350,21 +382,23 @@ fn execute_command(
     for file_path in &file_paths {
         if streaming_files.contains(file_path) {
             // Streaming files: Re-process with dry_run=false to apply changes
-            let mut stream_processor = file_processor::StreamProcessor::with_regex_flavor(commands.clone(), regex_flavor)
-                .with_context_size(context)
-                .with_dry_run(false);  // Apply changes now
+            let mut stream_processor =
+                file_processor::StreamProcessor::with_regex_flavor(commands.clone(), regex_flavor)
+                    .with_context_size(context)
+                    .with_dry_run(false); // Apply changes now
             match stream_processor.process_streaming_forced(file_path) {
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(e) => {
                     eprintln!("Error applying to {}: {}", file_path.display(), e);
                 }
             }
         } else {
             // In-memory files: Apply using apply_to_file()
-            let mut processor = file_processor::FileProcessor::with_regex_flavor(commands.clone(), regex_flavor);
-            processor.set_no_default_output(quiet);  // Wire up -n flag
+            let mut processor =
+                file_processor::FileProcessor::with_regex_flavor(commands.clone(), regex_flavor);
+            processor.set_no_default_output(quiet); // Wire up -n flag
             match processor.apply_to_file(file_path) {
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(e) => {
                     eprintln!("Error applying to {}: {}", file_path.display(), e);
                 }
@@ -376,7 +410,8 @@ fn execute_command(
     if !interactive {
         // Show what was applied
         for diff in &diffs {
-            let output = diff_formatter::DiffFormatter::format_diff_with_context(diff, context, expression);
+            let output =
+                diff_formatter::DiffFormatter::format_diff_with_context(diff, context, expression);
             print!("{}", output);
         }
     }
@@ -430,17 +465,15 @@ fn rollback(id: Option<String>) -> Result<()> {
 
     let backup_id = match id {
         Some(id) => id,
-        None => {
-            match backup_manager.get_last_backup_id()? {
-                Some(id) => {
-                    println!("Rolling back last operation: {}\n", id);
-                    id
-                }
-                None => {
-                    anyhow::bail!("No backups found to rollback");
-                }
+        None => match backup_manager.get_last_backup_id()? {
+            Some(id) => {
+                println!("Rolling back last operation: {}\n", id);
+                id
             }
-        }
+            None => {
+                anyhow::bail!("No backups found to rollback");
+            }
+        },
     };
 
     backup_manager.restore_backup(&backup_id)?;
@@ -501,9 +534,11 @@ fn backup_list(verbose: bool) -> Result<()> {
                 let size = std::fs::metadata(&file_backup.backup_path)
                     .map(|m| m.len())
                     .unwrap_or(0);
-                println!("    - {} ({} bytes)",
+                println!(
+                    "    - {} ({} bytes)",
                     file_backup.original_path.display(),
-                    disk_space::DiskSpaceInfo::bytes_to_human(size));
+                    disk_space::DiskSpaceInfo::bytes_to_human(size)
+                );
             }
         }
         println!();
@@ -516,7 +551,8 @@ fn backup_show(id: &str) -> Result<()> {
     let backup_manager = backup_manager::BackupManager::new()?;
     let backups = backup_manager.list_backups()?;
 
-    let backup = backups.iter()
+    let backup = backups
+        .iter()
         .find(|b| b.id.starts_with(id))
         .ok_or_else(|| anyhow::anyhow!("Backup not found: {}", id))?;
 
@@ -532,7 +568,10 @@ fn backup_show(id: &str) -> Result<()> {
             .unwrap_or(0);
         println!("  {}", file_backup.original_path.display());
         println!("    Backup: {}", file_backup.backup_path.display());
-        println!("    Size: {}", disk_space::DiskSpaceInfo::bytes_to_human(size));
+        println!(
+            "    Size: {}",
+            disk_space::DiskSpaceInfo::bytes_to_human(size)
+        );
         println!();
     }
 
@@ -553,7 +592,8 @@ fn backup_remove(id: &str, force: bool) -> Result<()> {
     let backup_manager = backup_manager::BackupManager::new()?;
     let backups = backup_manager.list_backups()?;
 
-    let backup = backups.iter()
+    let backup = backups
+        .iter()
         .find(|b| b.id.starts_with(id))
         .ok_or_else(|| anyhow::anyhow!("Backup not found: {}", id))?;
 
@@ -626,7 +666,11 @@ fn backup_prune(keep: Option<usize>, keep_days: Option<usize>, force: bool) -> R
 
     println!("\nBackups to be removed:");
     for backup in &to_remove {
-        println!("  - {} ({})", backup.id, backup.timestamp.format("%Y-%m-%d %H:%M:%S"));
+        println!(
+            "  - {} ({})",
+            backup.id,
+            backup.timestamp.format("%Y-%m-%d %H:%M:%S")
+        );
     }
     println!("\nTotal: {} backup(s)", to_remove.len());
 

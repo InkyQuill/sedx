@@ -27,12 +27,17 @@ pub struct BackupManager {
 
 impl BackupManager {
     pub fn new() -> Result<Self> {
-        let home_dir = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+        let home_dir =
+            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
         let backups_dir = home_dir.join(".sedx").join("backups");
 
         // Create backups directory if it doesn't exist
-        fs::create_dir_all(&backups_dir)
-            .with_context(|| format!("Failed to create backups directory: {}", backups_dir.display()))?;
+        fs::create_dir_all(&backups_dir).with_context(|| {
+            format!(
+                "Failed to create backups directory: {}",
+                backups_dir.display()
+            )
+        })?;
 
         Ok(Self { backups_dir })
     }
@@ -42,8 +47,12 @@ impl BackupManager {
         let backups_dir = PathBuf::from(dir);
 
         // Create backups directory if it doesn't exist
-        fs::create_dir_all(&backups_dir)
-            .with_context(|| format!("Failed to create backups directory: {}", backups_dir.display()))?;
+        fs::create_dir_all(&backups_dir).with_context(|| {
+            format!(
+                "Failed to create backups directory: {}",
+                backups_dir.display()
+            )
+        })?;
 
         Ok(Self { backups_dir })
     }
@@ -58,8 +67,11 @@ impl BackupManager {
         let mut total_size = 0u64;
         for file_path in files {
             if file_path.exists() {
-                total_size += file_path.metadata()
-                    .with_context(|| format!("Failed to get file metadata: {}", file_path.display()))?
+                total_size += file_path
+                    .metadata()
+                    .with_context(|| {
+                        format!("Failed to get file metadata: {}", file_path.display())
+                    })?
                     .len();
             }
         }
@@ -68,14 +80,16 @@ impl BackupManager {
         // Default: warn if backup > 2GB or > 40% of free space
         // Error if backup > 60% of free space
         const MAX_BACKUP_SIZE_GB: u64 = 2;
-        #[allow(dead_code)]  // Documented threshold for future warning implementation
+        #[allow(dead_code)] // Documented threshold for future warning implementation
         const WARN_PERCENT: f64 = 40.0;
         const ERROR_PERCENT: f64 = 60.0;
 
         // Warn if backup is very large
         if total_size > MAX_BACKUP_SIZE_GB * 1024 * 1024 * 1024 {
-            eprintln!("⚠️  Warning: This operation will create a large backup ({})",
-                crate::disk_space::DiskSpaceInfo::bytes_to_human(total_size));
+            eprintln!(
+                "⚠️  Warning: This operation will create a large backup ({})",
+                crate::disk_space::DiskSpaceInfo::bytes_to_human(total_size)
+            );
             eprintln!("Consider using --no-backup if you have a recent backup");
         }
 
@@ -93,11 +107,19 @@ impl BackupManager {
         }
 
         // Generate unique backup ID
-        let id = format!("{}-{}", Utc::now().format("%Y%m%d-%H%M%S"), Uuid::new_v4().to_string().split_at(8).0);
+        let id = format!(
+            "{}-{}",
+            Utc::now().format("%Y%m%d-%H%M%S"),
+            Uuid::new_v4().to_string().split_at(8).0
+        );
         let backup_dir = self.backups_dir.join(&id);
 
-        fs::create_dir_all(&backup_dir)
-            .with_context(|| format!("Failed to create backup directory: {}", backup_dir.display()))?;
+        fs::create_dir_all(&backup_dir).with_context(|| {
+            format!(
+                "Failed to create backup directory: {}",
+                backup_dir.display()
+            )
+        })?;
 
         let mut file_backups = Vec::new();
 
@@ -106,7 +128,8 @@ impl BackupManager {
                 continue;
             }
 
-            let file_name = file_path.file_name()
+            let file_name = file_path
+                .file_name()
                 .ok_or_else(|| anyhow::anyhow!("Invalid file name: {}", file_path.display()))?;
 
             let backup_path = backup_dir.join(file_name);
@@ -129,8 +152,8 @@ impl BackupManager {
         };
 
         let metadata_path = backup_dir.join("operation.json");
-        let metadata_json = serde_json::to_string_pretty(&metadata)
-            .context("Failed to serialize metadata")?;
+        let metadata_json =
+            serde_json::to_string_pretty(&metadata).context("Failed to serialize metadata")?;
 
         fs::write(&metadata_path, metadata_json)
             .with_context(|| format!("Failed to write metadata: {}", metadata_path.display()))?;
@@ -152,24 +175,35 @@ impl BackupManager {
         let metadata_json = fs::read_to_string(&metadata_path)
             .with_context(|| format!("Failed to read metadata: {}", metadata_path.display()))?;
 
-        let metadata: BackupMetadata = serde_json::from_str(&metadata_json)
-            .context("Failed to parse metadata")?;
+        let metadata: BackupMetadata =
+            serde_json::from_str(&metadata_json).context("Failed to parse metadata")?;
 
         for file_backup in &metadata.files {
             if !file_backup.backup_path.exists() {
-                eprintln!("Warning: Backup file missing: {}", file_backup.backup_path.display());
+                eprintln!(
+                    "Warning: Backup file missing: {}",
+                    file_backup.backup_path.display()
+                );
                 continue;
             }
 
-            fs::copy(&file_backup.backup_path, &file_backup.original_path)
-                .with_context(|| format!("Failed to restore file: {}", file_backup.original_path.display()))?;
+            fs::copy(&file_backup.backup_path, &file_backup.original_path).with_context(|| {
+                format!(
+                    "Failed to restore file: {}",
+                    file_backup.original_path.display()
+                )
+            })?;
 
             println!("Restored: {}", file_backup.original_path.display());
         }
 
         // Remove backup after successful restore
-        fs::remove_dir_all(&backup_dir)
-            .with_context(|| format!("Failed to remove backup directory: {}", backup_dir.display()))?;
+        fs::remove_dir_all(&backup_dir).with_context(|| {
+            format!(
+                "Failed to remove backup directory: {}",
+                backup_dir.display()
+            )
+        })?;
 
         println!("Backup {} removed after restore", id);
 
@@ -185,9 +219,12 @@ impl BackupManager {
     pub fn list_backups(&self) -> Result<Vec<BackupMetadata>> {
         let mut backups = Vec::new();
 
-        for entry in fs::read_dir(&self.backups_dir)
-            .with_context(|| format!("Failed to read backups directory: {}", self.backups_dir.display()))?
-        {
+        for entry in fs::read_dir(&self.backups_dir).with_context(|| {
+            format!(
+                "Failed to read backups directory: {}",
+                self.backups_dir.display()
+            )
+        })? {
             let entry = entry?;
             let metadata_path = entry.path().join("operation.json");
 
@@ -211,8 +248,9 @@ impl BackupManager {
         if backups.len() > MAX_BACKUPS {
             for backup in backups.iter().take(backups.len() - MAX_BACKUPS) {
                 let backup_dir = self.backups_dir.join(&backup.id);
-                fs::remove_dir_all(&backup_dir)
-                    .with_context(|| format!("Failed to remove old backup: {}", backup_dir.display()))?;
+                fs::remove_dir_all(&backup_dir).with_context(|| {
+                    format!("Failed to remove old backup: {}", backup_dir.display())
+                })?;
             }
         }
 
@@ -220,7 +258,7 @@ impl BackupManager {
     }
 
     /// Remove a backup by its ID (used for cleanup when no changes are made)
-    #[allow(dead_code)]  // Public API - kept for future use
+    #[allow(dead_code)] // Public API - kept for future use
     pub fn remove_backup_by_id(&self, backup_id: &str) -> Result<()> {
         let backup_dir = self.backups_dir.join(backup_id);
         fs::remove_dir_all(&backup_dir)
@@ -229,15 +267,15 @@ impl BackupManager {
     }
 
     /// Parse backup metadata from JSON string
-    #[allow(dead_code)]  // Public API - kept for future use
+    #[allow(dead_code)] // Public API - kept for future use
     pub fn parse_backup_metadata(json: &str) -> Result<BackupMetadata> {
-        let metadata: BackupMetadata = serde_json::from_str(json)
-            .context("Failed to parse backup metadata")?;
+        let metadata: BackupMetadata =
+            serde_json::from_str(json).context("Failed to parse backup metadata")?;
         Ok(metadata)
     }
 
     /// Prune backups keeping only the N most recent ones
-    #[allow(dead_code)]  // Public API - kept for future use
+    #[allow(dead_code)] // Public API - kept for future use
     pub fn prune_backups(&self, keep_count: usize) -> Result<usize> {
         let mut backups = self.list_backups()?;
         backups.sort_by_key(|b| b.timestamp);
@@ -257,7 +295,7 @@ impl BackupManager {
     }
 
     /// Prune backups older than the specified number of days
-    #[allow(dead_code)]  // Public API - kept for future use
+    #[allow(dead_code)] // Public API - kept for future use
     pub fn prune_backups_older_than(&self, days: i64) -> Result<usize> {
         let cutoff = Utc::now() - chrono::Duration::days(days);
         let mut removed = 0;
@@ -265,8 +303,9 @@ impl BackupManager {
         for backup in self.list_backups()? {
             if backup.timestamp < cutoff {
                 let backup_dir = self.backups_dir.join(&backup.id);
-                fs::remove_dir_all(&backup_dir)
-                    .with_context(|| format!("Failed to remove old backup: {}", backup_dir.display()))?;
+                fs::remove_dir_all(&backup_dir).with_context(|| {
+                    format!("Failed to remove old backup: {}", backup_dir.display())
+                })?;
                 removed += 1;
             }
         }
@@ -295,7 +334,8 @@ mod tests {
     fn create_test_manager() -> (BackupManager, TempDir) {
         let temp_dir = TempDir::new().unwrap();
         let backups_dir = temp_dir.path().join("backups");
-        let manager = BackupManager::with_directory(backups_dir.to_str().unwrap().to_string()).unwrap();
+        let manager =
+            BackupManager::with_directory(backups_dir.to_str().unwrap().to_string()).unwrap();
         (manager, temp_dir)
     }
 
@@ -308,7 +348,9 @@ mod tests {
         let (mut manager, temp_dir) = create_test_manager();
         let test_file = create_test_file(temp_dir.path(), "test.txt", "Hello, World!");
 
-        let backup_id = manager.create_backup("s/foo/bar/", &[test_file.clone()]).unwrap();
+        let backup_id = manager
+            .create_backup("s/foo/bar/", &[test_file.clone()])
+            .unwrap();
 
         // Verify backup directory exists
         let backup_dir = manager.backups_dir().join(&backup_id);
@@ -325,7 +367,10 @@ mod tests {
         // Verify backup content matches original
         let backup_content = fs::read_to_string(&backup_file).unwrap();
         let original_content = fs::read_to_string(&test_file).unwrap();
-        assert_eq!(backup_content, original_content, "Backup content should match original");
+        assert_eq!(
+            backup_content, original_content,
+            "Backup content should match original"
+        );
 
         // Verify metadata is correct
         let metadata_json = fs::read_to_string(&metadata_path).unwrap();
@@ -343,7 +388,12 @@ mod tests {
         let file2 = create_test_file(temp_dir.path(), "file2.txt", "Content 2");
         let file3 = create_test_file(temp_dir.path(), "file3.txt", "Content 3");
 
-        let backup_id = manager.create_backup("s/test/prod/", &[file1.clone(), file2.clone(), file3.clone()]).unwrap();
+        let backup_id = manager
+            .create_backup(
+                "s/test/prod/",
+                &[file1.clone(), file2.clone(), file3.clone()],
+            )
+            .unwrap();
 
         let backup_dir = manager.backups_dir().join(&backup_id);
         assert!(backup_dir.exists());
@@ -355,7 +405,8 @@ mod tests {
 
         // Verify metadata
         let metadata_path = backup_dir.join("operation.json");
-        let metadata: BackupMetadata = serde_json::from_str(&fs::read_to_string(&metadata_path).unwrap()).unwrap();
+        let metadata: BackupMetadata =
+            serde_json::from_str(&fs::read_to_string(&metadata_path).unwrap()).unwrap();
         assert_eq!(metadata.files.len(), 3);
     }
 
@@ -365,7 +416,9 @@ mod tests {
         let large_content = "x".repeat(1_000_000); // 1MB of data
         let large_file = create_test_file(temp_dir.path(), "large.txt", &large_content);
 
-        let backup_id = manager.create_backup("s/x/y/", &[large_file.clone()]).unwrap();
+        let backup_id = manager
+            .create_backup("s/x/y/", &[large_file.clone()])
+            .unwrap();
 
         let backup_dir = manager.backups_dir().join(&backup_id);
         let backup_file = backup_dir.join("large.txt");
@@ -401,7 +454,11 @@ mod tests {
 
         // Verify all files with special characters were backed up
         for (name, _) in &test_cases {
-            assert!(backup_dir.join(name).exists(), "File '{}' should exist in backup", name);
+            assert!(
+                backup_dir.join(name).exists(),
+                "File '{}' should exist in backup",
+                name
+            );
         }
     }
 
@@ -411,11 +468,14 @@ mod tests {
         let existing_file = create_test_file(temp_dir.path(), "exists.txt", "I exist");
         let nonexistent_file = temp_dir.path().join("does_not_exist.txt");
 
-        let backup_id = manager.create_backup("s/test/prod/", &[existing_file.clone(), nonexistent_file]).unwrap();
+        let backup_id = manager
+            .create_backup("s/test/prod/", &[existing_file.clone(), nonexistent_file])
+            .unwrap();
 
         let backup_dir = manager.backups_dir().join(&backup_id);
         let metadata_path = backup_dir.join("operation.json");
-        let metadata: BackupMetadata = serde_json::from_str(&fs::read_to_string(&metadata_path).unwrap()).unwrap();
+        let metadata: BackupMetadata =
+            serde_json::from_str(&fs::read_to_string(&metadata_path).unwrap()).unwrap();
 
         // Only the existing file should be in the backup
         assert_eq!(metadata.files.len(), 1);
@@ -427,10 +487,14 @@ mod tests {
         let (mut manager, temp_dir) = create_test_manager();
         let test_file = create_test_file(temp_dir.path(), "test.txt", "content");
 
-        let id1 = manager.create_backup("s/a/b/", &[test_file.clone()]).unwrap();
+        let id1 = manager
+            .create_backup("s/a/b/", &[test_file.clone()])
+            .unwrap();
         // Small delay to ensure different timestamps
         std::thread::sleep(std::time::Duration::from_millis(10));
-        let id2 = manager.create_backup("s/c/d/", &[test_file.clone()]).unwrap();
+        let id2 = manager
+            .create_backup("s/c/d/", &[test_file.clone()])
+            .unwrap();
 
         assert_ne!(id1, id2, "Backup IDs should be unique");
     }
@@ -445,7 +509,9 @@ mod tests {
         let test_file = create_test_file(temp_dir.path(), "test.txt", "original content");
 
         // Create backup
-        let backup_id = manager.create_backup("s/foo/bar/", &[test_file.clone()]).unwrap();
+        let backup_id = manager
+            .create_backup("s/foo/bar/", &[test_file.clone()])
+            .unwrap();
 
         // Modify the original file
         fs::write(&test_file, "modified content").unwrap();
@@ -459,7 +525,10 @@ mod tests {
 
         // Verify backup directory was removed after restore
         let backup_dir = manager.backups_dir().join(&backup_id);
-        assert!(!backup_dir.exists(), "Backup directory should be removed after restore");
+        assert!(
+            !backup_dir.exists(),
+            "Backup directory should be removed after restore"
+        );
     }
 
     #[test]
@@ -467,10 +536,16 @@ mod tests {
         let (manager, _) = create_test_manager();
 
         let result = manager.restore_backup("nonexistent-backup-id");
-        assert!(result.is_err(), "Should return error for nonexistent backup");
+        assert!(
+            result.is_err(),
+            "Should return error for nonexistent backup"
+        );
 
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("Backup not found"), "Error should mention backup not found");
+        assert!(
+            err_msg.contains("Backup not found"),
+            "Error should mention backup not found"
+        );
     }
 
     #[test]
@@ -480,7 +555,9 @@ mod tests {
         let file2 = create_test_file(temp_dir.path(), "file2.txt", "original 2");
         let file3 = create_test_file(temp_dir.path(), "file3.txt", "original 3");
 
-        let backup_id = manager.create_backup("s/a/b/", &[file1.clone(), file2.clone(), file3.clone()]).unwrap();
+        let backup_id = manager
+            .create_backup("s/a/b/", &[file1.clone(), file2.clone(), file3.clone()])
+            .unwrap();
 
         // Modify all files
         fs::write(&file1, "modified 1").unwrap();
@@ -510,7 +587,9 @@ mod tests {
             fs::set_permissions(&test_file, perms).unwrap();
         }
 
-        let backup_id = manager.create_backup("s/a/b/", &[test_file.clone()]).unwrap();
+        let backup_id = manager
+            .create_backup("s/a/b/", &[test_file.clone()])
+            .unwrap();
 
         // Modify and change permissions
         fs::write(&test_file, "modified").unwrap();
@@ -541,7 +620,10 @@ mod tests {
         let (manager, _temp_dir) = create_test_manager();
 
         let last_id = manager.get_last_backup_id().unwrap();
-        assert!(last_id.is_none(), "Should return None when no backups exist");
+        assert!(
+            last_id.is_none(),
+            "Should return None when no backups exist"
+        );
     }
 
     #[test]
@@ -560,9 +642,13 @@ mod tests {
         let (mut manager, temp_dir) = create_test_manager();
         let test_file = create_test_file(temp_dir.path(), "test.txt", "content");
 
-        let id1 = manager.create_backup("s/a/b/", &[test_file.clone()]).unwrap();
+        let id1 = manager
+            .create_backup("s/a/b/", &[test_file.clone()])
+            .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
-        let id2 = manager.create_backup("s/c/d/", &[test_file.clone()]).unwrap();
+        let id2 = manager
+            .create_backup("s/c/d/", &[test_file.clone()])
+            .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
         let id3 = manager.create_backup("s/e/f/", &[test_file]).unwrap();
 
@@ -582,7 +668,11 @@ mod tests {
         let (manager, _temp_dir) = create_test_manager();
 
         let backups = manager.list_backups().unwrap();
-        assert_eq!(backups.len(), 0, "Should return empty list when no backups exist");
+        assert_eq!(
+            backups.len(),
+            0,
+            "Should return empty list when no backups exist"
+        );
     }
 
     #[test]
@@ -590,9 +680,13 @@ mod tests {
         let (mut manager, temp_dir) = create_test_manager();
         let test_file = create_test_file(temp_dir.path(), "test.txt", "content");
 
-        manager.create_backup("s/a/b/", &[test_file.clone()]).unwrap();
+        manager
+            .create_backup("s/a/b/", &[test_file.clone()])
+            .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
-        manager.create_backup("s/c/d/", &[test_file.clone()]).unwrap();
+        manager
+            .create_backup("s/c/d/", &[test_file.clone()])
+            .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
         manager.create_backup("s/e/f/", &[test_file]).unwrap();
 
@@ -605,9 +699,13 @@ mod tests {
         let (mut manager, temp_dir) = create_test_manager();
         let test_file = create_test_file(temp_dir.path(), "test.txt", "content");
 
-        let id1 = manager.create_backup("s/a/b/", &[test_file.clone()]).unwrap();
+        let id1 = manager
+            .create_backup("s/a/b/", &[test_file.clone()])
+            .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
-        let id2 = manager.create_backup("s/c/d/", &[test_file.clone()]).unwrap();
+        let id2 = manager
+            .create_backup("s/c/d/", &[test_file.clone()])
+            .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
         let id3 = manager.create_backup("s/e/f/", &[test_file]).unwrap();
 
@@ -633,7 +731,11 @@ mod tests {
         fs::write(invalid_dir.join("some_file.txt"), "data").unwrap();
 
         let backups = manager.list_backups().unwrap();
-        assert_eq!(backups.len(), 0, "Should ignore directories without operation.json");
+        assert_eq!(
+            backups.len(),
+            0,
+            "Should ignore directories without operation.json"
+        );
     }
 
     // ============================================================================
@@ -652,7 +754,10 @@ mod tests {
 
         manager.remove_backup_by_id(&backup_id).unwrap();
 
-        assert!(!backup_dir.exists(), "Backup should not exist after removal");
+        assert!(
+            !backup_dir.exists(),
+            "Backup should not exist after removal"
+        );
     }
 
     #[test]
@@ -661,7 +766,10 @@ mod tests {
 
         let result = manager.remove_backup_by_id("nonexistent-backup");
         // This should fail since the directory doesn't exist
-        assert!(result.is_err(), "Should return error when removing nonexistent backup");
+        assert!(
+            result.is_err(),
+            "Should return error when removing nonexistent backup"
+        );
     }
 
     // ============================================================================
@@ -673,7 +781,10 @@ mod tests {
         let (manager, _temp_dir) = create_test_manager();
 
         let removed = manager.prune_backups(10).unwrap();
-        assert_eq!(removed, 0, "Should remove 0 backups when fewer than keep count");
+        assert_eq!(
+            removed, 0,
+            "Should remove 0 backups when fewer than keep count"
+        );
     }
 
     #[test]
@@ -684,7 +795,11 @@ mod tests {
         // Create 5 backups
         let mut backup_ids = Vec::new();
         for i in 0..5 {
-            backup_ids.push(manager.create_backup(&format!("s/test{i}/", i=i), &[test_file.clone()]).unwrap());
+            backup_ids.push(
+                manager
+                    .create_backup(&format!("s/test{i}/", i = i), &[test_file.clone()])
+                    .unwrap(),
+            );
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
@@ -708,13 +823,18 @@ mod tests {
 
         // Create exactly 3 backups
         for i in 0..3 {
-            manager.create_backup(&format!("s/test{}/", i), &[test_file.clone()]).unwrap();
+            manager
+                .create_backup(&format!("s/test{}/", i), &[test_file.clone()])
+                .unwrap();
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
         // Keep 3 (same as current count)
         let removed = manager.prune_backups(3).unwrap();
-        assert_eq!(removed, 0, "Should remove 0 backups when count equals keep count");
+        assert_eq!(
+            removed, 0,
+            "Should remove 0 backups when count equals keep count"
+        );
 
         let backups = manager.list_backups().unwrap();
         assert_eq!(backups.len(), 3);
@@ -743,7 +863,9 @@ mod tests {
 
         // Create some backups
         for _ in 0..3 {
-            manager.create_backup("s/a/b/", &[test_file.clone()]).unwrap();
+            manager
+                .create_backup("s/a/b/", &[test_file.clone()])
+                .unwrap();
         }
 
         // Manually create an "old" backup by modifying its metadata
@@ -790,8 +912,14 @@ mod tests {
         assert_eq!(metadata.id, "20240201-120000-abc123");
         assert_eq!(metadata.expression, "s/foo/bar/g");
         assert_eq!(metadata.files.len(), 2);
-        assert_eq!(metadata.files[0].original_path, PathBuf::from("/path/to/file1.txt"));
-        assert_eq!(metadata.files[1].original_path, PathBuf::from("/path/to/file2.txt"));
+        assert_eq!(
+            metadata.files[0].original_path,
+            PathBuf::from("/path/to/file1.txt")
+        );
+        assert_eq!(
+            metadata.files[1].original_path,
+            PathBuf::from("/path/to/file2.txt")
+        );
     }
 
     #[test]
@@ -812,7 +940,10 @@ mod tests {
         }"#;
 
         let result = BackupManager::parse_backup_metadata(json);
-        assert!(result.is_err(), "Should return error when missing required field");
+        assert!(
+            result.is_err(),
+            "Should return error when missing required field"
+        );
     }
 
     #[test]
@@ -825,7 +956,10 @@ mod tests {
         }"#;
 
         let result = BackupManager::parse_backup_metadata(json);
-        assert!(result.is_err(), "Should return error for malformed timestamp");
+        assert!(
+            result.is_err(),
+            "Should return error for malformed timestamp"
+        );
     }
 
     #[test]
@@ -852,7 +986,8 @@ mod tests {
 
         assert!(!custom_path.exists(), "Directory should not exist yet");
 
-        let _manager = BackupManager::with_directory(custom_path.to_str().unwrap().to_string()).unwrap();
+        let _manager =
+            BackupManager::with_directory(custom_path.to_str().unwrap().to_string()).unwrap();
 
         assert!(custom_path.exists(), "Directory should be created");
     }
@@ -863,7 +998,10 @@ mod tests {
 
         let returned_path = manager.backups_dir();
         assert!(returned_path.exists(), "Returned path should exist");
-        assert!(returned_path.ends_with("backups"), "Returned path should end with 'backups'");
+        assert!(
+            returned_path.ends_with("backups"),
+            "Returned path should end with 'backups'"
+        );
     }
 
     // ============================================================================
@@ -880,7 +1018,11 @@ mod tests {
         let mut backup_ids = Vec::new();
 
         for i in 0..5 {
-            backup_ids.push(manager.create_backup(&format!("s/test{}/", i), &[test_file.clone()]).unwrap());
+            backup_ids.push(
+                manager
+                    .create_backup(&format!("s/test{}/", i), &[test_file.clone()])
+                    .unwrap(),
+            );
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
@@ -904,12 +1046,16 @@ mod tests {
         let backup_dir = manager.backups_dir().join(&backup_id.as_ref().unwrap());
 
         // Backup should be created even with no files
-        assert!(backup_id.is_ok(), "Should create backup even with empty file list");
+        assert!(
+            backup_id.is_ok(),
+            "Should create backup even with empty file list"
+        );
         assert!(backup_dir.exists(), "Backup directory should exist");
 
         // Metadata should exist with empty files list
         let metadata_path = backup_dir.join("operation.json");
-        let metadata: BackupMetadata = serde_json::from_str(&fs::read_to_string(&metadata_path).unwrap()).unwrap();
+        let metadata: BackupMetadata =
+            serde_json::from_str(&fs::read_to_string(&metadata_path).unwrap()).unwrap();
         assert_eq!(metadata.files.len(), 0);
     }
 
@@ -918,7 +1064,9 @@ mod tests {
         let (mut manager, temp_dir) = create_test_manager();
         let test_file = create_test_file(temp_dir.path(), "test.txt", "original");
 
-        let backup_id = manager.create_backup("s/a/b/", &[test_file.clone()]).unwrap();
+        let backup_id = manager
+            .create_backup("s/a/b/", &[test_file.clone()])
+            .unwrap();
 
         // Manually remove the backup file (simulating corruption)
         let backup_dir = manager.backups_dir().join(&backup_id);
@@ -927,7 +1075,10 @@ mod tests {
 
         // Restore should still succeed but warn about missing file
         let result = manager.restore_backup(&backup_id);
-        assert!(result.is_ok(), "Restore should succeed even with missing backup file");
+        assert!(
+            result.is_ok(),
+            "Restore should succeed even with missing backup file"
+        );
 
         // Original file should remain unchanged
         let content = fs::read_to_string(&test_file).unwrap();
@@ -943,7 +1094,10 @@ mod tests {
 
         // Verify ID format: YYYYMMDD-HHMMSS-XXXXXXXX
         // e.g., 20240201-120000-abc12345
-        assert!(backup_id.len() >= 17, "Backup ID should be at least 17 characters");
+        assert!(
+            backup_id.len() >= 17,
+            "Backup ID should be at least 17 characters"
+        );
         assert!(backup_id.contains('-'), "Backup ID should contain hyphens");
 
         // First part should be date format (8 digits)
@@ -960,13 +1114,19 @@ mod tests {
         let test_file = create_test_file(temp_dir.path(), "test.txt", "content");
 
         let test_expression = "s/foo\\(bar\\)/baz\\1/gi";
-        let backup_id = manager.create_backup(test_expression, &[test_file]).unwrap();
+        let backup_id = manager
+            .create_backup(test_expression, &[test_file])
+            .unwrap();
 
         let backup_dir = manager.backups_dir().join(&backup_id);
         let metadata_path = backup_dir.join("operation.json");
-        let metadata: BackupMetadata = serde_json::from_str(&fs::read_to_string(&metadata_path).unwrap()).unwrap();
+        let metadata: BackupMetadata =
+            serde_json::from_str(&fs::read_to_string(&metadata_path).unwrap()).unwrap();
 
-        assert_eq!(metadata.expression, test_expression, "Expression should be preserved exactly");
+        assert_eq!(
+            metadata.expression, test_expression,
+            "Expression should be preserved exactly"
+        );
     }
 
     #[test]
@@ -974,9 +1134,13 @@ mod tests {
         let (mut manager, temp_dir) = create_test_manager();
         let test_file = create_test_file(temp_dir.path(), "test.txt", "content");
 
-        let id1 = manager.create_backup("s/a/b/", &[test_file.clone()]).unwrap();
+        let id1 = manager
+            .create_backup("s/a/b/", &[test_file.clone()])
+            .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
-        let id2 = manager.create_backup("s/x/y/", &[test_file.clone()]).unwrap();
+        let id2 = manager
+            .create_backup("s/x/y/", &[test_file.clone()])
+            .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
         let id3 = manager.create_backup("s/1/2/", &[test_file]).unwrap();
 

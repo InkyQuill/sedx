@@ -3,7 +3,7 @@
 //! This module provides functions to determine whether commands can be executed
 //! in streaming mode or require full file buffering.
 
-use crate::command::{Command, Address};
+use crate::command::{Address, Command};
 
 /// Check if a list of commands can be executed in streaming mode
 ///
@@ -14,12 +14,14 @@ use crate::command::{Command, Address};
 /// - Hold space operations with non-streamable ranges (e.g., negated addresses)
 /// - Negated addresses in ranges
 /// - Complex mixed ranges (pattern to negated pattern, etc.)
-#[allow(dead_code)]  // Kept for potential future use
+#[allow(dead_code)] // Kept for potential future use
 pub fn can_stream(commands: &[Command]) -> bool {
     for cmd in commands {
         match cmd {
             Command::Substitution { range, .. } => {
-                if let Some(range) = range && !is_range_streamable(range) {
+                if let Some(range) = range
+                    && !is_range_streamable(range)
+                {
                     return false;
                 }
             }
@@ -33,9 +35,14 @@ pub fn can_stream(commands: &[Command]) -> bool {
                 // but not for ranges
                 return true;
             }
-            Command::Group { range, commands: inner_cmds } => {
+            Command::Group {
+                range,
+                commands: inner_cmds,
+            } => {
                 // Chunk 10: Groups are streamable if range is streamable and inner commands are streamable
-                if let Some(r) = range && !is_range_streamable(r) {
+                if let Some(r) = range
+                    && !is_range_streamable(r)
+                {
                     return false;
                 }
                 // Check inner commands
@@ -50,7 +57,9 @@ pub fn can_stream(commands: &[Command]) -> bool {
             | Command::Exchange { range } => {
                 // Chunk 9: Hold space operations are streamable
                 // Check if range is streamable
-                if let Some(r) = range && !is_range_streamable(r) {
+                if let Some(r) = range
+                    && !is_range_streamable(r)
+                {
                     return false;
                 }
             }
@@ -112,7 +121,7 @@ pub fn can_stream(commands: &[Command]) -> bool {
 ///
 /// - Negated addresses: `!/pattern/`
 /// - Complex mixed negated ranges
-#[allow(dead_code)]  // Used by can_stream
+#[allow(dead_code)] // Used by can_stream
 fn is_range_streamable(range: &(Address, Address)) -> bool {
     use Address::*;
 
@@ -193,7 +202,10 @@ mod tests {
             pattern: "foo".to_string(),
             replacement: "bar".to_string(),
             flags: SubstitutionFlags::default(),
-            range: Some((Address::Pattern("start".to_string()), Address::Pattern("end".to_string()))),
+            range: Some((
+                Address::Pattern("start".to_string()),
+                Address::Pattern("end".to_string()),
+            )),
         };
         assert!(can_stream(&[cmd]));
     }
@@ -201,36 +213,28 @@ mod tests {
     #[test]
     fn test_can_stream_hold() {
         // Chunk 9: Hold space operations ARE streamable
-        let cmd = Command::Hold {
-            range: None,
-        };
+        let cmd = Command::Hold { range: None };
         assert!(can_stream(&[cmd]));
     }
 
     #[test]
     fn test_can_stream_hold_append() {
         // Chunk 9: Hold space operations ARE streamable
-        let cmd = Command::HoldAppend {
-            range: None,
-        };
+        let cmd = Command::HoldAppend { range: None };
         assert!(can_stream(&[cmd]));
     }
 
     #[test]
     fn test_can_stream_get() {
         // Chunk 9: Hold space operations ARE streamable
-        let cmd = Command::Get {
-            range: None,
-        };
+        let cmd = Command::Get { range: None };
         assert!(can_stream(&[cmd]));
     }
 
     #[test]
     fn test_can_stream_exchange() {
         // Chunk 9: Hold space operations ARE streamable
-        let cmd = Command::Exchange {
-            range: None,
-        };
+        let cmd = Command::Exchange { range: None };
         assert!(can_stream(&[cmd]));
     }
 
@@ -271,14 +275,12 @@ mod tests {
     fn test_can_stream_group_with_range() {
         // Chunk 10: Groups with streamable ranges ARE streamable
         let cmd = Command::Group {
-            commands: vec![
-                Command::Substitution {
-                    pattern: "foo".to_string(),
-                    replacement: "bar".to_string(),
-                    flags: SubstitutionFlags::default(),
-                    range: None,
-                },
-            ],
+            commands: vec![Command::Substitution {
+                pattern: "foo".to_string(),
+                replacement: "bar".to_string(),
+                flags: SubstitutionFlags::default(),
+                range: None,
+            }],
             range: Some((Address::LineNumber(1), Address::LineNumber(10))),
         };
         assert!(can_stream(&[cmd]));
@@ -287,14 +289,12 @@ mod tests {
     #[test]
     fn test_can_stream_group_without_range() {
         let cmd = Command::Group {
-            commands: vec![
-                Command::Substitution {
-                    pattern: "foo".to_string(),
-                    replacement: "bar".to_string(),
-                    flags: SubstitutionFlags::default(),
-                    range: None,
-                },
-            ],
+            commands: vec![Command::Substitution {
+                pattern: "foo".to_string(),
+                replacement: "bar".to_string(),
+                flags: SubstitutionFlags::default(),
+                range: None,
+            }],
             range: None,
         };
         assert!(can_stream(&[cmd]));
@@ -314,13 +314,19 @@ mod tests {
 
     #[test]
     fn test_is_range_streamable_pattern_to_pattern() {
-        let range = (Address::Pattern("start".to_string()), Address::Pattern("end".to_string()));
+        let range = (
+            Address::Pattern("start".to_string()),
+            Address::Pattern("end".to_string()),
+        );
         assert!(is_range_streamable(&range));
     }
 
     #[test]
     fn test_is_range_streamable_pattern_to_line() {
-        let range = (Address::Pattern("start".to_string()), Address::LineNumber(10));
+        let range = (
+            Address::Pattern("start".to_string()),
+            Address::LineNumber(10),
+        );
         assert!(is_range_streamable(&range));
     }
 
@@ -373,9 +379,7 @@ mod tests {
                 flags: SubstitutionFlags::default(),
                 range: None,
             },
-            Command::Hold {
-                range: None,
-            },
+            Command::Hold { range: None },
         ];
         assert!(can_stream(&cmds));
     }

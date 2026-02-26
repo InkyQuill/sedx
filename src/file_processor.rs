@@ -1,13 +1,13 @@
-use anyhow::{Context, Result};
-use crate::command::{Command, Address, SubstitutionFlags};
+use crate::command::{Address, Command, SubstitutionFlags};
 use crate::regex_error::compile_regex_with_context;
+use anyhow::{Context, Result};
 use regex::Regex;
-use std::fs::{self, File};
-use std::path::Path;
-use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::collections::VecDeque;
-use tempfile::NamedTempFile;
 use std::collections::HashMap;
+use std::collections::VecDeque;
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::path::Path;
+use tempfile::NamedTempFile;
 
 // Chunk 8: Key for tracking mixed range states per command
 #[derive(Clone, Hash, PartialEq, Eq)]
@@ -25,15 +25,19 @@ enum MixedRangeState {
 
 /// Pattern range state for streaming mode (Chunk 8)
 #[derive(Clone, PartialEq)]
-#[allow(dead_code)]  // Reserved for future use in mixed range handling
+#[allow(dead_code)] // Reserved for future use in mixed range handling
 enum PatternRangeState {
-    LookingForStart,   // Looking for start pattern
-    InRange,          // Currently inside /start/,/end/ range
+    LookingForStart, // Looking for start pattern
+    InRange,         // Currently inside /start/,/end/ range
     // Chunk 8: Mixed range states
-    #[allow(dead_code)]  // Reserved for future use
-    WaitingForLineNumber { target_line: usize },      // /start/,10 - waiting to reach line 10
-    #[allow(dead_code)]  // Reserved for future use
-    CountingRelativeLines { remaining: usize },       // /start/,+5 - counting N lines after match
+    #[allow(dead_code)] // Reserved for future use
+    WaitingForLineNumber {
+        target_line: usize,
+    }, // /start/,10 - waiting to reach line 10
+    #[allow(dead_code)] // Reserved for future use
+    CountingRelativeLines {
+        remaining: usize,
+    }, // /start/,+5 - counting N lines after match
 }
 
 // ============================================================================
@@ -71,18 +75,18 @@ impl LineIterator {
             self.current += 1;
             Some(line)
         } else {
-            None  // EOF
+            None // EOF
         }
     }
 
     /// Check if at EOF
-    #[allow(dead_code)]  // Kept for potential future use
+    #[allow(dead_code)] // Kept for potential future use
     fn is_eof(&self) -> bool {
         self.current >= self.lines.len()
     }
 
     /// Peek at current position without consuming
-    #[allow(dead_code)]  // Kept for potential future use
+    #[allow(dead_code)] // Kept for potential future use
     fn peek(&self) -> usize {
         self.current
     }
@@ -143,11 +147,11 @@ struct CycleState {
     line_iter: LineIterator,
 
     /// Pattern range states (for /start/,/end/ ranges)
-    #[allow(dead_code)]  // Reserved for future use
+    #[allow(dead_code)] // Reserved for future use
     pattern_range_states: HashMap<(String, String), PatternRangeState>,
 
     /// Mixed range states for tracking complex ranges (Chunk 8)
-    #[allow(dead_code)]  // Reserved for future use
+    #[allow(dead_code)] // Reserved for future use
     mixed_range_states: HashMap<MixedRangeKey, MixedRangeState>,
 
     /// Line number range states (for 1,3 ranges)
@@ -169,14 +173,14 @@ impl CycleState {
             line_num: 0,
             deleted: false,
             side_effects: Vec::new(),
-            file_reads: Vec::new(),  // Phase 5: Initialize file reads
-            stdout_outputs: Vec::new(),  // Phase 5: Initialize stdout outputs
-            current_filename: filename,  // Phase 5: Initialize filename
+            file_reads: Vec::new(),     // Phase 5: Initialize file reads
+            stdout_outputs: Vec::new(), // Phase 5: Initialize stdout outputs
+            current_filename: filename, // Phase 5: Initialize filename
             line_iter: LineIterator::new(lines),
             pattern_range_states: HashMap::new(),
             mixed_range_states: HashMap::new(),
             line_range_states: HashMap::new(),
-            substitution_made: false,  // Phase 5: Initialize substitution flag
+            substitution_made: false, // Phase 5: Initialize substitution flag
         }
     }
 }
@@ -187,10 +191,10 @@ impl CycleState {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChangeType {
-    Unchanged,    // Line not modified
-    Modified,     // Line content changed
-    Added,        // New line inserted
-    Deleted,      // Line removed
+    Unchanged, // Line not modified
+    Modified,  // Line content changed
+    Added,     // New line inserted
+    Deleted,   // Line removed
 }
 
 #[derive(Debug, Clone)]
@@ -198,24 +202,24 @@ pub struct LineChange {
     pub line_number: usize,
     pub change_type: ChangeType,
     pub content: String,
-    pub old_content: Option<String>,  // For Modified type
+    pub old_content: Option<String>, // For Modified type
 }
 
 #[derive(Debug)]
 pub struct FileDiff {
     pub file_path: String,
     pub changes: Vec<LineChange>,
-    pub all_lines: Vec<(usize, String, ChangeType)>,  // (line_number, content, change_type)
-    pub printed_lines: Vec<String>,  // Lines from print commands
-    pub is_streaming: bool,  // True if processed in streaming mode (all_lines may be empty)
+    pub all_lines: Vec<(usize, String, ChangeType)>, // (line_number, content, change_type)
+    pub printed_lines: Vec<String>,                  // Lines from print commands
+    pub is_streaming: bool, // True if processed in streaming mode (all_lines may be empty)
 }
 
 // Legacy structure for backward compatibility
 #[derive(Debug)]
-#[allow(dead_code)]  // Legacy type - kept for API compatibility
+#[allow(dead_code)] // Legacy type - kept for API compatibility
 pub struct FileChange {
     pub line_number: usize,
-    #[allow(dead_code)]  // Part of legacy API
+    #[allow(dead_code)] // Part of legacy API
     pub old_content: String,
     pub new_content: String,
 }
@@ -225,26 +229,26 @@ pub struct FileProcessor {
     printed_lines: Vec<String>,
     hold_space: String,
     // Multi-line pattern space support (Phase 4)
-    pattern_space: Option<String>,  // Multi-line pattern space (None = normal single-line mode)
-    current_line_index: usize,       // Current line index in input (for n/N commands)
+    pattern_space: Option<String>, // Multi-line pattern space (None = normal single-line mode)
+    current_line_index: usize,     // Current line index in input (for n/N commands)
     // Cycle-based architecture (Phase 4 refactoring)
-    no_default_output: bool,         // -n flag: suppress automatic output
+    no_default_output: bool, // -n flag: suppress automatic output
     // Phase 5: Flow control support
-    label_registry: HashMap<String, usize>,  // Maps label names to command indices
+    label_registry: HashMap<String, usize>, // Maps label names to command indices
     // Phase 5: File I/O support
-    write_handles: HashMap<String, BufWriter<std::fs::File>>,  // File handles for w/W commands
-    read_positions: HashMap<String, usize>,  // Current line position for R command (filename -> line_index)
+    write_handles: HashMap<String, BufWriter<std::fs::File>>, // File handles for w/W commands
+    read_positions: HashMap<String, usize>, // Current line position for R command (filename -> line_index)
     // Regex flavor for enhanced error reporting
     regex_flavor: crate::cli::RegexFlavor,
 }
 
 /// Result of applying a command in streaming mode
 #[derive(Debug)]
-#[allow(dead_code)]  // Reserved for future streaming enhancements
+#[allow(dead_code)] // Reserved for future streaming enhancements
 enum StreamResult {
-    Output(String),           // Line should be output
-    Skip,                     // Don't output (deleted)
-    StopProcessing,           // Quit command encountered
+    Output(String), // Line should be output
+    Skip,           // Don't output (deleted)
+    StopProcessing, // Quit command encountered
 }
 
 /// Processor for streaming large files with constant memory usage
@@ -256,7 +260,7 @@ pub struct StreamProcessor {
     context_buffer: VecDeque<(usize, String, ChangeType)>,
     context_size: usize,
     // State for reading context after a change
-    context_lines_to_read: usize,  // How many more lines to read as context
+    context_lines_to_read: usize, // How many more lines to read as context
     // Pattern range states (Chunk 8): (start_pattern, end_pattern) -> state
     pattern_range_states: HashMap<(String, String), PatternRangeState>,
     // Chunk 8: Mixed range states for tracking complex ranges
@@ -268,12 +272,15 @@ pub struct StreamProcessor {
 }
 
 impl StreamProcessor {
-    #[allow(dead_code)]  // Part of public API for library users
+    #[allow(dead_code)] // Part of public API for library users
     pub fn new(commands: Vec<Command>) -> Self {
         Self::with_regex_flavor(commands, crate::cli::RegexFlavor::PCRE)
     }
 
-    pub fn with_regex_flavor(commands: Vec<Command>, regex_flavor: crate::cli::RegexFlavor) -> Self {
+    pub fn with_regex_flavor(
+        commands: Vec<Command>,
+        regex_flavor: crate::cli::RegexFlavor,
+    ) -> Self {
         Self {
             commands,
             hold_space: String::new(),
@@ -313,7 +320,7 @@ impl StreamProcessor {
     }
 
     /// Check if file should use streaming based on size
-    #[allow(dead_code)]  // Kept for potential future use
+    #[allow(dead_code)] // Kept for potential future use
     fn should_use_streaming(file_size: u64) -> bool {
         const STREAMING_THRESHOLD: u64 = 100 * 1024 * 1024; // 100MB
         file_size >= STREAMING_THRESHOLD
@@ -344,7 +351,8 @@ impl StreamProcessor {
                 for mat in re.find_iter(line) {
                     count += 1;
                     if count == n {
-                        result = format!("{}{}{}",
+                        result = format!(
+                            "{}{}{}",
                             &line[..mat.start()],
                             processed_replacement,
                             &line[mat.end()..]
@@ -358,7 +366,9 @@ impl StreamProcessor {
             None => {
                 // Standard behavior
                 if global {
-                    Ok(re.replace_all(line, processed_replacement.as_str()).to_string())
+                    Ok(re
+                        .replace_all(line, processed_replacement.as_str())
+                        .to_string())
                 } else {
                     Ok(re.replace(line, processed_replacement.as_str()).to_string())
                 }
@@ -461,12 +471,15 @@ impl StreamProcessor {
     /// Check if a line is within a pattern range, updating state as needed (Chunk 8)
     fn check_pattern_range(&mut self, line: &str, start_pat: &str, end_pat: &str) -> Result<bool> {
         let key = (start_pat.to_string(), end_pat.to_string());
-        let state = self.pattern_range_states.entry(key.clone()).or_insert(PatternRangeState::LookingForStart);
+        let state = self
+            .pattern_range_states
+            .entry(key.clone())
+            .or_insert(PatternRangeState::LookingForStart);
 
         let start_re = Regex::new(start_pat)
             .with_context(|| format!("Invalid regex pattern: {}", start_pat))?;
-        let end_re = Regex::new(end_pat)
-            .with_context(|| format!("Invalid regex pattern: {}", end_pat))?;
+        let end_re =
+            Regex::new(end_pat).with_context(|| format!("Invalid regex pattern: {}", end_pat))?;
 
         let in_range = match state {
             PatternRangeState::LookingForStart => {
@@ -486,9 +499,8 @@ impl StreamProcessor {
                 }
             }
             // These states should not appear in pattern-to-pattern ranges, but handle them gracefully
-            PatternRangeState::WaitingForLineNumber { .. } | PatternRangeState::CountingRelativeLines { .. } => {
-                false
-            }
+            PatternRangeState::WaitingForLineNumber { .. }
+            | PatternRangeState::CountingRelativeLines { .. } => false,
         };
 
         Ok(in_range)
@@ -503,7 +515,10 @@ impl StreamProcessor {
         command_index: usize,
     ) -> Result<bool> {
         let key = MixedRangeKey { command_index };
-        let state = self.mixed_range_states.entry(key).or_insert(MixedRangeState::LookingForPattern);
+        let state = self
+            .mixed_range_states
+            .entry(key)
+            .or_insert(MixedRangeState::LookingForPattern);
 
         let start_re = Regex::new(start_pat)
             .with_context(|| format!("Invalid regex pattern: {}", start_pat))?;
@@ -511,7 +526,9 @@ impl StreamProcessor {
         let in_range = match state {
             MixedRangeState::LookingForPattern => {
                 if start_re.is_match(line) {
-                    *state = MixedRangeState::InRangeUntilLine { target_line: end_line };
+                    *state = MixedRangeState::InRangeUntilLine {
+                        target_line: end_line,
+                    };
                     true
                 } else {
                     false
@@ -540,12 +557,17 @@ impl StreamProcessor {
         command_index: usize,
     ) -> Result<bool> {
         let key = MixedRangeKey { command_index };
-        let state = self.mixed_range_states.entry(key).or_insert(MixedRangeState::LookingForPattern);
+        let state = self
+            .mixed_range_states
+            .entry(key)
+            .or_insert(MixedRangeState::LookingForPattern);
 
         let in_range = match state {
             MixedRangeState::LookingForPattern => {
                 if self.current_line >= start_line {
-                    *state = MixedRangeState::InRangeUntilPattern { end_pattern: end_pat.to_string() };
+                    *state = MixedRangeState::InRangeUntilPattern {
+                        end_pattern: end_pat.to_string(),
+                    };
                     true
                 } else {
                     false
@@ -578,18 +600,23 @@ impl StreamProcessor {
         let key = MixedRangeKey { command_index };
 
         // Remove old state and check fresh each time
-        let pat_re = Regex::new(pattern)
-            .with_context(|| format!("Invalid regex pattern: {}", pattern))?;
+        let pat_re =
+            Regex::new(pattern).with_context(|| format!("Invalid regex pattern: {}", pattern))?;
 
         if pat_re.is_match(line) {
             // Pattern matched - start counting
-            self.mixed_range_states.insert(key, MixedRangeState::InRangeUntilLine {
-                target_line: self.current_line + offset as usize,
-            });
+            self.mixed_range_states.insert(
+                key,
+                MixedRangeState::InRangeUntilLine {
+                    target_line: self.current_line + offset as usize,
+                },
+            );
             Ok(true)
         } else {
             // Check if we're in a counting state
-            if let Some(MixedRangeState::InRangeUntilLine { target_line }) = self.mixed_range_states.get(&key) {
+            if let Some(MixedRangeState::InRangeUntilLine { target_line }) =
+                self.mixed_range_states.get(&key)
+            {
                 if self.current_line <= *target_line {
                     Ok(true)
                 } else {
@@ -657,9 +684,7 @@ impl StreamProcessor {
             }
 
             // All lines: 1,$
-            (LineNumber(1), LastLine) => {
-                Ok(true)
-            }
+            (LineNumber(1), LastLine) => Ok(true),
 
             // Stepping: 1~2
             (Step { start, step }, _) | (_, Step { start, step }) => {
@@ -676,7 +701,7 @@ impl StreamProcessor {
     /// Process a file using streaming approach (constant memory)
     ///
     /// Currently implements substitution commands. More command types will be added.
-    #[allow(dead_code)]  // Kept for potential future use
+    #[allow(dead_code)] // Kept for potential future use
     pub fn process_streaming(&mut self, file_path: &Path) -> Result<FileDiff> {
         // Check file exists and get size
         let metadata = fs::metadata(file_path)
@@ -700,8 +725,7 @@ impl StreamProcessor {
     /// Internal streaming implementation (shared by both public methods)
     fn process_streaming_internal(&mut self, file_path: &Path) -> Result<FileDiff> {
         // Get parent directory for temp file
-        let parent_dir = file_path.parent()
-            .unwrap_or(Path::new("."));
+        let parent_dir = file_path.parent().unwrap_or(Path::new("."));
 
         // Create temp file in same directory as target (for atomic rename)
         let temp_file = NamedTempFile::new_in(parent_dir)
@@ -731,19 +755,26 @@ impl StreamProcessor {
                 // Apply sed commands to this line
                 let mut processed_line = line.clone();
                 let mut line_changed = false;
-                let mut skip_line = false;  // For delete command
-                let mut print_line = false;  // For print command
-                let mut append_text: Option<String> = None;  // For append command
-                let mut should_quit_after_line = false;  // For quit command
+                let mut skip_line = false; // For delete command
+                let mut print_line = false; // For print command
+                let mut append_text: Option<String> = None; // For append command
+                let mut should_quit_after_line = false; // For quit command
 
                 // Clone commands to avoid borrow checker issues with pattern range state updates
                 let commands = self.commands.clone();
                 for (cmd_index, cmd) in commands.iter().enumerate() {
                     match cmd {
-                        Command::Substitution { pattern, replacement, flags, range } => {
+                        Command::Substitution {
+                            pattern,
+                            replacement,
+                            flags,
+                            range,
+                        } => {
                             // Check if we should apply this substitution (Chunk 8: pattern range support)
                             let should_apply = match range {
-                                Some(range) => self.should_apply_command_with_range(&line, range, cmd_index)?,
+                                Some(range) => {
+                                    self.should_apply_command_with_range(&line, range, cmd_index)?
+                                }
                                 None => true, // No range means apply to all lines
                             };
 
@@ -753,7 +784,7 @@ impl StreamProcessor {
                                     &processed_line,
                                     pattern,
                                     replacement,
-                                    flags
+                                    flags,
                                 )?;
                                 line_changed = processed_line != original_line;
 
@@ -763,19 +794,25 @@ impl StreamProcessor {
                                 }
                             }
                         }
-                        Command::Delete { range: (start, end) } => {
+                        Command::Delete {
+                            range: (start, end),
+                        } => {
                             // Check if we should apply this deletion (Chunk 8: unified range support)
                             let range = (start.clone(), end.clone());
-                            let should_delete = self.should_apply_command_with_range(&line, &range, cmd_index)?;
+                            let should_delete =
+                                self.should_apply_command_with_range(&line, &range, cmd_index)?;
 
                             if should_delete {
                                 skip_line = true;
                             }
                         }
-                        Command::Print { range: (start, end) } => {
+                        Command::Print {
+                            range: (start, end),
+                        } => {
                             // Check if we should print this line (Chunk 8: unified range support)
                             let range = (start.clone(), end.clone());
-                            let should_print = self.should_apply_command_with_range(&line, &range, cmd_index)?;
+                            let should_print =
+                                self.should_apply_command_with_range(&line, &range, cmd_index)?;
 
                             if should_print {
                                 print_line = true;
@@ -875,9 +912,11 @@ impl StreamProcessor {
                             // h - Copy current line to hold space (overwrite)
                             let should_apply = match &range {
                                 None => true, // No range means apply to all lines
-                                Some((start, end)) => {
-                                    self.should_apply_command_with_range(&line, &(start.clone(), end.clone()), cmd_index)?
-                                }
+                                Some((start, end)) => self.should_apply_command_with_range(
+                                    &line,
+                                    &(start.clone(), end.clone()),
+                                    cmd_index,
+                                )?,
                             };
                             if should_apply {
                                 self.hold_space = processed_line.clone();
@@ -887,9 +926,11 @@ impl StreamProcessor {
                             // H - Append current line to hold space
                             let should_apply = match &range {
                                 None => true, // No range means apply to all lines
-                                Some((start, end)) => {
-                                    self.should_apply_command_with_range(&line, &(start.clone(), end.clone()), cmd_index)?
-                                }
+                                Some((start, end)) => self.should_apply_command_with_range(
+                                    &line,
+                                    &(start.clone(), end.clone()),
+                                    cmd_index,
+                                )?,
                             };
                             if should_apply {
                                 if !self.hold_space.is_empty() {
@@ -902,9 +943,11 @@ impl StreamProcessor {
                             // g - Replace current line with hold space
                             let should_apply = match &range {
                                 None => true, // No range means apply to all lines
-                                Some((start, end)) => {
-                                    self.should_apply_command_with_range(&line, &(start.clone(), end.clone()), cmd_index)?
-                                }
+                                Some((start, end)) => self.should_apply_command_with_range(
+                                    &line,
+                                    &(start.clone(), end.clone()),
+                                    cmd_index,
+                                )?,
                             };
                             if should_apply && !self.hold_space.is_empty() {
                                 processed_line = self.hold_space.clone();
@@ -915,9 +958,11 @@ impl StreamProcessor {
                             // G - Append hold space to current line
                             let should_apply = match &range {
                                 None => true, // No range means apply to all lines
-                                Some((start, end)) => {
-                                    self.should_apply_command_with_range(&line, &(start.clone(), end.clone()), cmd_index)?
-                                }
+                                Some((start, end)) => self.should_apply_command_with_range(
+                                    &line,
+                                    &(start.clone(), end.clone()),
+                                    cmd_index,
+                                )?,
                             };
                             if should_apply && !self.hold_space.is_empty() {
                                 processed_line.push('\n');
@@ -929,9 +974,11 @@ impl StreamProcessor {
                             // x - Swap current line with hold space
                             let should_apply = match &range {
                                 None => true, // No range means apply to all lines
-                                Some((start, end)) => {
-                                    self.should_apply_command_with_range(&line, &(start.clone(), end.clone()), cmd_index)?
-                                }
+                                Some((start, end)) => self.should_apply_command_with_range(
+                                    &line,
+                                    &(start.clone(), end.clone()),
+                                    cmd_index,
+                                )?,
                             };
                             if should_apply {
                                 std::mem::swap(&mut processed_line, &mut self.hold_space);
@@ -939,13 +986,18 @@ impl StreamProcessor {
                             }
                         }
                         // Chunk 10: Command grouping in streaming mode
-                        Command::Group { range, commands: group_commands } => {
+                        Command::Group {
+                            range,
+                            commands: group_commands,
+                        } => {
                             // Check if we're in the group's range
                             let should_apply = match &range {
                                 None => true, // No range means apply to all lines
-                                Some((start, end)) => {
-                                    self.should_apply_command_with_range(&line, &(start.clone(), end.clone()), cmd_index)?
-                                }
+                                Some((start, end)) => self.should_apply_command_with_range(
+                                    &line,
+                                    &(start.clone(), end.clone()),
+                                    cmd_index,
+                                )?,
                             };
 
                             if should_apply {
@@ -953,10 +1005,17 @@ impl StreamProcessor {
                                 // We need to handle the streaming semantics carefully here
                                 for group_cmd in group_commands {
                                     match group_cmd {
-                                        Command::Substitution { pattern, replacement, flags, range } => {
+                                        Command::Substitution {
+                                            pattern,
+                                            replacement,
+                                            flags,
+                                            range,
+                                        } => {
                                             let should_apply_sub = match range {
                                                 None => true,
-                                                Some(r) => self.should_apply_command_with_range(&line, r, cmd_index)?,
+                                                Some(r) => self.should_apply_command_with_range(
+                                                    &line, r, cmd_index,
+                                                )?,
                                             };
                                             if should_apply_sub {
                                                 let original = processed_line.clone();
@@ -964,7 +1023,7 @@ impl StreamProcessor {
                                                     &processed_line,
                                                     pattern,
                                                     replacement,
-                                                    flags
+                                                    flags,
                                                 )?;
                                                 let was_changed = processed_line != original;
                                                 line_changed = line_changed || was_changed;
@@ -975,17 +1034,27 @@ impl StreamProcessor {
                                                 }
                                             }
                                         }
-                                        Command::Delete { range: (start, end) } => {
+                                        Command::Delete {
+                                            range: (start, end),
+                                        } => {
                                             let range = (start.clone(), end.clone());
-                                            let should_delete = self.should_apply_command_with_range(&line, &range, cmd_index)?;
+                                            let should_delete = self
+                                                .should_apply_command_with_range(
+                                                    &line, &range, cmd_index,
+                                                )?;
                                             if should_delete {
                                                 skip_line = true;
                                                 break; // Stop processing group commands
                                             }
                                         }
-                                        Command::Print { range: (start, end) } => {
+                                        Command::Print {
+                                            range: (start, end),
+                                        } => {
                                             let range = (start.clone(), end.clone());
-                                            let should_print = self.should_apply_command_with_range(&line, &range, cmd_index)?;
+                                            let should_print = self
+                                                .should_apply_command_with_range(
+                                                    &line, &range, cmd_index,
+                                                )?;
                                             if should_print {
                                                 print_line = true;
                                             }
@@ -993,7 +1062,12 @@ impl StreamProcessor {
                                         Command::Hold { range } => {
                                             let should_apply = match &range {
                                                 None => true,
-                                                Some((start, end)) => self.should_apply_command_with_range(&line, &(start.clone(), end.clone()), cmd_index)?,
+                                                Some((start, end)) => self
+                                                    .should_apply_command_with_range(
+                                                        &line,
+                                                        &(start.clone(), end.clone()),
+                                                        cmd_index,
+                                                    )?,
                                             };
                                             if should_apply {
                                                 self.hold_space = processed_line.clone();
@@ -1002,7 +1076,12 @@ impl StreamProcessor {
                                         Command::HoldAppend { range } => {
                                             let should_apply = match &range {
                                                 None => true,
-                                                Some((start, end)) => self.should_apply_command_with_range(&line, &(start.clone(), end.clone()), cmd_index)?,
+                                                Some((start, end)) => self
+                                                    .should_apply_command_with_range(
+                                                        &line,
+                                                        &(start.clone(), end.clone()),
+                                                        cmd_index,
+                                                    )?,
                                             };
                                             if should_apply {
                                                 if !self.hold_space.is_empty() {
@@ -1014,7 +1093,12 @@ impl StreamProcessor {
                                         Command::Get { range } => {
                                             let should_apply = match &range {
                                                 None => true,
-                                                Some((start, end)) => self.should_apply_command_with_range(&line, &(start.clone(), end.clone()), cmd_index)?,
+                                                Some((start, end)) => self
+                                                    .should_apply_command_with_range(
+                                                        &line,
+                                                        &(start.clone(), end.clone()),
+                                                        cmd_index,
+                                                    )?,
                                             };
                                             if should_apply && !self.hold_space.is_empty() {
                                                 processed_line = self.hold_space.clone();
@@ -1024,7 +1108,12 @@ impl StreamProcessor {
                                         Command::GetAppend { range } => {
                                             let should_apply = match &range {
                                                 None => true,
-                                                Some((start, end)) => self.should_apply_command_with_range(&line, &(start.clone(), end.clone()), cmd_index)?,
+                                                Some((start, end)) => self
+                                                    .should_apply_command_with_range(
+                                                        &line,
+                                                        &(start.clone(), end.clone()),
+                                                        cmd_index,
+                                                    )?,
                                             };
                                             if should_apply && !self.hold_space.is_empty() {
                                                 processed_line.push('\n');
@@ -1035,10 +1124,18 @@ impl StreamProcessor {
                                         Command::Exchange { range } => {
                                             let should_apply = match &range {
                                                 None => true,
-                                                Some((start, end)) => self.should_apply_command_with_range(&line, &(start.clone(), end.clone()), cmd_index)?,
+                                                Some((start, end)) => self
+                                                    .should_apply_command_with_range(
+                                                        &line,
+                                                        &(start.clone(), end.clone()),
+                                                        cmd_index,
+                                                    )?,
                                             };
                                             if should_apply {
-                                                std::mem::swap(&mut processed_line, &mut self.hold_space);
+                                                std::mem::swap(
+                                                    &mut processed_line,
+                                                    &mut self.hold_space,
+                                                );
                                                 line_changed = true;
                                             }
                                         }
@@ -1046,7 +1143,8 @@ impl StreamProcessor {
                                         _ => {
                                             // Delegate entire file to in-memory processing
                                             drop(writer);
-                                            let mut processor = FileProcessor::new(self.commands.clone());
+                                            let mut processor =
+                                                FileProcessor::new(self.commands.clone());
                                             return processor.process_file_with_context(file_path);
                                         }
                                     }
@@ -1077,7 +1175,7 @@ impl StreamProcessor {
                         content: line.clone(),
                         old_content: None,
                     });
-                    continue;  // Don't write this line
+                    continue; // Don't write this line
                 }
 
                 // Write the processed line
@@ -1108,7 +1206,6 @@ impl StreamProcessor {
 
                     // Set flag to read next context_size lines as context
                     self.context_lines_to_read = self.context_size;
-
                 } else if self.context_lines_to_read > 0 {
                     // Reading context AFTER a change - add directly to changes
                     changes.push(LineChange {
@@ -1118,10 +1215,10 @@ impl StreamProcessor {
                         old_content: None,
                     });
                     self.context_lines_to_read -= 1;
-
                 } else {
                     // Unchanged line - add to buffer
-                    self.context_buffer.push_back((line_num, processed_line, change_type));
+                    self.context_buffer
+                        .push_back((line_num, processed_line, change_type));
 
                     // Keep buffer size limited to context_size
                     // In streaming mode, we only show context around changes, not all lines
@@ -1157,15 +1254,17 @@ impl StreamProcessor {
             self.flush_buffer_to_changes(&mut changes);
 
             // Ensure all data is written to disk
-            writer.flush()
+            writer
+                .flush()
                 .with_context(|| "Failed to flush temp file")?;
         } // writer dropped here
 
         // Atomic rename: temp file becomes the actual file
         // In dry-run mode, don't persist (temp file will be automatically deleted when dropped)
         if !self.dry_run {
-            temp_file.persist(file_path)
-                .with_context(|| format!("Failed to persist temp file to {}", file_path.display()))?;
+            temp_file.persist(file_path).with_context(|| {
+                format!("Failed to persist temp file to {}", file_path.display())
+            })?;
         }
         // If dry_run, temp_file is dropped here and automatically deleted
 
@@ -1179,7 +1278,7 @@ impl StreamProcessor {
             changes,
             all_lines,
             printed_lines: Vec::new(),
-            is_streaming: true,  // Streaming mode
+            is_streaming: true, // Streaming mode
         })
     }
 }
@@ -1189,7 +1288,10 @@ impl FileProcessor {
         Self::with_regex_flavor(commands, crate::cli::RegexFlavor::PCRE)
     }
 
-    pub fn with_regex_flavor(commands: Vec<Command>, regex_flavor: crate::cli::RegexFlavor) -> Self {
+    pub fn with_regex_flavor(
+        commands: Vec<Command>,
+        regex_flavor: crate::cli::RegexFlavor,
+    ) -> Self {
         // Build label registry (Phase 5)
         let label_registry = Self::build_label_registry(&commands);
 
@@ -1235,7 +1337,7 @@ impl FileProcessor {
     }
 
     /// Get the lines that were printed by print commands (for quiet mode)
-    #[allow(dead_code)]  // Public API - kept for compatibility
+    #[allow(dead_code)] // Public API - kept for compatibility
     pub fn get_printed_lines(&self) -> &[String] {
         &self.printed_lines
     }
@@ -1247,15 +1349,32 @@ impl FileProcessor {
         for cmd in commands {
             match cmd {
                 // Supported commands (Phase 5: flow control + file I/O commands now supported)
-                Substitution { .. } | Delete { .. } | Print { .. } |
-                Quit { .. } | QuitWithoutPrint { .. } |
-                Next { .. } | NextAppend { .. } |
-                PrintFirstLine { .. } | DeleteFirstLine { .. } |
-                Hold { .. } | HoldAppend { .. } |
-                Get { .. } | GetAppend { .. } | Exchange { .. } |
-                Group { .. } | Label { .. } | Branch { .. } | Test { .. } | TestFalse { .. } |
-                ReadFile { .. } | WriteFile { .. } | ReadLine { .. } | WriteFirstLine { .. } |
-                PrintLineNumber { .. } | PrintFilename { .. } | ClearPatternSpace { .. } => {
+                Substitution { .. }
+                | Delete { .. }
+                | Print { .. }
+                | Quit { .. }
+                | QuitWithoutPrint { .. }
+                | Next { .. }
+                | NextAppend { .. }
+                | PrintFirstLine { .. }
+                | DeleteFirstLine { .. }
+                | Hold { .. }
+                | HoldAppend { .. }
+                | Get { .. }
+                | GetAppend { .. }
+                | Exchange { .. }
+                | Group { .. }
+                | Label { .. }
+                | Branch { .. }
+                | Test { .. }
+                | TestFalse { .. }
+                | ReadFile { .. }
+                | WriteFile { .. }
+                | ReadLine { .. }
+                | WriteFirstLine { .. }
+                | PrintLineNumber { .. }
+                | PrintFilename { .. }
+                | ClearPatternSpace { .. } => {
                     // Supported (Phase 5: flow control + file I/O + additional commands added)
                 }
                 // Unsupported commands (fall back to batch processing)
@@ -1269,11 +1388,13 @@ impl FileProcessor {
     }
 
     /// Legacy method - returns simple changes (for backward compatibility)
-    #[allow(dead_code)]  // Public API - kept for compatibility
+    #[allow(dead_code)] // Public API - kept for compatibility
     pub fn process_file(&mut self, file_path: &Path) -> Result<Vec<FileChange>> {
         let diff = self.process_file_with_context(file_path)?;
 
-        Ok(diff.changes.iter()
+        Ok(diff
+            .changes
+            .iter()
             .filter(|c| c.change_type == ChangeType::Modified)
             .map(|c| FileChange {
                 line_number: c.line_number,
@@ -1325,7 +1446,8 @@ impl FileProcessor {
         let all_lines = self.generate_simple_diff(&original_lines, &modified_lines_clone);
 
         // Collect only changed lines for summary
-        let changes: Vec<LineChange> = all_lines.iter()
+        let changes: Vec<LineChange> = all_lines
+            .iter()
             .filter(|(_, _, change_type)| *change_type != ChangeType::Unchanged)
             .map(|(line_num, content, change_type)| {
                 let old_content = if *change_type == ChangeType::Modified {
@@ -1348,11 +1470,15 @@ impl FileProcessor {
             changes,
             all_lines,
             printed_lines: self.printed_lines.clone(),
-            is_streaming: false,  // In-memory mode
+            is_streaming: false, // In-memory mode
         })
     }
 
-    fn generate_simple_diff(&self, original: &[&str], modified: &[String]) -> Vec<(usize, String, ChangeType)> {
+    fn generate_simple_diff(
+        &self,
+        original: &[&str],
+        modified: &[String],
+    ) -> Vec<(usize, String, ChangeType)> {
         let mut result = Vec::new();
 
         // Simple line-by-line comparison for now
@@ -1414,14 +1540,14 @@ impl FileProcessor {
         while let Some(line) = state.line_iter.current_line() {
             state.pattern_space = line;
             state.line_num += 1;
-            state.substitution_made = false;  // Phase 5: Reset substitution flag at start of cycle
+            state.substitution_made = false; // Phase 5: Reset substitution flag at start of cycle
 
             // Clone commands to avoid borrow checker issues
             let commands = self.commands.clone();
             let num_commands = commands.len();
 
             // Inner loop: apply commands to pattern space using program counter (Phase 5)
-            let mut pc: usize = 0;  // Program counter
+            let mut pc: usize = 0; // Program counter
             while pc < num_commands {
                 let cmd = &commands[pc];
 
@@ -1521,7 +1647,7 @@ impl FileProcessor {
             // Commands with Option<range>
             Command::Substitution { range, .. } => {
                 match range {
-                    None => true,  // No range - applies to all lines
+                    None => true, // No range - applies to all lines
                     Some((start, end)) => {
                         // Check if current line is within the range
                         self.check_range_inclusive(state, start, end)
@@ -1529,59 +1655,45 @@ impl FileProcessor {
                 }
             }
 
-            Command::Next { range } => {
-                match range {
-                    None => true,
-                    Some((start, end)) => self.check_range_inclusive(state, start, end),
-                }
-            }
+            Command::Next { range } => match range {
+                None => true,
+                Some((start, end)) => self.check_range_inclusive(state, start, end),
+            },
 
-            Command::NextAppend { range } => {
-                match range {
-                    None => true,
-                    Some((start, end)) => self.check_range_inclusive(state, start, end),
-                }
-            }
+            Command::NextAppend { range } => match range {
+                None => true,
+                Some((start, end)) => self.check_range_inclusive(state, start, end),
+            },
 
-            Command::Hold { range } => {
-                match range {
-                    None => true,
-                    Some((start, end)) => self.check_range_inclusive(state, start, end),
-                }
-            }
+            Command::Hold { range } => match range {
+                None => true,
+                Some((start, end)) => self.check_range_inclusive(state, start, end),
+            },
 
-            Command::HoldAppend { range } => {
-                match range {
-                    None => true,
-                    Some((start, end)) => self.check_range_inclusive(state, start, end),
-                }
-            }
+            Command::HoldAppend { range } => match range {
+                None => true,
+                Some((start, end)) => self.check_range_inclusive(state, start, end),
+            },
 
-            Command::Get { range } => {
-                match range {
-                    None => true,
-                    Some((start, end)) => self.check_range_inclusive(state, start, end),
-                }
-            }
+            Command::Get { range } => match range {
+                None => true,
+                Some((start, end)) => self.check_range_inclusive(state, start, end),
+            },
 
-            Command::GetAppend { range } => {
-                match range {
-                    None => true,
-                    Some((start, end)) => self.check_range_inclusive(state, start, end),
-                }
-            }
+            Command::GetAppend { range } => match range {
+                None => true,
+                Some((start, end)) => self.check_range_inclusive(state, start, end),
+            },
 
-            Command::Exchange { range } => {
-                match range {
-                    None => true,
-                    Some((start, end)) => self.check_range_inclusive(state, start, end),
-                }
-            }
+            Command::Exchange { range } => match range {
+                None => true,
+                Some((start, end)) => self.check_range_inclusive(state, start, end),
+            },
 
             Command::Group { range, .. } => {
                 // Phase 5: Groups now support cycle-based processing for flow control
                 match range {
-                    None => true,  // No range - applies to all lines
+                    None => true, // No range - applies to all lines
                     Some((start, end)) => {
                         // Check if current line is within the range
                         self.check_range_inclusive(state, start, end)
@@ -1590,51 +1702,41 @@ impl FileProcessor {
             }
 
             // Commands with required range (tuple, not Option)
-            Command::Delete { range } => {
-                self.check_range_inclusive(state, &range.0, &range.1)
-            }
+            Command::Delete { range } => self.check_range_inclusive(state, &range.0, &range.1),
 
-            Command::Print { range } => {
-                self.check_range_inclusive(state, &range.0, &range.1)
-            }
+            Command::Print { range } => self.check_range_inclusive(state, &range.0, &range.1),
 
-            Command::PrintFirstLine { range } => {
-                match range {
-                    None => true,
-                    Some((start, end)) => self.check_range_inclusive(state, start, end),
-                }
-            }
+            Command::PrintFirstLine { range } => match range {
+                None => true,
+                Some((start, end)) => self.check_range_inclusive(state, start, end),
+            },
 
-            Command::DeleteFirstLine { range } => {
-                match range {
-                    None => true,
-                    Some((start, end)) => self.check_range_inclusive(state, start, end),
-                }
-            }
+            Command::DeleteFirstLine { range } => match range {
+                None => true,
+                Some((start, end)) => self.check_range_inclusive(state, start, end),
+            },
 
             // Insert/Append/Change handle their own addresses
-            Command::Insert { .. } | Command::Append { .. } | Command::Change { .. } => {
-                true
-            }
+            Command::Insert { .. } | Command::Append { .. } | Command::Change { .. } => true,
 
             // Quit commands: check address if present
             Command::Quit { address } | Command::QuitWithoutPrint { address } => {
                 match address {
-                    None => true,  // No address = quit immediately
+                    None => true, // No address = quit immediately
                     Some(addr) => self.address_matches_cycle(addr, state),
                 }
             }
 
             // Phase 5: Flow control commands (check range if present)
             Command::Label { .. } => {
-                true  // Labels are always applicable
+                true // Labels are always applicable
             }
             Command::Branch { range, .. }
             | Command::Test { range, .. }
             | Command::TestFalse { range, .. } => {
                 // Check if the range matches the current cycle
                 match range {
-                    None => true,  // No range - applies to all lines
+                    None => true, // No range - applies to all lines
                     Some((start, end)) => {
                         // Check if current line is within the range
                         self.check_range_inclusive(state, start, end)
@@ -1648,7 +1750,7 @@ impl FileProcessor {
             | Command::ReadLine { range, .. }
             | Command::WriteFirstLine { range, .. } => {
                 match range {
-                    None => true,  // No address - applies to all lines
+                    None => true, // No address - applies to all lines
                     Some(addr) => self.address_matches_cycle(addr, state),
                 }
             }
@@ -1658,7 +1760,7 @@ impl FileProcessor {
             | Command::PrintFilename { range, .. }
             | Command::ClearPatternSpace { range, .. } => {
                 match range {
-                    None => true,  // No address - applies to all lines
+                    None => true, // No address - applies to all lines
                     Some(addr) => self.address_matches_cycle(addr, state),
                 }
             }
@@ -1723,7 +1825,12 @@ impl FileProcessor {
 
     /// Check if current line is within a range [start, end]
     /// Uses state tracking to handle ranges across cycles
-    fn check_range_inclusive(&mut self, state: &mut CycleState, start: &Address, end: &Address) -> bool {
+    fn check_range_inclusive(
+        &mut self,
+        state: &mut CycleState,
+        start: &Address,
+        end: &Address,
+    ) -> bool {
         match (start, end) {
             // Line number range: 1,3
             (Address::LineNumber(start_line), Address::LineNumber(end_line)) => {
@@ -1734,9 +1841,8 @@ impl FileProcessor {
 
                 // Multi-line range: use state tracking
                 let key = (*start_line, *end_line);
-                let (in_range, ended) = state.line_range_states
-                    .entry(key)
-                    .or_insert((false, false));
+                let (in_range, ended) =
+                    state.line_range_states.entry(key).or_insert((false, false));
 
                 // If range has ended, stay ended
                 if *ended {
@@ -1752,7 +1858,7 @@ impl FileProcessor {
                 // Check if we're exiting the range
                 if state.line_num == *end_line {
                     *ended = true;
-                    return true;  // Include the end line
+                    return true; // Include the end line
                 }
 
                 // Return true if we're currently in the range
@@ -1767,8 +1873,8 @@ impl FileProcessor {
                 }
 
                 // NOTE: In-memory batch mode uses stateless pattern matching.
-            // For proper pattern range state tracking, use streaming mode (which is the default for groups).
-            let start_match = self.address_matches_cycle(start, state);
+                // For proper pattern range state tracking, use streaming mode (which is the default for groups).
+                let start_match = self.address_matches_cycle(start, state);
                 let end_match = self.address_matches_cycle(end, state);
                 start_match || end_match
             }
@@ -1776,8 +1882,8 @@ impl FileProcessor {
             // Mixed range: line,pattern or pattern,line
             _ => {
                 // NOTE: Mixed ranges use stateless matching in batch mode.
-            // Streaming mode has proper mixed range state tracking (the default).
-            let start_match = self.address_matches_cycle(start, state);
+                // Streaming mode has proper mixed range state tracking (the default).
+                let start_match = self.address_matches_cycle(start, state);
                 let end_match = self.address_matches_cycle(end, state);
                 start_match || end_match
             }
@@ -1786,32 +1892,26 @@ impl FileProcessor {
 
     /// Apply command within a cycle (returns cycle result)
     /// Matches GNU sed execute.c:1297-1643 (command switch statement)
-    fn apply_command_to_cycle(&mut self, cmd: &Command, state: &mut CycleState) -> Result<CycleResult> {
+    fn apply_command_to_cycle(
+        &mut self,
+        cmd: &Command,
+        state: &mut CycleState,
+    ) -> Result<CycleResult> {
         match cmd {
             // n command: print current, read next, continue (matches execute.c:1459)
-            Command::Next { range: _ } => {
-                self.apply_next_cycle(state)
-            }
+            Command::Next { range: _ } => self.apply_next_cycle(state),
 
             // N command: append next line (matches execute.c:1474)
-            Command::NextAppend { range: _ } => {
-                self.apply_next_append_cycle(state)
-            }
+            Command::NextAppend { range: _ } => self.apply_next_append_cycle(state),
 
             // P command: print first line (matches execute.c:1496)
-            Command::PrintFirstLine { range: _ } => {
-                self.apply_print_first_line_cycle(state)
-            }
+            Command::PrintFirstLine { range: _ } => self.apply_print_first_line_cycle(state),
 
             // D command: delete first line, restart (matches execute.c:1333)
-            Command::DeleteFirstLine { range: _ } => {
-                self.apply_delete_first_line_cycle(state)
-            }
+            Command::DeleteFirstLine { range: _ } => self.apply_delete_first_line_cycle(state),
 
             // d command: delete pattern space, end cycle (matches execute.c:1328)
-            Command::Delete { range: _ } => {
-                Ok(CycleResult::DeleteLine)
-            }
+            Command::Delete { range: _ } => Ok(CycleResult::DeleteLine),
 
             // p command: print pattern space (matches execute.c:1491)
             Command::Print { range: _ } => {
@@ -1820,9 +1920,12 @@ impl FileProcessor {
             }
 
             // s command: substitution (matches execute.c:1384-1457)
-            Command::Substitution { pattern, replacement, flags, range: _ } => {
-                self.apply_substitution_cycle(state, pattern, replacement, flags)
-            }
+            Command::Substitution {
+                pattern,
+                replacement,
+                flags,
+                range: _,
+            } => self.apply_substitution_cycle(state, pattern, replacement, flags),
 
             // h command: copy pattern space to hold space (matches execute.c:1522)
             Command::Hold { range: _ } => {
@@ -1935,7 +2038,10 @@ impl FileProcessor {
             }
 
             // Group command: execute inner commands (Phase 5)
-            Command::Group { range: _, commands: group_commands } => {
+            Command::Group {
+                range: _,
+                commands: group_commands,
+            } => {
                 // Execute each command in the group in sequence
                 for group_cmd in group_commands {
                     let result = self.apply_command_to_cycle(group_cmd, state)?;
@@ -1982,7 +2088,8 @@ impl FileProcessor {
                     let mut writer = BufWriter::new(file);
                     writeln!(writer, "{}", state.pattern_space)
                         .with_context(|| format!("Failed to write to file: {}", filename))?;
-                    writer.flush()
+                    writer
+                        .flush()
                         .with_context(|| format!("Failed to flush file: {}", filename))?;
                     self.write_handles.insert(filename.clone(), writer);
                 }
@@ -2007,7 +2114,8 @@ impl FileProcessor {
                     let mut writer = BufWriter::new(file);
                     writeln!(writer, "{}", first_line)
                         .with_context(|| format!("Failed to write to file: {}", filename))?;
-                    writer.flush()
+                    writer
+                        .flush()
                         .with_context(|| format!("Failed to flush file: {}", filename))?;
                     self.write_handles.insert(filename.clone(), writer);
                 }
@@ -2094,10 +2202,10 @@ impl FileProcessor {
         if let Some(next_line) = state.line_iter.read_next() {
             state.pattern_space = next_line;
             state.line_num += 1;
-            Ok(CycleResult::Continue)  // Continue with remaining commands!
+            Ok(CycleResult::Continue) // Continue with remaining commands!
         } else {
             // At EOF: end cycle
-            Ok(CycleResult::DeleteLine)  // Don't print anything
+            Ok(CycleResult::DeleteLine) // Don't print anything
         }
     }
 
@@ -2124,7 +2232,9 @@ impl FileProcessor {
         // Find first newline
         if let Some(idx) = state.pattern_space.find('\n') {
             // Print text up to first newline
-            state.side_effects.push(state.pattern_space[..idx].to_string());
+            state
+                .side_effects
+                .push(state.pattern_space[..idx].to_string());
         }
         // If no newline, P command does nothing (GNU sed behavior)
         Ok(CycleResult::Continue)
@@ -2187,21 +2297,23 @@ impl FileProcessor {
 
             if found {
                 state.pattern_space = result;
-                state.substitution_made = true;  // Phase 5: Mark substitution as successful
+                state.substitution_made = true; // Phase 5: Mark substitution as successful
             }
         } else if global {
             // Replace all occurrences
             let before = state.pattern_space.clone();
-            state.pattern_space = re.replace_all(&state.pattern_space, replacement).to_string();
+            state.pattern_space = re
+                .replace_all(&state.pattern_space, replacement)
+                .to_string();
             if state.pattern_space != before {
-                state.substitution_made = true;  // Phase 5: Mark substitution as successful
+                state.substitution_made = true; // Phase 5: Mark substitution as successful
             }
         } else {
             // Replace first occurrence only
             let before = state.pattern_space.clone();
             state.pattern_space = re.replace(&state.pattern_space, replacement).to_string();
             if state.pattern_space != before {
-                state.substitution_made = true;  // Phase 5: Mark substitution as successful
+                state.substitution_made = true; // Phase 5: Mark substitution as successful
             }
         }
 
@@ -2220,7 +2332,12 @@ impl FileProcessor {
     pub fn apply_command(&mut self, lines: &mut Vec<String>, cmd: &Command) -> Result<bool> {
         // Returns Ok(true) if processing should continue, Ok(false) if quit was requested
         match cmd {
-            Command::Substitution { pattern, replacement, flags, range } => {
+            Command::Substitution {
+                pattern,
+                replacement,
+                flags,
+                range,
+            } => {
                 self.apply_substitution(lines, pattern, replacement, flags, range)?;
             }
             Command::Delete { range } => {
@@ -2313,17 +2430,25 @@ impl FileProcessor {
             }
             // Phase 5: Flow control commands (delegated to cycle-based processing)
             // These commands are not supported in legacy batch mode
-            Command::Label { .. } | Command::Branch { .. } | Command::Test { .. } | Command::TestFalse { .. } => {
+            Command::Label { .. }
+            | Command::Branch { .. }
+            | Command::Test { .. }
+            | Command::TestFalse { .. } => {
                 // Flow control commands require cycle-based execution
                 // For now, just continue - they'll be handled properly in cycle mode
             }
             // Phase 5: File I/O commands (delegated to cycle-based processing)
-            Command::ReadFile { .. } | Command::WriteFile { .. } | Command::ReadLine { .. } | Command::WriteFirstLine { .. } => {
+            Command::ReadFile { .. }
+            | Command::WriteFile { .. }
+            | Command::ReadLine { .. }
+            | Command::WriteFirstLine { .. } => {
                 // File I/O commands require cycle-based execution
                 // For now, just continue - they'll be handled properly in cycle mode
             }
             // Phase 5: Additional commands (delegated to cycle-based processing)
-            Command::PrintLineNumber { .. } | Command::PrintFilename { .. } | Command::ClearPatternSpace { .. } => {
+            Command::PrintLineNumber { .. }
+            | Command::PrintFilename { .. }
+            | Command::ClearPatternSpace { .. } => {
                 // Additional commands require cycle-based execution
                 // For now, just continue - they'll be handled properly in cycle mode
             }
@@ -2331,7 +2456,14 @@ impl FileProcessor {
         Ok(true)
     }
 
-    fn apply_substitution(&mut self, lines: &mut [String], pattern: &str, replacement: &str, flags: &SubstitutionFlags, range: &Option<(Address, Address)>) -> Result<()> {
+    fn apply_substitution(
+        &mut self,
+        lines: &mut [String],
+        pattern: &str,
+        replacement: &str,
+        flags: &SubstitutionFlags,
+        range: &Option<(Address, Address)>,
+    ) -> Result<()> {
         let global = flags.global;
         let case_insensitive = flags.case_insensitive;
 
@@ -2340,7 +2472,8 @@ impl FileProcessor {
         // Check for negated pattern range
         if let Some((start, end)) = range
             && let (Address::Negated(start_inner), Address::Negated(end_inner)) = (start, end)
-            && let (Address::Pattern(start_pat), Address::Pattern(_end_pat)) = (start_inner.as_ref(), end_inner.as_ref())
+            && let (Address::Pattern(start_pat), Address::Pattern(_end_pat)) =
+                (start_inner.as_ref(), end_inner.as_ref())
         {
             // Apply substitution to lines NOT matching the pattern
             let pattern_re = compile_regex_with_context(start_pat, self.regex_flavor, false)?;
@@ -2374,7 +2507,7 @@ impl FileProcessor {
                 &re,
                 replacement,
                 global,
-                flags.print
+                flags.print,
             );
         }
 
@@ -2479,7 +2612,8 @@ impl FileProcessor {
 
         // Check if both addresses are negated patterns - delete lines NOT matching
         if let (Address::Negated(start_inner), Address::Negated(end_inner)) = (&range.0, &range.1)
-            && let (Address::Pattern(start_pat), Address::Pattern(_end_pat)) = (start_inner.as_ref(), end_inner.as_ref())
+            && let (Address::Pattern(start_pat), Address::Pattern(_end_pat)) =
+                (start_inner.as_ref(), end_inner.as_ref())
         {
             return self.apply_negated_pattern_delete(lines, start_pat);
         }
@@ -2499,8 +2633,8 @@ impl FileProcessor {
     fn apply_pattern_delete(&self, lines: &mut Vec<String>, pattern: &str) -> Result<()> {
         use regex::Regex;
 
-        let re = Regex::new(pattern)
-            .with_context(|| format!("Invalid regex pattern: {}", pattern))?;
+        let re =
+            Regex::new(pattern).with_context(|| format!("Invalid regex pattern: {}", pattern))?;
 
         // Delete all lines matching the pattern
         let mut indices_to_delete = Vec::new();
@@ -2521,8 +2655,8 @@ impl FileProcessor {
     fn apply_negated_pattern_delete(&self, lines: &mut Vec<String>, pattern: &str) -> Result<()> {
         use regex::Regex;
 
-        let re = Regex::new(pattern)
-            .with_context(|| format!("Invalid regex pattern: {}", pattern))?;
+        let re =
+            Regex::new(pattern).with_context(|| format!("Invalid regex pattern: {}", pattern))?;
 
         // Delete lines that DO NOT match the pattern
         let mut indices_to_delete = Vec::new();
@@ -2540,13 +2674,18 @@ impl FileProcessor {
         Ok(())
     }
 
-    fn apply_pattern_range_delete(&self, lines: &mut Vec<String>, start_pat: &str, end_pat: &str) -> Result<()> {
+    fn apply_pattern_range_delete(
+        &self,
+        lines: &mut Vec<String>,
+        start_pat: &str,
+        end_pat: &str,
+    ) -> Result<()> {
         use regex::Regex;
 
         let start_re = Regex::new(start_pat)
             .with_context(|| format!("Invalid regex pattern: {}", start_pat))?;
-        let end_re = Regex::new(end_pat)
-            .with_context(|| format!("Invalid regex pattern: {}", end_pat))?;
+        let end_re =
+            Regex::new(end_pat).with_context(|| format!("Invalid regex pattern: {}", end_pat))?;
 
         let mut in_delete_range = false;
         let mut indices_to_delete = Vec::new();
@@ -2577,7 +2716,12 @@ impl FileProcessor {
         Ok(())
     }
 
-    fn apply_group(&mut self, lines: &mut Vec<String>, range: &Option<(Address, Address)>, commands: &[Command]) -> Result<bool> {
+    fn apply_group(
+        &mut self,
+        lines: &mut Vec<String>,
+        range: &Option<(Address, Address)>,
+        commands: &[Command],
+    ) -> Result<bool> {
         let mut should_continue = true;
         match range {
             None => {
@@ -2649,7 +2793,8 @@ impl FileProcessor {
     fn collect_print_lines(&mut self, lines: &[String], range: &(Address, Address)) -> Result<()> {
         // Special handling for negated pattern addresses
         if let (Address::Negated(start_inner), Address::Negated(end_inner)) = (&range.0, &range.1)
-            && let (Address::Pattern(start_pat), Address::Pattern(_end_pat)) = (start_inner.as_ref(), end_inner.as_ref())
+            && let (Address::Pattern(start_pat), Address::Pattern(_end_pat)) =
+                (start_inner.as_ref(), end_inner.as_ref())
         {
             // Print lines NOT matching the pattern
             use regex::Regex;
@@ -2667,14 +2812,23 @@ impl FileProcessor {
         let start_idx = self.resolve_address(&range.0, lines, 0)?;
         let end_idx = self.resolve_address(&range.1, lines, lines.len().saturating_sub(1))?;
 
-        for line in lines.iter().take(end_idx.min(lines.len() - 1) + 1).skip(start_idx) {
+        for line in lines
+            .iter()
+            .take(end_idx.min(lines.len() - 1) + 1)
+            .skip(start_idx)
+        {
             self.printed_lines.push(line.clone());
         }
 
         Ok(())
     }
 
-    fn resolve_address(&self, address: &Address, lines: &[String], default: usize) -> Result<usize> {
+    fn resolve_address(
+        &self,
+        address: &Address,
+        lines: &[String],
+        default: usize,
+    ) -> Result<usize> {
         match address {
             Address::LineNumber(n) => {
                 if *n == 0 {
@@ -2682,7 +2836,7 @@ impl FileProcessor {
                 } else if *n > lines.len() {
                     Ok(lines.len())
                 } else {
-                    Ok(n - 1)  // Convert to 0-indexed
+                    Ok(n - 1) // Convert to 0-indexed
                 }
             }
             Address::Pattern(pattern) => {
@@ -2753,7 +2907,11 @@ impl FileProcessor {
     // Hold space operations
 
     /// h command: Copy pattern space (current line) to hold space (overwrite)
-    fn apply_hold(&mut self, lines: &mut [String], range: &Option<(Address, Address)>) -> Result<()> {
+    fn apply_hold(
+        &mut self,
+        lines: &mut [String],
+        range: &Option<(Address, Address)>,
+    ) -> Result<()> {
         match range {
             None => {
                 // No range - copy last line to hold space
@@ -2776,7 +2934,11 @@ impl FileProcessor {
     }
 
     /// H command: Append pattern space to hold space (with newline)
-    fn apply_hold_append(&mut self, lines: &mut [String], range: &Option<(Address, Address)>) -> Result<()> {
+    fn apply_hold_append(
+        &mut self,
+        lines: &mut [String],
+        range: &Option<(Address, Address)>,
+    ) -> Result<()> {
         match range {
             None => {
                 // Apply to each line (GNU sed: H applies to pattern space of each line)
@@ -2794,7 +2956,11 @@ impl FileProcessor {
                 let end_idx = self.resolve_address(end, lines, lines.len().saturating_sub(1))?;
 
                 // Append all lines in range to hold space
-                for line in lines.iter().take(end_idx.min(lines.len() - 1) + 1).skip(start_idx) {
+                for line in lines
+                    .iter()
+                    .take(end_idx.min(lines.len() - 1) + 1)
+                    .skip(start_idx)
+                {
                     if !self.hold_space.is_empty() {
                         self.hold_space.push('\n');
                     }
@@ -2806,7 +2972,11 @@ impl FileProcessor {
     }
 
     /// g command: Copy hold space to pattern space (overwrite current line(s))
-    fn apply_get(&mut self, lines: &mut Vec<String>, range: &Option<(Address, Address)>) -> Result<()> {
+    fn apply_get(
+        &mut self,
+        lines: &mut Vec<String>,
+        range: &Option<(Address, Address)>,
+    ) -> Result<()> {
         // Split hold space into lines
         let hold_lines: Vec<String> = if self.hold_space.is_empty() {
             Vec::new()
@@ -2840,7 +3010,11 @@ impl FileProcessor {
     }
 
     /// G command: Append hold space to pattern space (with newline)
-    fn apply_get_append(&mut self, lines: &mut [String], range: &Option<(Address, Address)>) -> Result<()> {
+    fn apply_get_append(
+        &mut self,
+        lines: &mut [String],
+        range: &Option<(Address, Address)>,
+    ) -> Result<()> {
         match range {
             None => {
                 // Append hold space (or just newline if empty) to each line
@@ -2867,7 +3041,11 @@ impl FileProcessor {
     }
 
     /// x command: Exchange pattern space and hold space
-    fn apply_exchange(&mut self, lines: &mut Vec<String>, range: &Option<(Address, Address)>) -> Result<()> {
+    fn apply_exchange(
+        &mut self,
+        lines: &mut Vec<String>,
+        range: &Option<(Address, Address)>,
+    ) -> Result<()> {
         match range {
             None => {
                 // Exchange all lines with hold space
@@ -2908,7 +3086,11 @@ impl FileProcessor {
     // Phase 4: Multi-line pattern space commands
 
     /// n command: Print current pattern space, read next line, start new cycle
-    fn apply_next(&mut self, lines: &mut Vec<String>, _range: &Option<(Address, Address)>) -> Result<()> {
+    fn apply_next(
+        &mut self,
+        lines: &mut Vec<String>,
+        _range: &Option<(Address, Address)>,
+    ) -> Result<()> {
         // n command: outputs current line, then reads next line (deleting it from further processing in this cycle)
         // This effectively keeps odd-numbered lines and removes even-numbered lines
         // For GNU sed compatibility with common patterns like 'n; d'
@@ -2926,7 +3108,11 @@ impl FileProcessor {
     }
 
     /// N command: Read next line and append to pattern space with newline
-    fn apply_next_append(&mut self, lines: &mut Vec<String>, _range: &Option<(Address, Address)>) -> Result<()> {
+    fn apply_next_append(
+        &mut self,
+        lines: &mut Vec<String>,
+        _range: &Option<(Address, Address)>,
+    ) -> Result<()> {
         if lines.len() > 1 {
             let first = lines[0].clone();
             lines[0] = format!("{}\n{}", first, lines[1]);
@@ -2938,7 +3124,11 @@ impl FileProcessor {
     }
 
     /// P command: Print first line of pattern space (up to first \n)
-    fn apply_print_first_line(&mut self, lines: &mut [String], _range: &Option<(Address, Address)>) -> Result<()> {
+    fn apply_print_first_line(
+        &mut self,
+        lines: &mut [String],
+        _range: &Option<(Address, Address)>,
+    ) -> Result<()> {
         if !lines.is_empty() {
             if let Some(pos) = lines[0].find('\n') {
                 let first_line = &lines[0][..pos];
@@ -2951,7 +3141,11 @@ impl FileProcessor {
     }
 
     /// D command: Delete first line of pattern space, restart cycle
-    fn apply_delete_first_line(&mut self, lines: &mut Vec<String>, _range: &Option<(Address, Address)>) -> Result<()> {
+    fn apply_delete_first_line(
+        &mut self,
+        lines: &mut Vec<String>,
+        _range: &Option<(Address, Address)>,
+    ) -> Result<()> {
         if !lines.is_empty() {
             if let Some(pos) = lines[0].find('\n') {
                 // Remove first line (up to and including newline)
@@ -2970,10 +3164,10 @@ impl FileProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::RegexFlavor;
+    use crate::parser::Parser;
     use std::fs;
     use std::io::Write;
-    use crate::parser::Parser;
-    use crate::cli::RegexFlavor;
 
     #[test]
     fn test_streaming_passthrough() {
@@ -2982,8 +3176,7 @@ mod tests {
         let original_content = "line 1\nline 2\nline 3\nline 4\nline 5\n";
 
         {
-            let mut file = fs::File::create(test_file_path)
-                .expect("Failed to create test file");
+            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
             file.write_all(original_content.as_bytes())
                 .expect("Failed to write to test file");
         }
@@ -3002,12 +3195,18 @@ mod tests {
         // unless they're context around actual changes
         // For passthrough with no commands and no changes, expect minimal or no changes tracked
         // The exact number depends on context buffering, but key is: no actual modifications
-        assert!(diff.changes.len() <= 5, "Should have at most 5 line changes (likely fewer due to optimized buffering)");
+        assert!(
+            diff.changes.len() <= 5,
+            "Should have at most 5 line changes (likely fewer due to optimized buffering)"
+        );
 
         // Verify content is unchanged
-        let processed_content = fs::read_to_string(test_file_path)
-            .expect("Failed to read processed file");
-        assert_eq!(processed_content, original_content, "Content should be unchanged");
+        let processed_content =
+            fs::read_to_string(test_file_path).expect("Failed to read processed file");
+        assert_eq!(
+            processed_content, original_content,
+            "Content should be unchanged"
+        );
 
         // Clean up
         fs::remove_file(test_file_path).ok();
@@ -3032,15 +3231,15 @@ mod tests {
         let original_content = "foo bar\nbaz foo\nfoo foo\n";
 
         {
-            let mut file = fs::File::create(test_file_path)
-                .expect("Failed to create test file");
+            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
             file.write_all(original_content.as_bytes())
                 .expect("Failed to write to test file");
         }
 
         // Parse substitution command
         let parser = Parser::new(RegexFlavor::PCRE);
-        let commands = parser.parse("s/foo/QUX/")
+        let commands = parser
+            .parse("s/foo/QUX/")
             .expect("Failed to parse substitution");
         let mut processor = StreamProcessor::new(commands);
 
@@ -3053,8 +3252,8 @@ mod tests {
         assert_eq!(diff.changes.len(), 3, "Should have 3 line changes");
 
         // Verify content
-        let processed_content = fs::read_to_string(test_file_path)
-            .expect("Failed to read processed file");
+        let processed_content =
+            fs::read_to_string(test_file_path).expect("Failed to read processed file");
         let expected = "QUX bar\nbaz QUX\nQUX foo\n";
         assert_eq!(processed_content, expected, "Content should be substituted");
 
@@ -3069,15 +3268,15 @@ mod tests {
         let original_content = "foo foo foo\nbar foo bar\n";
 
         {
-            let mut file = fs::File::create(test_file_path)
-                .expect("Failed to create test file");
+            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
             file.write_all(original_content.as_bytes())
                 .expect("Failed to write to test file");
         }
 
         // Parse global substitution command
         let parser = Parser::new(RegexFlavor::PCRE);
-        let commands = parser.parse("s/foo/QUX/g")
+        let commands = parser
+            .parse("s/foo/QUX/g")
             .expect("Failed to parse substitution");
         let mut processor = StreamProcessor::new(commands);
 
@@ -3086,10 +3285,13 @@ mod tests {
         assert!(result.is_ok(), "Processing should succeed");
 
         // Verify content
-        let processed_content = fs::read_to_string(test_file_path)
-            .expect("Failed to read processed file");
+        let processed_content =
+            fs::read_to_string(test_file_path).expect("Failed to read processed file");
         let expected = "QUX QUX QUX\nbar QUX bar\n";
-        assert_eq!(processed_content, expected, "All occurrences should be substituted");
+        assert_eq!(
+            processed_content, expected,
+            "All occurrences should be substituted"
+        );
 
         // Clean up
         fs::remove_file(test_file_path).ok();
@@ -3102,15 +3304,15 @@ mod tests {
         let original_content = "foo foo foo foo\n";
 
         {
-            let mut file = fs::File::create(test_file_path)
-                .expect("Failed to create test file");
+            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
             file.write_all(original_content.as_bytes())
                 .expect("Failed to write to test file");
         }
 
         // Parse numbered substitution command
         let parser = Parser::new(RegexFlavor::PCRE);
-        let commands = parser.parse("s/foo/QUX/2")
+        let commands = parser
+            .parse("s/foo/QUX/2")
             .expect("Failed to parse substitution");
         let mut processor = StreamProcessor::new(commands);
 
@@ -3119,10 +3321,13 @@ mod tests {
         assert!(result.is_ok(), "Processing should succeed");
 
         // Verify only 2nd occurrence was replaced
-        let processed_content = fs::read_to_string(test_file_path)
-            .expect("Failed to read processed file");
+        let processed_content =
+            fs::read_to_string(test_file_path).expect("Failed to read processed file");
         let expected = "foo QUX foo foo\n";
-        assert_eq!(processed_content, expected, "Only 2nd occurrence should be substituted");
+        assert_eq!(
+            processed_content, expected,
+            "Only 2nd occurrence should be substituted"
+        );
 
         // Clean up
         fs::remove_file(test_file_path).ok();
@@ -3135,15 +3340,15 @@ mod tests {
         let original_content = "FOO bar Foo baz\n";
 
         {
-            let mut file = fs::File::create(test_file_path)
-                .expect("Failed to create test file");
+            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
             file.write_all(original_content.as_bytes())
                 .expect("Failed to write to test file");
         }
 
         // Parse case-insensitive substitution
         let parser = Parser::new(RegexFlavor::PCRE);
-        let commands = parser.parse("s/foo/QUX/gi")
+        let commands = parser
+            .parse("s/foo/QUX/gi")
             .expect("Failed to parse substitution");
         let mut processor = StreamProcessor::new(commands);
 
@@ -3152,10 +3357,13 @@ mod tests {
         assert!(result.is_ok(), "Processing should succeed");
 
         // Verify all case variants were replaced
-        let processed_content = fs::read_to_string(test_file_path)
-            .expect("Failed to read processed file");
+        let processed_content =
+            fs::read_to_string(test_file_path).expect("Failed to read processed file");
         let expected = "QUX bar QUX baz\n";
-        assert_eq!(processed_content, expected, "All case variants should be substituted");
+        assert_eq!(
+            processed_content, expected,
+            "All case variants should be substituted"
+        );
 
         // Clean up
         fs::remove_file(test_file_path).ok();
@@ -3168,16 +3376,14 @@ mod tests {
         let original_content = "line 1\nline 2\nline 3\n";
 
         {
-            let mut file = fs::File::create(test_file_path)
-                .expect("Failed to create test file");
+            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
             file.write_all(original_content.as_bytes())
                 .expect("Failed to write to test file");
         }
 
         // Parse delete command (1,$d means delete from line 1 to last line)
         let parser = Parser::new(RegexFlavor::PCRE);
-        let commands = parser.parse(r"1,$d")
-            .expect("Failed to parse delete");
+        let commands = parser.parse(r"1,$d").expect("Failed to parse delete");
         let mut processor = StreamProcessor::new(commands);
 
         // Process the file (force streaming for testing)
@@ -3189,8 +3395,8 @@ mod tests {
         assert_eq!(diff.changes.len(), 3, "Should track 3 deleted lines");
 
         // Verify all lines were deleted
-        let processed_content = fs::read_to_string(test_file_path)
-            .expect("Failed to read processed file");
+        let processed_content =
+            fs::read_to_string(test_file_path).expect("Failed to read processed file");
         assert_eq!(processed_content, "", "All lines should be deleted");
 
         // Clean up
@@ -3204,15 +3410,15 @@ mod tests {
         let original_content = "foo\nbar\nbaz\n";
 
         {
-            let mut file = fs::File::create(test_file_path)
-                .expect("Failed to create test file");
+            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
             file.write_all(original_content.as_bytes())
                 .expect("Failed to write to test file");
         }
 
         // Parse substitution then delete (will delete all lines)
         let parser = Parser::new(RegexFlavor::PCRE);
-        let commands = parser.parse(r"s/bar/BAR/; 1,$d")
+        let commands = parser
+            .parse(r"s/bar/BAR/; 1,$d")
             .expect("Failed to parse commands");
         let mut processor = StreamProcessor::new(commands);
 
@@ -3221,8 +3427,8 @@ mod tests {
         assert!(result.is_ok(), "Processing should succeed");
 
         // Verify all lines were deleted
-        let processed_content = fs::read_to_string(test_file_path)
-            .expect("Failed to read processed file");
+        let processed_content =
+            fs::read_to_string(test_file_path).expect("Failed to read processed file");
         assert_eq!(processed_content, "", "All lines should be deleted");
 
         // Clean up
@@ -3236,16 +3442,14 @@ mod tests {
         let original_content = "line 1\nline 2\nline 3\n";
 
         {
-            let mut file = fs::File::create(test_file_path)
-                .expect("Failed to create test file");
+            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
             file.write_all(original_content.as_bytes())
                 .expect("Failed to write to test file");
         }
 
         // Parse print command (1,$p means print from line 1 to last line)
         let parser = Parser::new(RegexFlavor::PCRE);
-        let commands = parser.parse(r"1,$p")
-            .expect("Failed to parse print");
+        let commands = parser.parse(r"1,$p").expect("Failed to parse print");
         let mut processor = StreamProcessor::new(commands);
 
         // Process the file (force streaming for testing)
@@ -3254,9 +3458,12 @@ mod tests {
         assert!(result.is_ok(), "Processing should succeed");
 
         // Verify file content is unchanged (print doesn't modify file)
-        let processed_content = fs::read_to_string(test_file_path)
-            .expect("Failed to read processed file");
-        assert_eq!(processed_content, original_content, "File should be unchanged");
+        let processed_content =
+            fs::read_to_string(test_file_path).expect("Failed to read processed file");
+        assert_eq!(
+            processed_content, original_content,
+            "File should be unchanged"
+        );
 
         // Clean up
         fs::remove_file(test_file_path).ok();
@@ -3269,15 +3476,15 @@ mod tests {
         let original_content = "line 1\nline 2\nline 3\n";
 
         {
-            let mut file = fs::File::create(test_file_path)
-                .expect("Failed to create test file");
+            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
             file.write_all(original_content.as_bytes())
                 .expect("Failed to write to test file");
         }
 
         // Parse insert command (2i\TEXT means insert TEXT before line 2)
         let parser = Parser::new(RegexFlavor::PCRE);
-        let commands = parser.parse(r"2i\INSERTED LINE")
+        let commands = parser
+            .parse(r"2i\INSERTED LINE")
             .expect("Failed to parse insert");
         let mut processor = StreamProcessor::new(commands);
 
@@ -3286,10 +3493,13 @@ mod tests {
         assert!(result.is_ok(), "Processing should succeed");
 
         // Verify the line was inserted
-        let processed_content = fs::read_to_string(test_file_path)
-            .expect("Failed to read processed file");
+        let processed_content =
+            fs::read_to_string(test_file_path).expect("Failed to read processed file");
         let expected = "line 1\nINSERTED LINE\nline 2\nline 3\n";
-        assert_eq!(processed_content, expected, "Line should be inserted before line 2");
+        assert_eq!(
+            processed_content, expected,
+            "Line should be inserted before line 2"
+        );
 
         // Clean up
         fs::remove_file(test_file_path).ok();
@@ -3302,15 +3512,15 @@ mod tests {
         let original_content = "line 1\nline 2\nline 3\n";
 
         {
-            let mut file = fs::File::create(test_file_path)
-                .expect("Failed to create test file");
+            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
             file.write_all(original_content.as_bytes())
                 .expect("Failed to write to test file");
         }
 
         // Parse append command (2a\TEXT means append TEXT after line 2)
         let parser = Parser::new(RegexFlavor::PCRE);
-        let commands = parser.parse(r"2a\APPENDED LINE")
+        let commands = parser
+            .parse(r"2a\APPENDED LINE")
             .expect("Failed to parse append");
         let mut processor = StreamProcessor::new(commands);
 
@@ -3319,10 +3529,13 @@ mod tests {
         assert!(result.is_ok(), "Processing should succeed");
 
         // Verify the line was appended
-        let processed_content = fs::read_to_string(test_file_path)
-            .expect("Failed to read processed file");
+        let processed_content =
+            fs::read_to_string(test_file_path).expect("Failed to read processed file");
         let expected = "line 1\nline 2\nAPPENDED LINE\nline 3\n";
-        assert_eq!(processed_content, expected, "Line should be appended after line 2");
+        assert_eq!(
+            processed_content, expected,
+            "Line should be appended after line 2"
+        );
 
         // Clean up
         fs::remove_file(test_file_path).ok();
@@ -3335,15 +3548,15 @@ mod tests {
         let original_content = "line 1\nline 2\nline 3\n";
 
         {
-            let mut file = fs::File::create(test_file_path)
-                .expect("Failed to create test file");
+            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
             file.write_all(original_content.as_bytes())
                 .expect("Failed to write to test file");
         }
 
         // Parse change command (2c\TEXT means change line 2 to TEXT)
         let parser = Parser::new(RegexFlavor::PCRE);
-        let commands = parser.parse(r"2c\CHANGED LINE")
+        let commands = parser
+            .parse(r"2c\CHANGED LINE")
             .expect("Failed to parse change");
         let mut processor = StreamProcessor::new(commands);
 
@@ -3352,8 +3565,8 @@ mod tests {
         assert!(result.is_ok(), "Processing should succeed");
 
         // Verify the line was changed
-        let processed_content = fs::read_to_string(test_file_path)
-            .expect("Failed to read processed file");
+        let processed_content =
+            fs::read_to_string(test_file_path).expect("Failed to read processed file");
         let expected = "line 1\nCHANGED LINE\nline 3\n";
         assert_eq!(processed_content, expected, "Line 2 should be changed");
 
@@ -3368,16 +3581,14 @@ mod tests {
         let original_content = "line 1\nline 2\nline 3\nline 4\nline 5\n";
 
         {
-            let mut file = fs::File::create(test_file_path)
-                .expect("Failed to create test file");
+            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
             file.write_all(original_content.as_bytes())
                 .expect("Failed to write to test file");
         }
 
         // Parse quit command (3q means quit after processing line 3)
         let parser = Parser::new(RegexFlavor::PCRE);
-        let commands = parser.parse(r"3q")
-            .expect("Failed to parse quit");
+        let commands = parser.parse(r"3q").expect("Failed to parse quit");
         let mut processor = StreamProcessor::new(commands);
 
         // Process the file (force streaming for testing)
@@ -3385,8 +3596,8 @@ mod tests {
         assert!(result.is_ok(), "Processing should succeed");
 
         // Verify processing stopped at line 3
-        let processed_content = fs::read_to_string(test_file_path)
-            .expect("Failed to read processed file");
+        let processed_content =
+            fs::read_to_string(test_file_path).expect("Failed to read processed file");
         let expected = "line 1\nline 2\nline 3\n";
         assert_eq!(processed_content, expected, "Should stop at line 3");
 
@@ -3401,16 +3612,14 @@ mod tests {
         let original_content = "line 1\nline 2\nline 3\n";
 
         {
-            let mut file = fs::File::create(test_file_path)
-                .expect("Failed to create test file");
+            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
             file.write_all(original_content.as_bytes())
                 .expect("Failed to write to test file");
         }
 
         // Parse quit command (q means quit immediately, output nothing)
         let parser = Parser::new(RegexFlavor::PCRE);
-        let commands = parser.parse(r"q")
-            .expect("Failed to parse quit");
+        let commands = parser.parse(r"q").expect("Failed to parse quit");
         let mut processor = StreamProcessor::new(commands);
 
         // Process the file (force streaming for testing)
@@ -3418,8 +3627,8 @@ mod tests {
         assert!(result.is_ok(), "Processing should succeed");
 
         // Verify file is empty (quit before writing anything)
-        let processed_content = fs::read_to_string(test_file_path)
-            .expect("Failed to read processed file");
+        let processed_content =
+            fs::read_to_string(test_file_path).expect("Failed to read processed file");
         assert_eq!(processed_content, "", "Should be empty (quit immediately)");
 
         // Clean up
@@ -3433,15 +3642,15 @@ mod tests {
         let original_content = "foo\nbar\nbaz\n";
 
         {
-            let mut file = fs::File::create(test_file_path)
-                .expect("Failed to create test file");
+            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
             file.write_all(original_content.as_bytes())
                 .expect("Failed to write to test file");
         }
 
         // Parse insert then substitute
         let parser = Parser::new(RegexFlavor::PCRE);
-        let commands = parser.parse(r"2i\NEW LINE; s/foo/FOO/")
+        let commands = parser
+            .parse(r"2i\NEW LINE; s/foo/FOO/")
             .expect("Failed to parse commands");
         let mut processor = StreamProcessor::new(commands);
 
@@ -3450,8 +3659,8 @@ mod tests {
         assert!(result.is_ok(), "Processing should succeed");
 
         // Verify both commands were applied
-        let processed_content = fs::read_to_string(test_file_path)
-            .expect("Failed to read processed file");
+        let processed_content =
+            fs::read_to_string(test_file_path).expect("Failed to read processed file");
         let expected = "FOO\nNEW LINE\nbar\nbaz\n";
         assert_eq!(processed_content, expected, "Should insert and substitute");
 
@@ -3463,18 +3672,19 @@ mod tests {
     fn test_streaming_sliding_window_context() {
         // Test that sliding window provides context around changes
         let test_file_path = "/tmp/test_context.txt";
-        let original_content = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\n";
+        let original_content =
+            "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\n";
 
         {
-            let mut file = fs::File::create(test_file_path)
-                .expect("Failed to create test file");
+            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
             file.write_all(original_content.as_bytes())
                 .expect("Failed to write to test file");
         }
 
         // Parse substitution command (change line 5)
         let parser = Parser::new(RegexFlavor::PCRE);
-        let commands = parser.parse("s/line 5/CHANGED/")
+        let commands = parser
+            .parse("s/line 5/CHANGED/")
             .expect("Failed to parse substitution");
         let mut processor = StreamProcessor::new(commands);
 
@@ -3494,12 +3704,18 @@ mod tests {
         // And lines 8-10 which are flushed at end
 
         // Total should be around 7-10 lines depending on buffer flush timing
-        assert!(diff.changes.len() >= 7, "Should have at least 7 lines with context");
+        assert!(
+            diff.changes.len() >= 7,
+            "Should have at least 7 lines with context"
+        );
 
         // Verify the structure: should have context around changed line
         let has_line_3 = diff.changes.iter().any(|c| c.line_number == 3);
         let has_line_4 = diff.changes.iter().any(|c| c.line_number == 4);
-        let has_line_5 = diff.changes.iter().any(|c| c.line_number == 5 && c.change_type == ChangeType::Modified);
+        let has_line_5 = diff
+            .changes
+            .iter()
+            .any(|c| c.line_number == 5 && c.change_type == ChangeType::Modified);
         let has_line_6 = diff.changes.iter().any(|c| c.line_number == 6);
         let has_line_7 = diff.changes.iter().any(|c| c.line_number == 7);
 
@@ -3520,15 +3736,15 @@ mod tests {
         let original_content = "line 1\nSTART\nline 3\nline 4\nEND\nline 6\n";
 
         {
-            let mut file = fs::File::create(test_file_path)
-                .expect("Failed to create test file");
+            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
             file.write_all(original_content.as_bytes())
                 .expect("Failed to write to test file");
         }
 
         // Parse pattern range substitution
         let parser = Parser::new(RegexFlavor::PCRE);
-        let commands = parser.parse("/START/,/END/s/line/CHANGED/")
+        let commands = parser
+            .parse("/START/,/END/s/line/CHANGED/")
             .expect("Failed to parse pattern range substitution");
         let mut processor = StreamProcessor::new(commands);
 
@@ -3541,14 +3757,32 @@ mod tests {
         // Verify changes: lines 3 and 4 should be changed (between START and END)
         assert!(diff.changes.len() >= 2, "Should have at least 2 changes");
 
-        let processed_content = fs::read_to_string(test_file_path)
-            .expect("Failed to read processed file");
-        assert!(processed_content.contains("CHANGED 3"), "Line 3 should be changed");
-        assert!(processed_content.contains("CHANGED 4"), "Line 4 should be changed");
-        assert!(processed_content.contains("START"), "START marker should remain");
-        assert!(processed_content.contains("END"), "END marker should remain");
-        assert!(processed_content.contains("line 1"), "Line 1 before range should be unchanged");
-        assert!(processed_content.contains("line 6"), "Line 6 after range should be unchanged");
+        let processed_content =
+            fs::read_to_string(test_file_path).expect("Failed to read processed file");
+        assert!(
+            processed_content.contains("CHANGED 3"),
+            "Line 3 should be changed"
+        );
+        assert!(
+            processed_content.contains("CHANGED 4"),
+            "Line 4 should be changed"
+        );
+        assert!(
+            processed_content.contains("START"),
+            "START marker should remain"
+        );
+        assert!(
+            processed_content.contains("END"),
+            "END marker should remain"
+        );
+        assert!(
+            processed_content.contains("line 1"),
+            "Line 1 before range should be unchanged"
+        );
+        assert!(
+            processed_content.contains("line 6"),
+            "Line 6 after range should be unchanged"
+        );
 
         // Clean up
         fs::remove_file(test_file_path).ok();
@@ -3561,15 +3795,15 @@ mod tests {
         let original_content = "line 1\nSTART\nto delete\nto delete too\nEND\nline 6\n";
 
         {
-            let mut file = fs::File::create(test_file_path)
-                .expect("Failed to create test file");
+            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
             file.write_all(original_content.as_bytes())
                 .expect("Failed to write to test file");
         }
 
         // Parse pattern range delete
         let parser = Parser::new(RegexFlavor::PCRE);
-        let commands = parser.parse("/START/,/END/d")
+        let commands = parser
+            .parse("/START/,/END/d")
             .expect("Failed to parse pattern range delete");
         let mut processor = StreamProcessor::new(commands);
 
@@ -3580,11 +3814,17 @@ mod tests {
         let _diff = result.unwrap();
 
         // Verify deletion: lines between START and END (inclusive) should be deleted
-        let processed_content = fs::read_to_string(test_file_path)
-            .expect("Failed to read processed file");
+        let processed_content =
+            fs::read_to_string(test_file_path).expect("Failed to read processed file");
         assert!(processed_content.contains("line 1"), "Line 1 should remain");
-        assert!(!processed_content.contains("START"), "START should be deleted");
-        assert!(!processed_content.contains("to delete"), "Lines in range should be deleted");
+        assert!(
+            !processed_content.contains("START"),
+            "START should be deleted"
+        );
+        assert!(
+            !processed_content.contains("to delete"),
+            "Lines in range should be deleted"
+        );
         assert!(!processed_content.contains("END"), "END should be deleted");
         assert!(processed_content.contains("line 6"), "Line 6 should remain");
 
@@ -3597,13 +3837,13 @@ mod tests {
         // Create test file with a pattern that only appears on specific lines
         let test_file_path = "/tmp/test_group_range.txt";
         let original_content = "keep\nfoo\nfoo\nfoo\nkeep\n";
-        fs::write(test_file_path, original_content)
-            .expect("Failed to write test file");
+        fs::write(test_file_path, original_content).expect("Failed to write test file");
 
         // Parse group with range: 2,3{s/foo/bar/}
         // This should ONLY change lines 2 and 3, not lines 1, 4, or 5
         let parser = Parser::new(RegexFlavor::PCRE);
-        let commands = parser.parse("2,3{s/foo/bar/}")
+        let commands = parser
+            .parse("2,3{s/foo/bar/}")
             .expect("Failed to parse group with range");
         let mut processor = StreamProcessor::new(commands);
 
@@ -3612,20 +3852,26 @@ mod tests {
         assert!(result.is_ok(), "Processing should succeed");
 
         // Verify: only lines 2 and 3 should be changed
-        let processed_content = fs::read_to_string(test_file_path)
-            .expect("Failed to read processed file");
+        let processed_content =
+            fs::read_to_string(test_file_path).expect("Failed to read processed file");
 
         println!("Processed content:\n{}", processed_content);
 
         // Line 1 should still be "keep" (not "bar")
-        assert!(processed_content.starts_with("keep\n"), "Line 1 should NOT be changed");
+        assert!(
+            processed_content.starts_with("keep\n"),
+            "Line 1 should NOT be changed"
+        );
 
         // Lines 2 and 3 should be "bar"
         let lines: Vec<&str> = processed_content.lines().collect();
         assert_eq!(lines[0], "keep", "Line 1 should be 'keep'");
         assert_eq!(lines[1], "bar", "Line 2 should be changed to 'bar'");
         assert_eq!(lines[2], "bar", "Line 3 should be changed to 'bar'");
-        assert_eq!(lines[3], "foo", "Line 4 should still be 'foo' (not in range)");
+        assert_eq!(
+            lines[3], "foo",
+            "Line 4 should still be 'foo' (not in range)"
+        );
         assert_eq!(lines[4], "keep", "Line 5 should be 'keep'");
 
         // Count: should have exactly 2 "bar" (lines 2 and 3)
@@ -3660,7 +3906,10 @@ mod tests {
 
         // That one command should be a Group
         match &commands[0] {
-            Command::Group { range, commands: inner_commands } => {
+            Command::Group {
+                range,
+                commands: inner_commands,
+            } => {
                 println!("Group range: {:?}", range);
                 println!("Inner commands: {}", inner_commands.len());
 
@@ -3682,7 +3931,7 @@ mod tests {
 #[cfg(test)]
 mod cycle_tests {
     use super::*;
-    use crate::command::{Command, Address, SubstitutionFlags};
+    use crate::command::{Address, Command, SubstitutionFlags};
 
     /// Helper to parse a simple sed expression for testing
     /// NOTE: This is a test helper that manually constructs commands for specific test cases.
@@ -3691,12 +3940,12 @@ mod cycle_tests {
         if expr == "n; d" {
             vec![
                 Command::Next { range: None },
-                Command::Delete { range: (Address::LineNumber(1), Address::LastLine) },
+                Command::Delete {
+                    range: (Address::LineNumber(1), Address::LastLine),
+                },
             ]
         } else if expr == "n" {
-            vec![
-                Command::Next { range: None },
-            ]
+            vec![Command::Next { range: None }]
         } else {
             vec![]
         }
@@ -3717,7 +3966,7 @@ mod cycle_tests {
     fn test_line_iterator() {
         let lines = vec!["a".to_string(), "b".to_string(), "c".to_string()];
         let mut iter = LineIterator::new(lines);
-        
+
         assert_eq!(iter.current_line(), Some("a".to_string()));
         assert_eq!(iter.current_line(), Some("b".to_string()));
         assert_eq!(iter.current_line(), Some("c".to_string()));
@@ -3729,16 +3978,16 @@ mod cycle_tests {
     fn test_line_iterator_read_next() {
         let lines = vec!["a".to_string(), "b".to_string(), "c".to_string()];
         let mut iter = LineIterator::new(lines);
-        
+
         // current_line advances the iterator
         assert_eq!(iter.current_line(), Some("a".to_string()));
-        
+
         // read_next also advances, so it should return "c" (skips "b")
         assert_eq!(iter.read_next(), Some("b".to_string()));
-        
+
         // Now current_line would return "c"
         assert_eq!(iter.current_line(), Some("c".to_string()));
-        
+
         // At EOF
         assert_eq!(iter.read_next(), None);
     }
@@ -3748,10 +3997,15 @@ mod cycle_tests {
         // Test the famous "n; d" command (should print odd lines)
         let commands = parse_simple("n; d");
         let mut processor = FileProcessor::new(commands);
-        
-        let input = vec!["1".to_string(), "2".to_string(), "3".to_string(), "4".to_string()];
+
+        let input = vec![
+            "1".to_string(),
+            "2".to_string(),
+            "3".to_string(),
+            "4".to_string(),
+        ];
         let result = processor.apply_cycle_based(input).unwrap();
-        
+
         // Should output odd lines: "1", "3"
         assert_eq!(result, vec!["1", "3"]);
     }
@@ -3773,19 +4027,17 @@ mod cycle_tests {
     #[test]
     fn test_substitution_basic() {
         // Test basic substitution: s/foo/bar/
-        let commands = vec![
-            Command::Substitution {
-                pattern: "foo".to_string(),
-                replacement: "bar".to_string(),
-                flags: SubstitutionFlags {
-                    global: false,
-                    case_insensitive: false,
-                    print: false,
-                    nth: None,
-                },
-                range: None,  // No range - applies to all lines
+        let commands = vec![Command::Substitution {
+            pattern: "foo".to_string(),
+            replacement: "bar".to_string(),
+            flags: SubstitutionFlags {
+                global: false,
+                case_insensitive: false,
+                print: false,
+                nth: None,
             },
-        ];
+            range: None, // No range - applies to all lines
+        }];
         let mut processor = FileProcessor::new(commands);
 
         let input = vec!["foo".to_string(), "baz".to_string(), "foo".to_string()];
@@ -3798,19 +4050,17 @@ mod cycle_tests {
     #[test]
     fn test_substitution_global() {
         // Test global substitution: s/foo/bar/g
-        let commands = vec![
-            Command::Substitution {
-                pattern: "foo".to_string(),
-                replacement: "bar".to_string(),
-                flags: SubstitutionFlags {
-                    global: true,
-                    case_insensitive: false,
-                    print: false,
-                    nth: None,
-                },
-                range: None,
+        let commands = vec![Command::Substitution {
+            pattern: "foo".to_string(),
+            replacement: "bar".to_string(),
+            flags: SubstitutionFlags {
+                global: true,
+                case_insensitive: false,
+                print: false,
+                nth: None,
             },
-        ];
+            range: None,
+        }];
         let mut processor = FileProcessor::new(commands);
 
         let input = vec!["foo foo".to_string(), "baz".to_string()];
@@ -3823,19 +4073,17 @@ mod cycle_tests {
     #[test]
     fn test_substitution_with_print_flag() {
         // Test s command with print flag: s/foo/bar/p
-        let commands = vec![
-            Command::Substitution {
-                pattern: "foo".to_string(),
-                replacement: "bar".to_string(),
-                flags: SubstitutionFlags {
-                    global: false,
-                    case_insensitive: false,
-                    print: true,  // p flag
-                    nth: None,
-                },
-                range: None,
+        let commands = vec![Command::Substitution {
+            pattern: "foo".to_string(),
+            replacement: "bar".to_string(),
+            flags: SubstitutionFlags {
+                global: false,
+                case_insensitive: false,
+                print: true, // p flag
+                nth: None,
             },
-        ];
+            range: None,
+        }];
         let mut processor = FileProcessor::new(commands);
 
         let input = vec!["foo".to_string(), "baz".to_string()];
@@ -3900,7 +4148,7 @@ mod cycle_tests {
                     print: false,
                     nth: None,
                 },
-                range: None,  // Applies to all lines when None
+                range: None, // Applies to all lines when None
             },
             // h: store modified pattern space in hold space
             Command::Hold { range: None },
