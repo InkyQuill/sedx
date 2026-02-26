@@ -93,9 +93,10 @@ pub fn get_disk_space(path: &Path) -> Result<DiskSpaceInfo> {
     }
 
     // Calculate values from statvfs
-    let frsize = stat.f_frsize; // File system block size
-    let total_bytes = stat.f_blocks * frsize;
-    let available_bytes = stat.f_bavail * frsize;
+    // Cast to u64 for cross-platform compatibility (macOS uses u32 for some fields)
+    let frsize = stat.f_frsize as u64;
+    let total_bytes = stat.f_blocks as u64 * frsize;
+    let available_bytes = stat.f_bavail as u64 * frsize;
     let used_bytes = total_bytes - available_bytes;
     let used_percent = if total_bytes > 0 {
         (used_bytes as f64 / total_bytes as f64) * 100.0
