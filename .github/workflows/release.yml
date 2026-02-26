@@ -1,0 +1,283 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v0.2.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Build and test across platforms
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: sedx
+            asset_name: sedx-linux-x86_64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact_name: sedx
+            asset_name: sedx-linux-aarch64
+            use_cross: true
+          - os: macos-13
+            target: x86_64-apple-darwin
+            artifact_name: sedx
+            asset_name: sedx-darwin-x86_64
+          - os: macos-14
+            target: aarch64-apple-darwin
+            artifact_name: sedx
+            asset_name: sedx-darwin-aarch64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: sedx.exe
+            asset_name: sedx-windows-x86_64.exe
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross (for cross-compilation)
+        if: matrix.use_cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build release binary
+        run: |
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+        shell: bash
+
+      - name: Strip binary (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+
+  # Run tests
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        rust: [stable]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.rust }}
+
+      - name: Run unit tests
+        run: cargo test --all-features
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+  # Create GitHub Release
+  release:
+    name: Create Release
+    needs: [build, test]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
+      - name: Create checksums
+        run: |
+          cd artifacts
+          for dir in */; do
+            cd "$dir"
+            if [ -f "sedx" ]; then
+              sha256sum sedx > sedx.sha256
+              sha512sum sedx > sedx.sha512
+            elif [ -f "sedx.exe" ]; then
+              sha256sum sedx.exe > sedx.exe.sha256
+              sha512sum sedx.exe > sedx.exe.sha512
+            fi
+            cd ..
+          done
+          cd ..
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          mv artifacts/sedx-linux-x86_64/sedx release/sedx-linux-x86_64
+          mv artifacts/sedx-linux-x86_64/sedx.sha256 release/sedx-linux-x86_64.sha256
+          mv artifacts/sedx-linux-x86_64/sedx.sha512 release/sedx-linux-x86_64.sha512
+
+          mv artifacts/sedx-linux-aarch64/sedx release/sedx-linux-aarch64
+          mv artifacts/sedx-linux-aarch64/sedx.sha256 release/sedx-linux-aarch64.sha256
+          mv artifacts/sedx-linux-aarch64/sedx.sha512 release/sedx-linux-aarch64.sha512
+
+          mv artifacts/sedx-darwin-x86_64/sedx release/sedx-darwin-x86_64
+          mv artifacts/sedx-darwin-x86_64/sedx.sha256 release/sedx-darwin-x86_64.sha256
+          mv artifacts/sedx-darwin-x86_64/sedx.sha512 release/sedx-darwin-x86_64.sha512
+
+          mv artifacts/sedx-darwin-aarch64/sedx release/sedx-darwin-aarch64
+          mv artifacts/sedx-darwin-aarch64/sedx.sha256 release/sedx-darwin-aarch64.sha256
+          mv artifacts/sedx-darwin-aarch64/sedx.sha512 release/sedx-darwin-aarch64.sha512
+
+          mv artifacts/sedx-windows-x86_64.exe/sedx.exe release/sedx-windows-x86_64.exe
+          mv artifacts/sedx-windows-x86_64.exe/sedx.exe.sha256 release/sedx-windows-x86_64.exe.sha256
+          mv artifacts/sedx-windows-x86_64.exe/sedx.exe.sha512 release/sedx-windows-x86_64.exe.sha512
+
+          # Create a checksums file
+          cd release
+          sha256sum * > SHA256SUMS.txt
+          sha512sum * > SHA512SUMS.txt
+          cd ..
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION="${{ github.ref_name }}"
+          if [ -z "$VERSION" ] || [ "$VERSION" == "" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          cat > release_notes.md << EOF
+          ## SedX $VERSION
+
+          A safe, modern replacement for GNU sed written in Rust.
+
+          ### Downloads
+
+          Choose the appropriate binary for your system:
+
+          - **Linux x86_64**: \`sedx-linux-x86_64\`
+          - **Linux aarch64**: \`sedx-linux-aarch64\`
+          - **macOS Intel**: \`sedx-darwin-x86_64\`
+          - **macOS Apple Silicon**: \`sedx-darwin-aarch64\`
+          - **Windows x86_64**: \`sedx-windows-x86_64.exe\`
+
+          ### Installation
+
+          \`\`\`bash
+          # Download the binary for your platform
+          wget https://github.com/InkyQuill/sedx/releases/download/$VERSION/sedx-linux-x86_64
+
+          # Make it executable
+          chmod +x sedx-linux-x86_64
+
+          # Move to your PATH
+          mv sedx-linux-x86_64 ~/.local/bin/sedx
+          \`\`\`
+
+          ### Verification
+
+          Verify the downloaded binary using the provided checksums:
+
+          \`\`\`bash
+          # Download the checksums file
+          wget https://github.com/InkyQuill/sedx/releases/download/$VERSION/SHA256SUMS.txt
+
+          # Verify
+          sha256sum -c SHA256SUMS.txt --ignore-missing
+          \`\`\`
+
+          ### What's New
+
+          See the [CHANGELOG](https://github.com/InkyQuill/sedx/blob/main/CHANGELOG.md) for details.
+          EOF
+          cat release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Publish to crates.io
+  publish:
+    name: Publish to crates.io
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    if: "!contains(github.ref, 'alpha') && !contains(github.ref, 'beta') && !contains(github.ref, 'rc')"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Login to crates.io
+        run: cargo login ${{ secrets.CRATES_IO_TOKEN }}
+
+      - name: Publish to crates.io
+        run: cargo publish
+
+  # Build and upload Homebrew bottle (macOS)
+  homebrew:
+    name: Create Homebrew Bottle
+    needs: [build, test]
+    runs-on: macos-latest
+    if: "!contains(github.ref, 'alpha') && !contains(github.ref, 'beta') && !contains(github.ref, 'rc')"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build bottle
+        run: |
+          cargo build --release
+          # Create bottle archive
+          tar czvf sedx-${{ github.ref_name }}.darwin.tar.gz -C target/release sedx
+          sha256sum sedx-${{ github.ref_name }}.darwin.tar.gz > sedx-${{ github.ref_name }}.darwin.tar.gz.sha256
+
+      - name: Upload bottle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: homebrew-bottle
+          path: sedx-${{ github.ref_name }}.darwin.tar.gz*

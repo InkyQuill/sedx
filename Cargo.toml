@@ -2,13 +2,24 @@
 name = "sedx"
 version = "0.2.6-alpha"
 edition = "2024"
+description = "A safe, modern replacement for GNU sed with automatic backups, preview mode, and rollback"
+authors = ["InkyQuill <inkyquill@users.noreply.github.com>"]
+license = "MIT"
+repository = "https://github.com/InkyQuill/sedx"
+homepage = "https://github.com/InkyQuill/sedx"
+documentation = "https://github.com/InkyQuill/sedx/blob/main/README.md"
+readme = "README.md"
+keywords = ["sed", "stream", "text-processing", "cli", "replacement"]
+categories = ["command-line-utilities", "text-processing", "development-tools"]
 include = [
     "src/**/*",
     "Cargo.toml",
     "LICENSE",
     "README.md",
     "man/sedx.1",
+    "completions/**/*",
 ]
+rust-version = "1.85"
 
 [[bin]]
 name = "sedx"

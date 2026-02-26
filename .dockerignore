@@ -1,0 +1,38 @@
+# Git
+.git
+.gitignore
+.github
+
+# Target
+target
+**/*.rs.bk
+*.pdb
+
+# Documentation
+*.md
+!README.md
+
+# CI/CD
+Justfile
+Makefile
+.justfile
+.claude
+
+# Tests
+tests
+*.spec
+PKGBUILD
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
