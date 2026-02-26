@@ -6,7 +6,7 @@
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::PathBuf;
-use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*, registry};
 
 /// Initialize the debug logging system
 ///
@@ -45,7 +45,7 @@ pub fn init_debug_logging(debug_enabled: bool) -> Result<Option<PathBuf>> {
                         .with_target(false)
                         .with_thread_ids(false)
                         .with_file(false)
-                        .with_line_number(false)
+                        .with_line_number(false),
                 )
                 .with(EnvFilter::new("sedx=info"));
 
@@ -75,8 +75,8 @@ fn get_log_path() -> Result<PathBuf> {
     }
 
     // Fall back to home directory
-    let home_dir = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+    let home_dir =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
     let sedx_dir = home_dir.join(".sedx");
     Ok(sedx_dir.join("sedx.log"))
 }
@@ -129,7 +129,11 @@ mod tests {
     fn test_init_debug_logging_disabled() {
         let result = init_debug_logging(false);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), None, "Should return None when debug is disabled");
+        assert_eq!(
+            result.unwrap(),
+            None,
+            "Should return None when debug is disabled"
+        );
     }
 
     #[test]

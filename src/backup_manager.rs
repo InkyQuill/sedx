@@ -240,11 +240,7 @@ impl BackupManager {
 
         // Sort by timestamp to ensure chronological order
         // When timestamps are equal (rare), use ID as tiebreaker for consistency
-        backups.sort_by(|a, b| {
-            a.timestamp
-                .cmp(&b.timestamp)
-                .then_with(|| a.id.cmp(&b.id))
-        });
+        backups.sort_by(|a, b| a.timestamp.cmp(&b.timestamp).then_with(|| a.id.cmp(&b.id)));
         Ok(backups)
     }
 
@@ -804,7 +800,10 @@ mod tests {
         for i in 0..5 {
             backup_ids.push(
                 manager
-                    .create_backup(&format!("s/test{i}/", i = i), std::slice::from_ref(&test_file))
+                    .create_backup(
+                        &format!("s/test{i}/", i = i),
+                        std::slice::from_ref(&test_file),
+                    )
                     .unwrap(),
             );
             std::thread::sleep(std::time::Duration::from_millis(10));
@@ -1112,7 +1111,10 @@ mod tests {
         assert_eq!(parts[0].len(), 8, "First part should be 8 digits (date)");
 
         // Second part should be time format with milliseconds (9+ digits)
-        assert!(parts[1].len() >= 9, "Second part should be at least 9 digits (time with milliseconds)");
+        assert!(
+            parts[1].len() >= 9,
+            "Second part should be at least 9 digits (time with milliseconds)"
+        );
     }
 
     #[test]

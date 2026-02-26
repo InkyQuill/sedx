@@ -612,7 +612,11 @@ fn execute_command(
     // Log completion
     let elapsed = start_time.elapsed();
     if debug_enabled {
-        let status = if apply_errors.is_empty() { "success" } else { "partial_failure" };
+        let status = if apply_errors.is_empty() {
+            "success"
+        } else {
+            "partial_failure"
+        };
         tracing::info!(
             status = status,
             elapsed_ms = elapsed.as_millis(),
@@ -623,7 +627,10 @@ fn execute_command(
     }
 
     if !apply_errors.is_empty() {
-        Err(anyhow::anyhow!("Failed to apply changes to {} file(s)", apply_errors.len()))
+        Err(anyhow::anyhow!(
+            "Failed to apply changes to {} file(s)",
+            apply_errors.len()
+        ))
     } else {
         Ok(())
     }
@@ -1034,7 +1041,10 @@ fn config_log_path() -> Result<()> {
 
     println!("SedX Log File:");
     println!("  Path: {}", get_current_log_path().display());
-    println!("  Status: {}", if debug_enabled { "enabled" } else { "disabled" });
+    println!(
+        "  Status: {}",
+        if debug_enabled { "enabled" } else { "disabled" }
+    );
     println!();
 
     if !debug_enabled {
