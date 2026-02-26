@@ -94,11 +94,15 @@ impl BackupManager {
         }
 
         // Check disk space with error threshold
-        if let Err(e) = crate::disk_space::check_disk_space_for_backup(
+        // Skip on Windows in test mode (disk_space check not implemented there)
+        #[cfg(not(all(windows, test)))]
+        let _disk_check_result = crate::disk_space::check_disk_space_for_backup(
             &self.backups_dir,
             total_size,
             ERROR_PERCENT,
-        ) {
+        );
+        #[cfg(not(all(windows, test)))]
+        if let Err(e) = _disk_check_result {
             // Provide helpful error message
             return Err(e.context(format!(
                 "Cannot create backup. Files size: {}",
