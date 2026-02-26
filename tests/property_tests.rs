@@ -255,7 +255,7 @@ proptest! {
         let mut backup_mgr = BackupManager::with_directory(
             backup_dir.to_str().unwrap().to_string()
         ).unwrap();
-        let backup_id = backup_mgr.create_backup("s/foo/bar/", &[test_file.clone()]).unwrap();
+        let backup_id = backup_mgr.create_backup("s/foo/bar/", std::slice::from_ref(&test_file)).unwrap();
 
         // Modify the file
         fs::write(&test_file, "modified content").unwrap();
@@ -317,7 +317,7 @@ proptest! {
         let mut backup_mgr = BackupManager::with_directory(
             backup_dir.to_str().unwrap().to_string()
         ).unwrap();
-        let backup_id = backup_mgr.create_backup(&expression, &[test_file.clone()]).unwrap();
+        let backup_id = backup_mgr.create_backup(&expression, std::slice::from_ref(&test_file)).unwrap();
 
         // Get backup metadata
         let backups = backup_mgr.list_backups().unwrap();
@@ -493,7 +493,7 @@ proptest! {
         fs::write(&file_path, "").unwrap();
 
         let parser = Parser::new(RegexFlavor::PCRE);
-        let expr = format!("s/a/b/"); // Simple, valid expression
+        let expr = "s/a/b/".to_string(); // Simple, valid expression
         let commands = parser.parse(&expr).unwrap();
 
         let mut processor = FileProcessor::new(commands);

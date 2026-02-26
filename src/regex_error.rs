@@ -187,60 +187,36 @@ impl EnhancedRegexError {
             } => {
                 match (sequence.as_str(), flavor) {
                     // BRE-specific issues
-                    ("\\(", RegexFlavor::PCRE) => Some(format!(
-                        "In PCRE mode (default), parentheses are meta-characters. \
+                    ("\\(", RegexFlavor::PCRE) => Some("In PCRE mode (default), parentheses are meta-characters. \
                             Use '(' directly, or use -B (BRE mode) if you meant '\\('. \
-                            For a literal '(', use '\\('."
-                    )),
-                    ("\\)", RegexFlavor::PCRE) => Some(format!(
-                        "In PCRE mode (default), ')' is a meta-character. \
+                            For a literal '(', use '\\('.".to_string()),
+                    ("\\)", RegexFlavor::PCRE) => Some("In PCRE mode (default), ')' is a meta-character. \
                             Use ')' directly, or use -B (BRE mode) if you meant '\\)'. \
-                            For a literal ')', use '\\)'."
-                    )),
-                    ("\\{", RegexFlavor::PCRE) => Some(format!(
-                        "In PCRE mode (default), '{{' starts a quantifier. \
-                            Use '{{' directly for quantifiers like 'a{{3}}', or use -B (BRE mode) if you meant '\\{{'."
-                    )),
-                    ("\\+", RegexFlavor::PCRE) => Some(format!(
-                        "In PCRE mode (default), '+' is a meta-character (one or more). \
+                            For a literal ')', use '\\)'.".to_string()),
+                    ("\\{", RegexFlavor::PCRE) => Some("In PCRE mode (default), '{' starts a quantifier. \
+                            Use '{' directly for quantifiers like 'a{3}', or use -B (BRE mode) if you meant '\\{'.".to_string()),
+                    ("\\+", RegexFlavor::PCRE) => Some("In PCRE mode (default), '+' is a meta-character (one or more). \
                             Use '+' directly, or use -B (BRE mode) if you meant '\\+' as a quantifier. \
-                            For a literal '+', use '\\+'."
-                    )),
-                    ("\\?", RegexFlavor::PCRE) => Some(format!(
-                        "In PCRE mode (default), '?' is a meta-character (zero or one). \
+                            For a literal '+', use '\\+'.".to_string()),
+                    ("\\?", RegexFlavor::PCRE) => Some("In PCRE mode (default), '?' is a meta-character (zero or one). \
                             Use '?' directly, or use -B (BRE mode) if you meant '\\?'. \
-                            For a literal '?', use '\\?'."
-                    )),
-                    ("\\|", RegexFlavor::PCRE) => Some(format!(
-                        "In PCRE mode (default), '|' is the alternation operator. \
+                            For a literal '?', use '\\?'.".to_string()),
+                    ("\\|", RegexFlavor::PCRE) => Some("In PCRE mode (default), '|' is the alternation operator. \
                             Use '|' directly, or use -B (BRE mode) if you meant '\\|'. \
-                            For a literal '|', use '\\|'."
-                    )),
+                            For a literal '|', use '\\|'.".to_string()),
                     // BRE-specific issues
-                    ("(", RegexFlavor::BRE) => Some(format!(
-                        "In BRE mode (-B), parentheses must be escaped: '\\(' not '('. \
-                            Use -E (ERE mode) or remove -B for PCRE mode to use '(' directly."
-                    )),
-                    (")", RegexFlavor::BRE) => Some(format!(
-                        "In BRE mode (-B), parentheses must be escaped: '\\)' not ')'. \
-                            Use -E (ERE mode) or remove -B for PCRE mode to use ')' directly."
-                    )),
-                    ("{", RegexFlavor::BRE) => Some(format!(
-                        "In BRE mode (-B), braces must be escaped: '\\{{' not '{{'. \
-                            Use -E (ERE mode) or remove -B for PCRE mode."
-                    )),
-                    ("+", RegexFlavor::BRE) => Some(format!(
-                        "In BRE mode (-B), '+' is a literal character. \
-                            Use '\\+' for the quantifier (one or more), or use -E for ERE mode."
-                    )),
-                    ("?", RegexFlavor::BRE) => Some(format!(
-                        "In BRE mode (-B), '?' is a literal character. \
-                            Use '\\?' for the quantifier (zero or one), or use -E for ERE mode."
-                    )),
-                    ("|", RegexFlavor::BRE) => Some(format!(
-                        "In BRE mode (-B), '|' is a literal character. \
-                            Use '\\|' for alternation, or use -E for ERE mode."
-                    )),
+                    ("(", RegexFlavor::BRE) => Some("In BRE mode (-B), parentheses must be escaped: '\\(' not '('. \
+                            Use -E (ERE mode) or remove -B for PCRE mode to use '(' directly.".to_string()),
+                    (")", RegexFlavor::BRE) => Some("In BRE mode (-B), parentheses must be escaped: '\\)' not ')'. \
+                            Use -E (ERE mode) or remove -B for PCRE mode to use ')' directly.".to_string()),
+                    ("{", RegexFlavor::BRE) => Some("In BRE mode (-B), braces must be escaped: '\\{' not '{'. \
+                            Use -E (ERE mode) or remove -B for PCRE mode.".to_string()),
+                    ("+", RegexFlavor::BRE) => Some("In BRE mode (-B), '+' is a literal character. \
+                            Use '\\+' for the quantifier (one or more), or use -E for ERE mode.".to_string()),
+                    ("?", RegexFlavor::BRE) => Some("In BRE mode (-B), '?' is a literal character. \
+                            Use '\\?' for the quantifier (zero or one), or use -E for ERE mode.".to_string()),
+                    ("|", RegexFlavor::BRE) => Some("In BRE mode (-B), '|' is a literal character. \
+                            Use '\\|' for alternation, or use -E for ERE mode.".to_string()),
                     // Generic escape issues
                     (seq, _) => Some(format!(
                         "The escape sequence '{}' is not recognized. \
@@ -256,44 +232,30 @@ impl EnhancedRegexError {
                 position: _,
             } => {
                 if message.to_lowercase().contains("nothing to repeat") {
-                    Some(format!(
-                        "A quantifier (*, +, ?, {{n}}) has nothing to repeat. \
-                        Place it after a character or group, e.g., 'a*', '(foo)+', 'bar{{3}}'."
-                    ))
+                    Some("A quantifier (*, +, ?, {n}) has nothing to repeat. \
+                        Place it after a character or group, e.g., 'a*', '(foo)+', 'bar{3}'.".to_string())
                 } else if message.to_lowercase().contains("invalid range") {
-                    Some(format!(
-                        "Quantifier ranges must be valid: '{{n}}', '{{n,}}', or '{{n,m}}' where n <= m. \
-                        Example: 'a{{2,5}}' matches 2 to 5 'a's."
-                    ))
+                    Some("Quantifier ranges must be valid: '{n}', '{n,}', or '{n,m}' where n <= m. \
+                        Example: 'a{2,5}' matches 2 to 5 'a's.".to_string())
                 } else {
-                    Some(format!(
-                        "Check your quantifier syntax: * (zero or more), + (one or more), ? (zero or one), {{n,m}} (n to m times)."
-                    ))
+                    Some("Check your quantifier syntax: * (zero or more), + (one or more), ? (zero or one), {n,m} (n to m times).".to_string())
                 }
             }
 
-            RegexErrorType::LookaroundError { message: _, .. } => Some(format!(
-                "Rust's regex crate (used by SedX) has limited lookaround support. \
+            RegexErrorType::LookaroundError { message: _, .. } => Some("Rust's regex crate (used by SedX) has limited lookaround support. \
                     Fixed-width lookbehinds are supported: (?<=pattern), (?<!pattern). \
                     Lookaheads are supported: (?=pattern), (?!pattern). \
-                    Variable-width lookbehinds are NOT supported."
-            )),
+                    Variable-width lookbehinds are NOT supported.".to_string()),
 
             RegexErrorType::InvalidBackreference { message: _, .. } => match flavor {
-                RegexFlavor::BRE => Some(format!(
-                    "In BRE mode, backreferences use \\1, \\2, etc. in patterns. \
+                RegexFlavor::BRE => Some("In BRE mode, backreferences use \\1, \\2, etc. in patterns. \
                             Make sure you have capturing groups \\(...\\) before referencing them. \
-                            Note: SedX converts BRE to PCRE internally, so \\1 becomes $1."
-                )),
-                RegexFlavor::ERE => Some(format!(
-                    "In ERE mode, backreferences use \\1, \\2, etc. in replacement strings. \
+                            Note: SedX converts BRE to PCRE internally, so \\1 becomes $1.".to_string()),
+                RegexFlavor::ERE => Some("In ERE mode, backreferences use \\1, \\2, etc. in replacement strings. \
                             In patterns, use $1, $2, etc. for backreferences. \
-                            Make sure you have capturing groups before referencing them."
-                )),
-                RegexFlavor::PCRE => Some(format!(
-                    "In PCRE mode, backreferences use $1, $2, etc. in both patterns and replacements. \
-                            Make sure you have capturing groups (...) before referencing them."
-                )),
+                            Make sure you have capturing groups before referencing them.".to_string()),
+                RegexFlavor::PCRE => Some("In PCRE mode, backreferences use $1, $2, etc. in both patterns and replacements. \
+                            Make sure you have capturing groups (...) before referencing them.".to_string()),
             },
 
             RegexErrorType::Syntax { message: _, .. } => {
@@ -305,12 +267,10 @@ impl EnhancedRegexError {
                 } else if pattern.contains('*') && pattern.ends_with('*') {
                     Some("Quantifier '*' at the end of pattern has nothing to repeat.".to_string())
                 } else {
-                    Some(format!(
-                        "Check your regex syntax. Common issues: \
-                        - Escape special characters: . + * ? ^ $ | ( ) [ ] {{ }} \\ \
-                        - Use proper quantifiers: a* a+ a? a{{3}} \
-                        - Close all groups and character classes"
-                    ))
+                    Some("Check your regex syntax. Common issues: \
+                        - Escape special characters: . + * ? ^ $ | ( ) [ ] { } \\ \
+                        - Use proper quantifiers: a* a+ a? a{3} \
+                        - Close all groups and character classes".to_string())
                 }
             }
 
@@ -337,11 +297,11 @@ impl EnhancedRegexError {
                 message,
                 position: _,
             } => {
-                output.push_str(&format!("  Type: Syntax error\n"));
+                output.push_str("  Type: Syntax error\n");
                 output.push_str(&format!("  Details: {}\n", message));
             }
             RegexErrorType::InvalidEscape { sequence, position } => {
-                output.push_str(&format!("  Type: Invalid escape sequence\n"));
+                output.push_str("  Type: Invalid escape sequence\n");
                 output.push_str(&format!(
                     "  Sequence: '{}' at position {}\n",
                     sequence, position
@@ -351,7 +311,7 @@ impl EnhancedRegexError {
                 delimiter,
                 position,
             } => {
-                output.push_str(&format!("  Type: Unclosed delimiter\n"));
+                output.push_str("  Type: Unclosed delimiter\n");
                 output.push_str(&format!(
                     "  Missing closing '{}' for opening '{}' at position {}\n",
                     match delimiter {
@@ -368,19 +328,19 @@ impl EnhancedRegexError {
                 message,
                 position: _,
             } => {
-                output.push_str(&format!("  Type: Invalid quantifier\n"));
+                output.push_str("  Type: Invalid quantifier\n");
                 output.push_str(&format!("  Details: {}\n", message));
             }
             RegexErrorType::LookaroundError { message, .. } => {
-                output.push_str(&format!("  Type: Lookaround error\n"));
+                output.push_str("  Type: Lookaround error\n");
                 output.push_str(&format!("  Details: {}\n", message));
             }
             RegexErrorType::InvalidBackreference { message, .. } => {
-                output.push_str(&format!("  Type: Backreference error\n"));
+                output.push_str("  Type: Backreference error\n");
                 output.push_str(&format!("  Details: {}\n", message));
             }
             RegexErrorType::Other { message } => {
-                output.push_str(&format!("  Type: Other error\n"));
+                output.push_str("  Type: Other error\n");
                 output.push_str(&format!("  Details: {}\n", message));
             }
         }

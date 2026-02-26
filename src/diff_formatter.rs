@@ -1145,7 +1145,7 @@ mod tests {
         let result = DiffFormatter::filter_lines_with_context(&all_lines, 1);
 
         // Should handle boundaries correctly
-        assert!(result.len() > 0);
+        assert!(!result.is_empty());
         // First result should be near line 1
         assert_eq!(result[0].0, 1);
         // Last result should be near line 4
@@ -1162,7 +1162,7 @@ mod tests {
         let result = DiffFormatter::filter_lines_with_context(&all_lines, 1);
 
         // Should include the change and context
-        assert!(result.len() >= 1);
+        assert!(!result.is_empty());
         let has_modified = result
             .iter()
             .any(|(_, content, ct)| content == "modified" && *ct == ChangeType::Modified);

@@ -502,6 +502,7 @@ pub fn parse_args() -> Result<Args> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_snake_case)] // BRE, ERE, and PCRE are well-known acronyms
+#[allow(clippy::upper_case_acronyms)] // These are industry-standard acronyms
 pub enum RegexFlavor {
     /// Basic Regular Expressions (GNU sed compatible)
     BRE,

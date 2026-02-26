@@ -356,7 +356,7 @@ mod tests {
         let test_file = create_test_file(temp_dir.path(), "test.txt", "Hello, World!");
 
         let backup_id = manager
-            .create_backup("s/foo/bar/", &[test_file.clone()])
+            .create_backup("s/foo/bar/", std::slice::from_ref(&test_file))
             .unwrap();
 
         // Verify backup directory exists
@@ -424,7 +424,7 @@ mod tests {
         let large_file = create_test_file(temp_dir.path(), "large.txt", &large_content);
 
         let backup_id = manager
-            .create_backup("s/x/y/", &[large_file.clone()])
+            .create_backup("s/x/y/", std::slice::from_ref(&large_file))
             .unwrap();
 
         let backup_dir = manager.backups_dir().join(&backup_id);
@@ -495,12 +495,12 @@ mod tests {
         let test_file = create_test_file(temp_dir.path(), "test.txt", "content");
 
         let id1 = manager
-            .create_backup("s/a/b/", &[test_file.clone()])
+            .create_backup("s/a/b/", std::slice::from_ref(&test_file))
             .unwrap();
         // Small delay to ensure different timestamps
         std::thread::sleep(std::time::Duration::from_millis(10));
         let id2 = manager
-            .create_backup("s/c/d/", &[test_file.clone()])
+            .create_backup("s/c/d/", std::slice::from_ref(&test_file))
             .unwrap();
 
         assert_ne!(id1, id2, "Backup IDs should be unique");
@@ -517,7 +517,7 @@ mod tests {
 
         // Create backup
         let backup_id = manager
-            .create_backup("s/foo/bar/", &[test_file.clone()])
+            .create_backup("s/foo/bar/", std::slice::from_ref(&test_file))
             .unwrap();
 
         // Modify the original file
@@ -595,7 +595,7 @@ mod tests {
         }
 
         let backup_id = manager
-            .create_backup("s/a/b/", &[test_file.clone()])
+            .create_backup("s/a/b/", std::slice::from_ref(&test_file))
             .unwrap();
 
         // Modify and change permissions
@@ -650,11 +650,11 @@ mod tests {
         let test_file = create_test_file(temp_dir.path(), "test.txt", "content");
 
         let id1 = manager
-            .create_backup("s/a/b/", &[test_file.clone()])
+            .create_backup("s/a/b/", std::slice::from_ref(&test_file))
             .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
         let id2 = manager
-            .create_backup("s/c/d/", &[test_file.clone()])
+            .create_backup("s/c/d/", std::slice::from_ref(&test_file))
             .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
         let id3 = manager.create_backup("s/e/f/", &[test_file]).unwrap();
@@ -688,11 +688,11 @@ mod tests {
         let test_file = create_test_file(temp_dir.path(), "test.txt", "content");
 
         manager
-            .create_backup("s/a/b/", &[test_file.clone()])
+            .create_backup("s/a/b/", std::slice::from_ref(&test_file))
             .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
         manager
-            .create_backup("s/c/d/", &[test_file.clone()])
+            .create_backup("s/c/d/", std::slice::from_ref(&test_file))
             .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
         manager.create_backup("s/e/f/", &[test_file]).unwrap();
@@ -707,11 +707,11 @@ mod tests {
         let test_file = create_test_file(temp_dir.path(), "test.txt", "content");
 
         let id1 = manager
-            .create_backup("s/a/b/", &[test_file.clone()])
+            .create_backup("s/a/b/", std::slice::from_ref(&test_file))
             .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
         let id2 = manager
-            .create_backup("s/c/d/", &[test_file.clone()])
+            .create_backup("s/c/d/", std::slice::from_ref(&test_file))
             .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
         let id3 = manager.create_backup("s/e/f/", &[test_file]).unwrap();
@@ -804,7 +804,7 @@ mod tests {
         for i in 0..5 {
             backup_ids.push(
                 manager
-                    .create_backup(&format!("s/test{i}/", i = i), &[test_file.clone()])
+                    .create_backup(&format!("s/test{i}/", i = i), std::slice::from_ref(&test_file))
                     .unwrap(),
             );
             std::thread::sleep(std::time::Duration::from_millis(10));
@@ -831,7 +831,7 @@ mod tests {
         // Create exactly 3 backups
         for i in 0..3 {
             manager
-                .create_backup(&format!("s/test{}/", i), &[test_file.clone()])
+                .create_backup(&format!("s/test{}/", i), std::slice::from_ref(&test_file))
                 .unwrap();
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
@@ -871,7 +871,7 @@ mod tests {
         // Create some backups
         for _ in 0..3 {
             manager
-                .create_backup("s/a/b/", &[test_file.clone()])
+                .create_backup("s/a/b/", std::slice::from_ref(&test_file))
                 .unwrap();
         }
 
@@ -1027,7 +1027,7 @@ mod tests {
         for i in 0..5 {
             backup_ids.push(
                 manager
-                    .create_backup(&format!("s/test{}/", i), &[test_file.clone()])
+                    .create_backup(&format!("s/test{}/", i), std::slice::from_ref(&test_file))
                     .unwrap(),
             );
             std::thread::sleep(std::time::Duration::from_millis(10));
@@ -1050,7 +1050,7 @@ mod tests {
         let (mut manager, _temp_dir) = create_test_manager();
 
         let backup_id = manager.create_backup("s/a/b/", &[]);
-        let backup_dir = manager.backups_dir().join(&backup_id.as_ref().unwrap());
+        let backup_dir = manager.backups_dir().join(backup_id.as_ref().unwrap());
 
         // Backup should be created even with no files
         assert!(
@@ -1072,7 +1072,7 @@ mod tests {
         let test_file = create_test_file(temp_dir.path(), "test.txt", "original");
 
         let backup_id = manager
-            .create_backup("s/a/b/", &[test_file.clone()])
+            .create_backup("s/a/b/", std::slice::from_ref(&test_file))
             .unwrap();
 
         // Manually remove the backup file (simulating corruption)
@@ -1142,11 +1142,11 @@ mod tests {
         let test_file = create_test_file(temp_dir.path(), "test.txt", "content");
 
         let id1 = manager
-            .create_backup("s/a/b/", &[test_file.clone()])
+            .create_backup("s/a/b/", std::slice::from_ref(&test_file))
             .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
         let id2 = manager
-            .create_backup("s/x/y/", &[test_file.clone()])
+            .create_backup("s/x/y/", std::slice::from_ref(&test_file))
             .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
         let id3 = manager.create_backup("s/1/2/", &[test_file]).unwrap();

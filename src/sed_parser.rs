@@ -524,8 +524,7 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
                 let unknown_char = command_char;
                 let suggestion = match unknown_char {
                     c if c.is_ascii_alphabetic() => {
-                        format!(
-                            "Did you mean:\n\
+                        "Did you mean:\n\
                              - Substitution: s/pattern/replacement/[flags]\n\
                              - Delete: d\n\
                              - Print: p\n\
@@ -533,20 +532,17 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
                              - Append (after line): 5a\\text\n\
                              - Change line: 5c\\new text\n\
                              - Quit: q or Q\n\
-                             See 'sedx --help' for all commands"
-                        )
+                             See 'sedx --help' for all commands".to_string()
                     }
                     '0'..='9' => {
                         "Numbers alone are not commands. Use a command character after the line number (e.g., '5d' to delete line 5)".to_string()
                     }
                     _ => {
-                        format!(
-                            "Valid commands: s (substitute), d (delete), p (print),\n\
+                        "Valid commands: s (substitute), d (delete), p (print),\n\
                              i (insert), a (append), c (change), q (quit),\n\
                              h/H (hold), g/G (get), x (exchange), n/N (next),\n\
                              b/t/T (branch), r/R (read file), w/W (write file),\n\
-                             = (line number), F (filename), z (clear pattern space)"
-                        )
+                             = (line number), F (filename), z (clear pattern space)".to_string()
                     }
                 };
 
@@ -585,7 +581,7 @@ fn parse_substitution(cmd: &str) -> Result<SedCommand> {
     let s_pos = s_pos.ok_or_else(|| anyhow!("{}", format_parse_error(
         cmd,
         None,
-        &format!("'s' command not followed by a valid delimiter"),
+        "'s' command not followed by a valid delimiter",
         Some("Substitution format: s<delimiter>pattern<delimiter>replacement<delimiter>[flags]\nDelimiters: / (slash), # (hash), : (colon), | (pipe)\nExample: s/foo/bar/ or s#old#new#g"),
     )))?;
 
@@ -598,7 +594,7 @@ fn parse_substitution(cmd: &str) -> Result<SedCommand> {
         .ok_or_else(|| anyhow!("{}", format_parse_error(
             cmd,
             Some(s_pos + 1),
-            &format!("missing delimiter after 's'"),
+            "missing delimiter after 's'",
             Some("Expected format: s<delimiter>pattern<delimiter>replacement<delimiter>[flags]\nExample: s/foo/bar/ or s#old#new#g"),
         )))?;
 
@@ -625,7 +621,7 @@ fn parse_substitution(cmd: &str) -> Result<SedCommand> {
                 ),
             ),
             1 => (
-                format!("missing closing delimiter for replacement"),
+                "missing closing delimiter for replacement".to_string(),
                 Some(
                     "You need to close the replacement with the delimiter:\n  s/pattern/replacement/\n                      ^ (add this)",
                 ),
@@ -637,7 +633,7 @@ fn parse_substitution(cmd: &str) -> Result<SedCommand> {
                 // So: s/pattern/replacement/ has 3 delimiters (positions of / / /)
                 // If we only have 2, we're missing the final delimiter
                 (
-                    format!("missing final delimiter to close the substitution"),
+                    "missing final delimiter to close the substitution".to_string(),
                     Some(
                         "Add the final delimiter:\n  s/pattern/replacement/\n                        ^ (add this)",
                     ),

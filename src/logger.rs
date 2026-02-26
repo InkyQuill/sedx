@@ -116,9 +116,10 @@ mod tests {
     fn test_get_current_log_path() {
         let path = get_current_log_path();
         // Should return either /var/log/sedx.log or ~/.sedx/sedx.log
+        #[allow(clippy::cmp_owned)]
+        let is_var_log = path == PathBuf::from("/var/log/sedx.log");
         assert!(
-            path == PathBuf::from("/var/log/sedx.log") ||
-            path.ends_with(".sedx/sedx.log"),
+            is_var_log || path.ends_with(".sedx/sedx.log"),
             "Log path should be either /var/log/sedx.log or in .sedx directory, got: {}",
             path.display()
         );
