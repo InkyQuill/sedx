@@ -137,6 +137,7 @@ pub fn get_disk_space(_path: &Path) -> Result<DiskSpaceInfo> {
 ///
 /// # Returns
 /// `Ok(())` if there's enough space, `Err` otherwise
+#[cfg(unix)]
 pub fn check_disk_space_for_backup(
     backup_dir: &Path,
     file_size: u64,
