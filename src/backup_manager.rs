@@ -106,10 +106,10 @@ impl BackupManager {
             )));
         }
 
-        // Generate unique backup ID
+        // Generate unique backup ID with millisecond precision for deterministic sorting
         let id = format!(
             "{}-{}",
-            Utc::now().format("%Y%m%d-%H%M%S"),
+            Utc::now().format("%Y%m%d-%H%M%S%3f"),
             Uuid::new_v4().to_string().split_at(8).0
         );
         let backup_dir = self.backups_dir.join(&id);
@@ -238,6 +238,13 @@ impl BackupManager {
             }
         }
 
+        // Sort by timestamp to ensure chronological order
+        // When timestamps are equal (rare), use ID as tiebreaker for consistency
+        backups.sort_by(|a, b| {
+            a.timestamp
+                .cmp(&b.timestamp)
+                .then_with(|| a.id.cmp(&b.id))
+        });
         Ok(backups)
     }
 
@@ -1092,11 +1099,11 @@ mod tests {
 
         let backup_id = manager.create_backup("s/a/b/", &[test_file]).unwrap();
 
-        // Verify ID format: YYYYMMDD-HHMMSS-XXXXXXXX
-        // e.g., 20240201-120000-abc12345
+        // Verify ID format: YYYYMMDD-HHMMSSmmm-XXXXXXXX
+        // e.g., 20240201-120000123-abc12345
         assert!(
-            backup_id.len() >= 17,
-            "Backup ID should be at least 17 characters"
+            backup_id.len() >= 20,
+            "Backup ID should be at least 20 characters"
         );
         assert!(backup_id.contains('-'), "Backup ID should contain hyphens");
 
@@ -1104,8 +1111,8 @@ mod tests {
         let parts: Vec<&str> = backup_id.split('-').collect();
         assert_eq!(parts[0].len(), 8, "First part should be 8 digits (date)");
 
-        // Second part should be time format (6 digits)
-        assert_eq!(parts[1].len(), 6, "Second part should be 6 digits (time)");
+        // Second part should be time format with milliseconds (9+ digits)
+        assert!(parts[1].len() >= 9, "Second part should be at least 9 digits (time with milliseconds)");
     }
 
     #[test]
