@@ -124,6 +124,10 @@ pub struct ProcessingConfig {
     /// Enable streaming mode
     #[serde(default = "default_streaming")]
     pub streaming: Option<bool>,
+
+    /// Enable debug logging to file
+    #[serde(default)]
+    pub debug: Option<bool>,
 }
 
 impl Default for ProcessingConfig {
@@ -132,6 +136,7 @@ impl Default for ProcessingConfig {
             context_lines: Some(2),
             max_memory_mb: Some(100),
             streaming: Some(true),
+            debug: Some(false),
         }
     }
 }
@@ -222,6 +227,11 @@ max_memory_mb = 100
 # When true, large files are processed with constant memory usage.
 # When false, all files are loaded into memory (faster but uses more RAM).
 streaming = true
+
+# Enable debug logging (default: false)
+# When true, operations are logged to /var/log/sedx.log (or ~/.sedx/sedx.log)
+# Logs include: expression, status, files processed, errors, and execution time
+debug = false
 "#
 }
 
@@ -371,6 +381,7 @@ mod tests {
         assert_eq!(config.processing.context_lines, Some(2));
         assert_eq!(config.processing.max_memory_mb, Some(100));
         assert_eq!(config.processing.streaming, Some(true));
+        assert_eq!(config.processing.debug, Some(false));
     }
 
     // =========================================================================
@@ -541,6 +552,7 @@ mod tests {
                 context_lines: None,
                 max_memory_mb: None,
                 streaming: None,
+                debug: None,
             },
         };
         assert!(validate_config(&config).is_ok());
@@ -604,6 +616,7 @@ mod tests {
                 context_lines: Some(5),
                 max_memory_mb: Some(200),
                 streaming: Some(false),
+                debug: Some(false),
             },
         };
         let toml_str = toml::to_string_pretty(&config).unwrap();
@@ -885,10 +898,12 @@ mod tests {
             context_lines: Some(8),
             max_memory_mb: Some(500),
             streaming: Some(false),
+            debug: Some(true),
         };
         assert_eq!(config.context_lines, Some(8));
         assert_eq!(config.max_memory_mb, Some(500));
         assert_eq!(config.streaming, Some(false));
+        assert_eq!(config.debug, Some(true));
     }
 
     // =========================================================================
@@ -1041,6 +1056,7 @@ mod tests {
                 context_lines: None,
                 max_memory_mb: None,
                 streaming: None,
+                debug: None,
             },
         };
 

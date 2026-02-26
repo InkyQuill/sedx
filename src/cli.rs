@@ -238,14 +238,20 @@ CONFIGURATION OPTIONS:
     context_lines = 2             # Context lines to show (max 10)
     max_memory_mb = 100           # Max memory for streaming (MB)
     streaming = true              # Enable streaming for large files
+    debug = false                 # Enable debug logging
 
 EXAMPLES:
   sedx config                     Edit configuration
-  sedx config --show              Show current configuration")]
+  sedx config --show              Show current configuration
+  sedx config --log-path          Show log file location")]
     Config {
         /// Show current configuration without editing
         #[arg(long = "show")]
         show: bool,
+
+        /// Show log file path
+        #[arg(long = "log-path")]
+        log_path: bool,
     },
 }
 
@@ -381,7 +387,7 @@ pub fn parse_args() -> Result<Args> {
         Some(Commands::Rollback { id }) => Ok(Args::Rollback { id }),
         Some(Commands::History) => Ok(Args::History),
         Some(Commands::Status) => Ok(Args::Status),
-        Some(Commands::Config { show }) => Ok(Args::Config { show }),
+        Some(Commands::Config { show, log_path }) => Ok(Args::Config { show, log_path }),
         Some(Commands::Backup { action }) => match action {
             BackupAction::List { verbose } => Ok(Args::BackupList { verbose }),
             BackupAction::Show { id } => Ok(Args::BackupShow { id }),
@@ -544,5 +550,6 @@ pub enum Args {
     },
     Config {
         show: bool,
+        log_path: bool,
     },
 }

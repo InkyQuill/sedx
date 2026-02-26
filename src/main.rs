@@ -8,6 +8,7 @@ mod diff_formatter;
 mod disk_space;
 mod ere_converter;
 mod file_processor;
+mod logger;
 mod parser;
 mod regex_error;
 mod sed_parser;
@@ -16,14 +17,37 @@ use anyhow::{Context, Result};
 use cli::{Args, RegexFlavor, parse_args};
 use command::{Address, Command};
 use config::{config_file_path, ensure_complete_config, load_config};
+use logger::init_debug_logging;
 use parser::Parser;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::process::Command as ProcessCommand;
+use std::time::Instant;
 
 fn main() -> Result<()> {
     let args = parse_args()?;
+
+    // Initialize debug logging early (before any operations)
+    // We need to check the config, but only for the Execute command
+    let log_path = if matches!(args, Args::Execute { .. }) {
+        // Load config to check if debug is enabled
+        let config = load_config();
+        match config {
+            Ok(cfg) => {
+                let debug_enabled = cfg.processing.debug.unwrap_or(false);
+                init_debug_logging(debug_enabled)?
+            }
+            Err(_) => None, // If config fails, no logging
+        }
+    } else {
+        None
+    };
+
+    // Log the log path if we're in debug mode and executing
+    if let Some(ref path) = log_path {
+        tracing::info!("Debug logging enabled. Log file: {}", path.display());
+    }
 
     match args {
         Args::Execute {
@@ -84,8 +108,10 @@ fn main() -> Result<()> {
         } => {
             backup_prune(keep, keep_days, force)?;
         }
-        Args::Config { show } => {
-            if show {
+        Args::Config { show, log_path } => {
+            if log_path {
+                config_log_path()?;
+            } else if show {
                 config_show()?;
             } else {
                 config_edit()?;
@@ -98,9 +124,37 @@ fn main() -> Result<()> {
 
 /// Process stdin and write to stdout (pipeline mode, like sed)
 fn execute_stdin(expression: &str, regex_flavor: RegexFlavor, quiet: bool) -> Result<()> {
+    // Check if debug logging is enabled
+    let debug_enabled = load_config()
+        .map(|c| c.processing.debug.unwrap_or(false))
+        .unwrap_or(false);
+
+    let start_time = Instant::now();
+
+    if debug_enabled {
+        tracing::info!(
+            expression = expression,
+            regex_flavor = ?regex_flavor,
+            mode = "stdin",
+            "Stdin processing started"
+        );
+    }
+
     // Parse sed expression
     let parser = Parser::new(regex_flavor);
-    let commands = parser.parse(expression)?;
+    let commands = match parser.parse(expression) {
+        Ok(cmds) => cmds,
+        Err(e) => {
+            if debug_enabled {
+                tracing::error!(
+                    expression = expression,
+                    error = %e,
+                    "Failed to parse expression"
+                );
+            }
+            return Err(e.context("Failed to parse expression"));
+        }
+    };
 
     // Read all input from stdin
     let mut input = String::new();
@@ -113,10 +167,21 @@ fn execute_stdin(expression: &str, regex_flavor: RegexFlavor, quiet: bool) -> Re
     processor.set_no_default_output(quiet); // Wire up -n flag
 
     let result_lines = processor.apply_cycle_based(lines)?;
+    let output_line_count = result_lines.len();
 
     // Write output to stdout
     for line in result_lines {
         println!("{}", line);
+    }
+
+    if debug_enabled {
+        let elapsed = start_time.elapsed();
+        tracing::info!(
+            status = "success",
+            output_lines = output_line_count,
+            elapsed_ms = elapsed.as_millis(),
+            "Stdin processing completed"
+        );
     }
 
     Ok(())
@@ -225,15 +290,50 @@ fn execute_command(
     backup_dir: Option<String>,
     quiet: bool,
 ) -> Result<()> {
+    let start_time = Instant::now();
+
     // Load configuration file
     let config = load_config()?;
 
     // Use backup_dir from config if not specified via CLI
     let backup_dir = backup_dir.or_else(|| config.backup.backup_dir.clone());
 
+    // Check if debug logging is enabled
+    let debug_enabled = config.processing.debug.unwrap_or(false);
+
+    // Log the start of operation
+    if debug_enabled {
+        tracing::info!(
+            expression = expression,
+            regex_flavor = ?regex_flavor,
+            dry_run = dry_run,
+            files_count = files.len(),
+            "Operation started"
+        );
+    }
+
     // Parse sed expression using unified parser
     let parser = Parser::new(regex_flavor);
-    let commands = parser.parse(expression)?;
+    let commands = match parser.parse(expression) {
+        Ok(cmds) => cmds,
+        Err(e) => {
+            if debug_enabled {
+                tracing::error!(
+                    expression = expression,
+                    error = %e,
+                    "Failed to parse expression"
+                );
+            }
+            return Err(e.context("Failed to parse expression"));
+        }
+    };
+
+    if debug_enabled {
+        tracing::info!(
+            command_count = commands.len(),
+            "Expression parsed successfully"
+        );
+    }
 
     // Check if commands can modify files
     // Commands like 'p', 'n', 'q', 'Q', '=', 'l' only read/print, don't modify
@@ -254,6 +354,13 @@ fn execute_command(
         let metadata = match fs::metadata(file_path) {
             Ok(meta) => meta,
             Err(e) => {
+                if debug_enabled {
+                    tracing::warn!(
+                        file = %file_path.display(),
+                        error = %e,
+                        "Failed to read file"
+                    );
+                }
                 eprintln!("Error reading file {}: {}", file_path.display(), e);
                 continue;
             }
@@ -309,6 +416,13 @@ fn execute_command(
         match diff {
             Ok(diff) => diffs.push(diff),
             Err(e) => {
+                if debug_enabled {
+                    tracing::error!(
+                        file = %file_path.display(),
+                        error = %e,
+                        "Failed to process file"
+                    );
+                }
                 eprintln!("Error processing {}: {}", file_path.display(), e);
             }
         }
@@ -319,8 +433,19 @@ fn execute_command(
     let has_printed_lines: bool = diffs.iter().any(|d| !d.printed_lines.is_empty());
 
     if total_changes == 0 && !has_printed_lines {
+        if debug_enabled {
+            tracing::info!("No changes would be made");
+        }
         println!("No changes would be made.");
         return Ok(());
+    }
+
+    if debug_enabled {
+        tracing::info!(
+            total_changes = total_changes,
+            files_processed = diffs.len(),
+            "Changes detected"
+        );
     }
 
     // Show preview (always show in dry-run or interactive mode)
@@ -345,6 +470,9 @@ fn execute_command(
 
         let input = input.trim().to_lowercase();
         if input != "y" && input != "yes" {
+            if debug_enabled {
+                tracing::info!("User declined changes in interactive mode");
+            }
             println!("Changes not applied.");
             return Ok(());
         }
@@ -352,16 +480,25 @@ fn execute_command(
 
     // Dry run mode: don't apply
     if dry_run {
+        if debug_enabled {
+            tracing::info!("Dry run completed, no changes applied");
+        }
         return Ok(());
     }
 
     // Execute mode: apply with backup (unless --no-backup --force)
     let backup_id = if no_backup {
         // Skip backup creation
+        if debug_enabled {
+            tracing::warn!("Backup skipped (--no-backup flag)");
+        }
         println!("⚠️  Skipping backup (changes cannot be undone)");
         None
     } else if !can_modify_files {
         // Skip backup if commands don't modify files (optimization)
+        if debug_enabled {
+            tracing::info!("No backup created (read-only command)");
+        }
         println!("ℹ️  No backup needed (read-only command)");
         None
     } else {
@@ -373,12 +510,28 @@ fn execute_command(
         };
 
         // Create backup BEFORE applying changes
-        let id = backup_manager.create_backup(expression, &file_paths)?;
-        println!("✅ Backup created: {}", id);
-        Some(id)
+        match backup_manager.create_backup(expression, &file_paths) {
+            Ok(id) => {
+                if debug_enabled {
+                    tracing::info!(backup_id = %id, "Backup created");
+                }
+                println!("✅ Backup created: {}", id);
+                Some(id)
+            }
+            Err(e) => {
+                if debug_enabled {
+                    tracing::error!(
+                        error = %e,
+                        "Failed to create backup"
+                    );
+                }
+                return Err(e);
+            }
+        }
     };
 
     // Apply changes
+    let mut apply_errors = Vec::new();
     for file_path in &file_paths {
         if streaming_files.contains(file_path) {
             // Streaming files: Re-process with dry_run=false to apply changes
@@ -387,9 +540,25 @@ fn execute_command(
                     .with_context_size(context)
                     .with_dry_run(false); // Apply changes now
             match stream_processor.process_streaming_forced(file_path) {
-                Ok(_) => {}
+                Ok(_) => {
+                    if debug_enabled {
+                        tracing::debug!(
+                            file = %file_path.display(),
+                            mode = "streaming",
+                            "Changes applied successfully"
+                        );
+                    }
+                }
                 Err(e) => {
+                    if debug_enabled {
+                        tracing::error!(
+                            file = %file_path.display(),
+                            error = %e,
+                            "Failed to apply changes"
+                        );
+                    }
                     eprintln!("Error applying to {}: {}", file_path.display(), e);
+                    apply_errors.push((file_path.clone(), e));
                 }
             }
         } else {
@@ -398,9 +567,25 @@ fn execute_command(
                 file_processor::FileProcessor::with_regex_flavor(commands.clone(), regex_flavor);
             processor.set_no_default_output(quiet); // Wire up -n flag
             match processor.apply_to_file(file_path) {
-                Ok(_) => {}
+                Ok(_) => {
+                    if debug_enabled {
+                        tracing::debug!(
+                            file = %file_path.display(),
+                            mode = "in-memory",
+                            "Changes applied successfully"
+                        );
+                    }
+                }
                 Err(e) => {
+                    if debug_enabled {
+                        tracing::error!(
+                            file = %file_path.display(),
+                            error = %e,
+                            "Failed to apply changes"
+                        );
+                    }
                     eprintln!("Error applying to {}: {}", file_path.display(), e);
+                    apply_errors.push((file_path.clone(), e));
                 }
             }
         }
@@ -424,7 +609,24 @@ fn execute_command(
         println!("\nNo backup created - changes cannot be undone");
     }
 
-    Ok(())
+    // Log completion
+    let elapsed = start_time.elapsed();
+    if debug_enabled {
+        let status = if apply_errors.is_empty() { "success" } else { "partial_failure" };
+        tracing::info!(
+            status = status,
+            elapsed_ms = elapsed.as_millis(),
+            files_processed = file_paths.len() - apply_errors.len(),
+            errors = apply_errors.len(),
+            "Operation completed"
+        );
+    }
+
+    if !apply_errors.is_empty() {
+        Err(anyhow::anyhow!("Failed to apply changes to {} file(s)", apply_errors.len()))
+    } else {
+        Ok(())
+    }
 }
 
 /// Check if any command in the list can modify files
@@ -752,6 +954,11 @@ fn config_show() -> Result<()> {
     } else {
         println!("  streaming = (not set)");
     }
+    if let Some(debug) = config.processing.debug {
+        println!("  debug = {}", debug);
+    } else {
+        println!("  debug = (not set)");
+    }
 
     Ok(())
 }
@@ -815,6 +1022,30 @@ fn config_edit() -> Result<()> {
     validate_config(&config)?;
 
     println!("\n✅ Configuration is valid!");
+
+    Ok(())
+}
+
+fn config_log_path() -> Result<()> {
+    use logger::get_current_log_path;
+
+    let config = load_config()?;
+    let debug_enabled = config.processing.debug.unwrap_or(false);
+
+    println!("SedX Log File:");
+    println!("  Path: {}", get_current_log_path().display());
+    println!("  Status: {}", if debug_enabled { "enabled" } else { "disabled" });
+    println!();
+
+    if !debug_enabled {
+        println!("Debug logging is currently disabled.");
+        println!("To enable it, edit ~/.sedx/config.toml and set:");
+        println!("\n  [processing]");
+        println!("  debug = true\n");
+        println!("After enabling, logs will be written to the path above.");
+    } else {
+        println!("Debug logging is enabled. Operations are being logged.");
+    }
 
     Ok(())
 }
