@@ -1,14 +1,25 @@
 [package]
 name = "sedx"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
+description = "A safe, modern replacement for GNU sed with automatic backups, preview mode, and rollback"
+authors = ["InkyQuill <inkyquill@users.noreply.github.com>"]
+license = "MIT"
+repository = "https://github.com/InkyQuill/sedx"
+homepage = "https://github.com/InkyQuill/sedx"
+documentation = "https://docs.rs/sedx"
+readme = "README.md"
+keywords = ["sed", "stream", "text-processing", "cli", "replacement"]
+categories = ["command-line-utilities", "text-processing", "development-tools"]
 include = [
     "src/**/*",
     "Cargo.toml",
     "LICENSE",
     "README.md",
     "man/sedx.1",
+    "completions/**/*",
 ]
+rust-version = "1.87"
 
 [[bin]]
 name = "sedx"
@@ -20,9 +31,19 @@ regex = "1.11"
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+toml = "0.8"
+tempfile = "3.17"
 chrono = { version = "0.4", features = ["serde"] }
-colored = "2.1"
-similar = "2.6"
-uuid = { version = "1.11", features = ["v4"] }
-dirs = "5.0"
-atty = "0.2"
+colored = "3.0"
+similar = "2.7"
+uuid = { version = "1.12", features = ["v4", "serde"] }
+dirs = "6.0"
+which = "7.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+proptest = "1.6"

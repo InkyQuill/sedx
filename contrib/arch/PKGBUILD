@@ -1,0 +1,50 @@
+# Maintainer: InkyQuill <inkyquill@users.noreply.github.com>
+pkgname=sedx
+pkgver=0.2.6_alpha
+pkgrel=1
+pkgdesc="A safe, modern replacement for GNU sed with automatic backups, preview mode, and rollback"
+arch=('x86_64' 'aarch64')
+url="https://github.com/InkyQuill/sedx"
+license=('MIT')
+depends=('gcc-libs')
+makedepends=('cargo')
+provides=('sedx')
+conflicts=('sedx' 'sedx-git')
+source=("$pkgname-$pkgver::git+https://github.com/InkyQuill/sedx.git#tag=v$pkgver")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  cargo fetch --locked
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  cargo build --release --locked --all-features
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  cargo test --release --locked
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+
+  # Install binary
+  install -Dm755 "target/release/sedx" "$pkgdir/usr/bin/sedx"
+
+  # Install man page
+  install -Dm644 "man/sedx.1" "$pkgdir/usr/share/man/man1/sedx.1"
+
+  # Install shell completions
+  install -Dm644 /dev/stdin "$pkgdir/usr/share/bash-completion/completions/sedx" < <(./target/release/sedx --completions bash)
+  install -Dm644 /dev/stdin "$pkgdir/usr/share/zsh/site-functions/_sedx" < <(./target/release/sedx --completions zsh)
+  install -Dm644 /dev/stdin "$pkgdir/usr/share/fish/vendor_completions.d/sedx.fish" < <(./target/release/sedx --completions fish)
+
+  # Install license
+  install -Dm644 "LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+  # Install documentation
+  install -Dm644 "README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

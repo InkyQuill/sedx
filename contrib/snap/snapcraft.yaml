@@ -1,0 +1,46 @@
+name: sedx
+base: core24
+version: "0.2.6-alpha"
+summary: Safe, modern replacement for GNU sed
+description: |
+  SedX is a safe, modern replacement for GNU sed written in Rust. It provides
+  safe file editing with automatic backups, dry-run mode, and easy rollback.
+
+  Key features:
+  - Automatic backups before every modification
+  - Dry-run mode to preview changes
+  - One-command rollback of any operation
+  - Colored diff output with context
+  - PCRE (modern regex) by default
+  - ~90% GNU sed compatibility
+  - Streaming mode for large files
+
+grade: stable
+confinement: strict
+
+parts:
+  sedx:
+    plugin: rust
+    source: .
+    build-packages:
+      - cargo
+      - rustc
+    override-build: |
+      cargo build --release
+      cargo install --path . --root $CRAFT_PART_INSTALL
+      mkdir -p $CRAFT_PART_INSTALL/usr/bin
+      mv $CRAFT_PART_INSTALL/bin/sedx $CRAFT_PART_INSTALL/usr/bin/sedx
+      # Install man page
+      mkdir -p $CRAFT_PART_INSTALL/usr/share/man/man1
+      cp man/sedx.1 $CRAFT_PART_INSTALL/usr/share/man/man1/
+
+apps:
+  sedx:
+    command: usr/bin/sedx
+    completer: usr/share/bash-completion/completions/sedx.bash
+
+plugs:
+  home-files:
+    interface: home
+  network:
+    interface: network

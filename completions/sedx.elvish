@@ -1,0 +1,67 @@
+# Elvish completion for SedX
+
+edit:completion:arg-completer[sedx] = [@args]{
+    fn subcommands {
+        put rollback history status backup config
+    }
+
+    fn backup-subcommands {
+        put list show restore remove prune
+    }
+
+    fn options {
+        put --help -h \
+            --version -V \
+            --dry-run -d \
+            --interactive -i \
+            --quiet -n --silent \
+            --context \
+            --no-context -nc \
+            --ere -E \
+            --bre -B \
+            --no-backup --force \
+            --backup-dir \
+            --streaming \
+            --no-streaming \
+            --expression -e \
+            --file -f
+    }
+
+    fn backup-ids {
+        try { sedx backup list | grep -oE '[0-9]{8}-[0-9]{6}-[a-z0-9]+' | head -20 } except { }
+    }
+
+    # Determine position in command
+    # Similar to awk '{print NR}'
+    # but using elvish's range builtin
+    # range 1 $num-args
+
+    # If we have no args, complete subcommands and options
+    if (eq (count $args) 0) {
+        put (subcommands) (options)
+        return
+    }
+
+    # If we have one arg, check if it's a subcommand
+    if (eq (count $args) 1) {
+        # Complete subcommands
+        put (subcommands) (options)
+        return
+    }
+
+    # If the second arg is a subcommand, complete accordingly
+    let cmd = $args[1]
+    if (eq $cmd backup) {
+        # If we have a third arg, complete it as backup subcommand or option
+        if (>= (count $args) 2) {
+            # After 'backup', suggest subcommands or options
+            put (backup-subcommands) (options)
+        }
+    } elif (eq $cmd rollback) {
+        # Suggest backup IDs
+        put (backup-ids)
+    } else {
+        # For other subcommands, just suggest options
+        put (options)
+    }
+}

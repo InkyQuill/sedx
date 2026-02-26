@@ -3,33 +3,54 @@
 .\" Copyright (c) 2025 InkyQuill
 .\" Licensed under MIT License
 .\"
-.TH "SEDX" "1" "January 2025" "sedx 0.1.0" "User Commands"
+.TH "SEDX" "1" "February 2025" "sedx 0.2.0-alpha" "User Commands"
 .SH NAME
 sedx \- Safe sed with preview, context, and automatic rollback
 .SH SYNOPSIS
 \fBsedx\fP [\fIOPTIONS\fP] \fIEXPRESSION\fP \fIFILE\fR...
-\fBsedx\fP [\fICOMMAND\fP]
+.PP
+\fBsedx\fP \fICOMMAND\fP [\fIARGUMENTS\fP]
+.PP
+\fBcat\fP \fIFILE\fP | \fBsedx\fP [\fIOPTIONS\fP] \fIEXPRESSION\fP
 .SH DESCRIPTION
 SedX is a modern replacement for GNU sed written in Rust. It provides safe file
 editing with automatic backups, dry-run mode, and easy rollback. Unlike sed,
 sedx shows you exactly what will change before applying modifications.
 .PP
-\fBFeatures:\fP
-.RS
+\fBKey Features:\fP
+.RS 4
 .IP \(bu 2
 Automatic backups before every modification
 .IP \(bu 2
-Dry-run mode to preview changes
+Dry-run mode to preview changes (default behavior)
 .IP \(bu 2
-Easy rollback with one command
+One-command rollback of any operation
 .IP \(bu 2
-Colored diff output
+Colored diff output with context
 .IP \(bu 2
-Extended regex by default (ERE)
+PCRE (modern regex) by default
+.IP \(bu 2
+ERE/BRE modes for GNU sed compatibility
 .IP \(bu 2
 ~90% GNU sed compatibility
+.IP \(bu 2
+Streaming mode for files >= 100MB (constant memory usage)
+.RE
+.PP
+\fBRegex Modes:\fP
+.RS 4
+.TP
+\fBPCRE\fR (default)
+Modern Perl-Compatible Regular Expressions. No escaping needed for metacharacters: \fB(\fP, \fB)\fP, \fB+\fP, \fB?\fP, \fB|\fP, \fB{\fP, \fB}\fP.
+.TP
+\fB-ER\fPE, \fB--ere\fR
+Extended Regular Expressions (like \fBsed -E\fR). Same syntax as PCRE for most operations.
+.TP
+\fB-BR\E, \fB--bre\fR
+Basic Regular Expressions (like GNU sed). Requires escaping: \fB\\(\fP, \fB\\)\fP, \fB\\+\fP, \fB\\?\fP, \fB\\|\fP.
 .RE
 .SH OPTIONS
+.SS General Options
 .TP
 \fB-d\fR, \fB--dry-run\fR
 Preview changes without modifying files. This is the default behavior.
@@ -37,221 +58,688 @@ Preview changes without modifying files. This is the default behavior.
 \fB-i\fR, \fB--interactive\fR
 Ask for confirmation before applying each change.
 .TP
-\fB-n\fR, \fB--context\fR=\fINUM\fR
-Number of context lines to show around changes (default: 2).
-Use 0 to show only changed lines (equivalent to --no-context).
-.TP
-\fB--no-context\fR
-Show only changed lines without context. Equivalent to --context=0.
+\fB-n\fR, \fB--quiet\fR, \fB--silent\fR
+Suppress automatic output. Only lines explicitly printed with \fBp\fR command are shown.
+Useful with expressions like: \fBsedx -n '1,10p'\fP
 .TP
 \fB-h\fR, \fB--help\fR
 Print help information.
 .TP
 \fB-V\fR, \fB--version\fR
 Print version information.
+.SS Context Options
+.TP
+\fB--context\fR=\fINUM\fR
+Number of context lines to show around changes (default: 2, max: 10).
+Use 0 to show only changed lines.
+.TP
+\fB--no-context\fR, \fB-nc\fR
+Show only changed lines without context. Equivalent to \fB--context=0\fR.
+.SS Regex Mode Options
+.TP
+\fB-B\fR, \fB--bre\fR
+Use Basic Regular Expressions (BRE). Like GNU sed: \fB\\(\fP \fB\\)\fP, \fB\\+\fP, \fB\\?\fP, \fB\\|\fP.
+.TP
+\fB-E\fR, \fB--ere\fR
+Use Extended Regular Expressions (ERE). Like \fBsed -E\fP: \fB(\fP \fB)\fP, \fB+\fP, \fB?\fP, \fB|\fP.
+.SS Backup Options
+.TP
+\fB--no-backup\fR, \fB--force\fR
+Skip creating a backup (requires both flags). Changes cannot be undone.
+Recommended only for files under version control.
+.TP
+\fB--backup-dir\fR=\fIDIR\fR
+Use custom directory for backups instead of \fI~/.sedx/backups/\fP.
+.SS Streaming Options
+.TP
+\fB--streaming\fR
+Enable streaming mode for large files (auto-detects at 100MB).
+.TP
+\fB--no-streaming\fR
+Disable auto-detection and force in-memory processing.
+.SS Expression Options
+.TP
+\fB-e\fR \fIEXPR\fR, \fB--expression\fR=\fIEXPR\fR
+Add a sed expression (can be specified multiple times). Expressions are applied in the order given.
+.RS
+.EX
+.EE
+sedx -e 's/foo/bar/' -e 's/baz/qux/' file.txt
+.RE
+.TP
+\fB-f\fR \fIFILE\fR, \fB--file\fR=\fIFILE\fR
+Read sed script from a file. The file should contain sed commands, one per line.
+Supports shebang: \fB#!/usr/bin/sedx -f\fP
+.RS
+.EX
+.EE
+sedx -f script.sed file.txt
+.RE
 .SH COMMANDS
+.SS rollback
 .TP
-\fBrollback\fR [\fIID\fR]
-Rollback a previous operation. If no backup ID is specified, rolls back the
-most recent operation. Use \fBsedx history\fP to see all available backups.
+\fBsedx rollback\fR [\fIID\fR]
+Rollback a previous operation. If no backup ID is specified, rolls back the most recent operation.
+.RS
+.EX
+.EE
+# Rollback last operation
+sedx rollback
+.EE
+# Rollback specific backup
+sedx rollback 20250125-120000-abc123
+.RE
 .TP
-\fBhistory\fR
-Display a log of all sedx operations. Shows timestamp, expression, files
-affected, and backup location for each operation.
+\fBsedx history\fR
+Display a log of all sedx operations. Shows timestamp, expression, files affected, and backup location.
 .TP
-\fBstatus\fR
+\fBsedx status\fR
 Display backup directory location and disk usage.
+.SS backup
+.TP
+\fBsedx backup list\fR [\fB-v\fR|\fB--verbose\fR]
+List all backups with details.
+.TP
+\fBsedx backup show\fR \fIID\fR
+Show detailed information about a specific backup.
+.TP
+\fBsedx backup restore\fR \fIID\fR
+Restore files from a backup (alias for \fBrollback\fR).
+.TP
+\fBsedx backup remove\fR [\fB-f\fR|\fB--force\fR] \fIID\fR
+Permanently delete a backup.
+.TP
+\fBsedx backup prune\fR [\fB--keep\fR=\fIN\fR] [\fB--keep-days\fR=\fIN\fR] [\fB-f\fR|\fB--force\fR]
+Remove old backups, keeping only recent ones.
+.RS
+.EX
+.EE
+# Keep only 10 most recent backups
+sedx backup prune --keep=10
+.EE
+# Keep only backups from last 7 days
+sedx backup prune --keep-days=7
+.RE
+.SS config
+.TP
+\fBsedx config\fR
+Open configuration file in text editor (\fI~/.sedx/config.toml\fP).
+.TP
+\fBsedx config --show\fR
+Show current configuration without editing.
 .SH EXPRESSIONS
-SedX supports most GNU sed expressions:
-.PP
-\fBSubstitution:\fP
+SedX supports most GNU sed expressions. All commands must use sed syntax (e.g., \fBs/old/new/\fP, not \fBold new\fR).
+.SS Substitution
 .RS
 .PP
 \fBs/pattern/replacement/flags\fR
 .PP
-Flags:
-.RS
+Replace text matching \fIpattern\fP with \fIreplacement\fP.
+.PP
+\fBFlags:\fP
 .IP \(bu 2
 \fBg\fR - Replace all occurrences in each line
 .IP \(bu 2
 \fBi\fR - Case-insensitive matching
 .IP \(bu 2
+\fBN\fR - Replace Nth occurrence only (0-9)
+.IP \(bu 2
 \fBp\fR - Print the modified line
 .RE
+.RS
+.EX
+.EE
+# Replace first occurrence
+sedx 's/foo/bar/' file.txt
+.EE
+# Replace all occurrences (global)
+sedx 's/foo/bar/g' file.txt
+.EE
+# Case-insensitive substitution
+sedx 's/HELLO/world/gi' file.txt
+.EE
+# Replace 2nd occurrence only
+sedx 's/foo/bar/2' file.txt
+.EE
+# With backreferences (PCRE syntax)
+sedx 's/([a-z]+) \\1/\\1/g' file.txt
 .RE
-.PP
-\fBDelete:\fP
+.SS Delete
 .RS
 .PP
-\fBd\fR - Delete line or lines in range
-.RE
+\fB[range]d\fR
 .PP
-\fBPrint:\fP
+Delete lines in range.
+.RE
+.RS
+.EX
+.EE
+# Delete line 5
+sedx '5d' file.txt
+.EE
+# Delete lines 5-10
+sedx '5,10d' file.txt
+.EE
+# Delete lines matching pattern
+sedx '/error/d' file.txt
+.EE
+# Delete all lines except matching pattern
+sedx '/keep/!d' file.txt
+.RE
+.SS Print
 .RS
 .PP
-\fBp\fR - Print line or lines in range
-.RE
+\fB[range]p\fR
 .PP
-\fBQuit:\fP
+Print lines in range (use with \fB-n\fR to suppress automatic output).
+.RE
+.RS
+.EX
+.EE
+# Print first 10 lines only
+sedx -n '1,10p' file.txt
+.EE
+# Print lines matching pattern
+sedx -n '/error/p' file.txt
+.RE
+.SS Quit
 .RS
 .PP
-\fBq\fR - Stop processing after current line
-.RE
+\fB[address]q\fR
 .PP
-\fBAddressing:\fP
+Stop processing after current line.
+.RE
 .RS
-.IP \(bu 2
-\fBN\fR - Line number
-.IP \(bu 2
-\fB/pattern/\fR - Lines matching pattern
-.IP \(bu 2
-\fB$start,$end\fR - Range from start to end
-.IP \(bu 2
-\fB$start,+N\fR - Range from start for N lines
-.IP \(bu 2
-\fB!pattern\fR - Negation (lines NOT matching pattern)
+.EX
+.EE
+# Stop after line 10
+sedx '10q' file.txt
+.EE
+# Stop when pattern found
+sedx '/DONE/q' file.txt
 .RE
-.PP
-\fBGrouping:\fP
+.SS Insert / Append / Change
 .RS
 .PP
-\fB{cmd1; cmd2; cmd3}\fR - Execute multiple commands
-.RE
-.SH EXAMPLES
+\fB[address]i\\ntext\fR
+.br
+Insert \fItext\fR before line.
 .PP
-\fBBasic substitution:\fP
+\fB[address]a\\ntext\fR
+.br
+Append \fItext\fR after line.
+.PP
+\fB[address]c\\ntext\fR
+.br
+Change line to \fItext\fR.
+.RE
+.RS
+.EX
+.EE
+# Insert header at line 1
+sedx '1i\\n# Header' file.txt
+.EE
+# Append footer at end
+sedx '$a\\n# End of file' file.txt
+.EE
+# Replace line 5 with new text
+sedx '5c\\nNew content here' file.txt
+.RE
+.SS Command Grouping
 .RS
 .PP
-\fBsedx 's/foo/bar/g' file.txt\fR
-.RE
+\fB[range]{cmd1; cmd2; ...}\fR
 .PP
-\fBOnly in lines matching pattern:\fP
+Execute multiple commands for lines in range.
+.RE
+.RS
+.EX
+.EE
+# Multiple substitutions
+sedx '{s/foo/bar/g; s/baz/qux/g}' file.txt
+.EE
+# Group with range
+sedx '1,10{s/a/A/g; s/b/B/g}' file.txt
+.RE
+.SS Hold Space Operations
 .RS
 .PP
-\fBsedx '/error/s/test/fix/' file.txt\fR
-.RE
+Hold space is a secondary buffer for advanced text manipulation:
 .PP
-\fBDelete lines 5-10:\fP
+\fBh\fR - Copy pattern space to hold space (overwrite)
+.br
+\fBH\fR - Append pattern space to hold space (with newline)
+.br
+\fBg\fR - Copy hold space to pattern space (overwrite)
+.br
+\fBG\fR - Append hold space to pattern space (with newline)
+.br
+\fBx\fR - Exchange pattern space and hold space
+.RE
+.RS
+.EX
+.EE
+# Double-space a file
+sedx 'G' file.txt
+.EE
+# Reverse lines of a file (similar to tac)
+sedx '1!G;h;$!d' file.txt
+.EE
+# Print last line
+sedx '$!d' file.txt
+.RE
+.SS Flow Control (Phase 5)
 .RS
 .PP
-\fBsedx '5,10d' file.txt\fR
-.RE
+\fB:label\fR
+.br
+Define a branch target.
 .PP
-\fBMultiple commands:\fP
+\fB[range]b\fR [label]
+.br
+Unconditional branch to label (or end of script if no label).
+.PP
+\fB[range]t\fR [label]
+.br
+Branch to label if substitution was made since last input.
+.PP
+\fB[range]T\fR [label]
+.br
+Branch to label if NO substitution was made since last input.
+.RE
+.RS
+.EX
+.EE
+# Loop until no more substitutions
+sedx ':top; s/foo/bar/; t top' file.txt
+.EE
+# Conditional branching
+sedx 's/foo/bar/; t success; s/baz/qux/; b done; :success' file.txt
+.RE
+.SS File I/O (Phase 5)
 .RS
 .PP
-\fBsedx '{s/a/A/g; s/b/B/g}' file.txt\fR
-.RE
+\fB[address]r\fR filename
+.br
+Read file and append contents to output.
 .PP
-\fBBackreference (remove duplicates):\fP
+\fB[address]w\fR filename
+.br
+Write pattern space to file.
+.PP
+\fB[address]R\fR filename
+.br
+Read one line from file and append to pattern space.
+.PP
+\fB[address]W\fR filename
+.br
+Write first line of pattern space to file.
+.RE
+.RS
+.EX
+.EE
+# Insert header file at line 1
+sedx '1r header.txt' file.txt
+.EE
+# Write all lines to output
+sedx 'w output.txt' file.txt
+.EE
+# Extract errors to separate file
+sedx '/error/w errors.log' logfile.txt
+.RE
+.SS Additional Commands
 .RS
 .PP
-\fBsedx 's/([a-z]+) \\1/\\1/g' file.txt\fR
+\fB[range]=\fR
+.br
+Print current line number to stdout.
+.PP
+\fB[range]F\fR
+.br
+Print current filename to stdout.
+.PP
+\fB[range]z\fR
+.br
+Clear pattern space (GNU sed extension).
 .RE
-.PP
-\fBRollback last change:\fP
-.RS
-.PP
-\fBsedx rollback\fR
+.SH ADDRESSING
+Addresses determine which lines commands operate on.
+.SS Address Types
+.TP
+\fBN\fR
+Line number (1-indexed).
+.TP
+\fB$\fR
+Last line.
+.TP
+\fB/pattern/\fR
+Lines matching regular expression.
+.TP
+\fB0\fR
+Special address before first line (for insert operations).
+.TP
+\fB!\fR
+Negation - applies to lines NOT matching the address.
+.SS Address Ranges
+.TP
+\fBstart,end\fR
+From start to end, inclusive.
+.TP
+\fBstart,+N\fR
+From start for N lines.
+.TP
+\fBstart~step\fR
+Every step-th line starting from start (e.g., \fB1~2\fR for every 2nd line).
 .RE
-.PP
-\fBView operation history:\fP
 .RS
-.PP
-\fBsedx history\fR
+.EX
+.EE
+# Lines 5 through 10
+sedx '5,10d' file.txt
+.EE
+# From line 5 to end
+sedx '5,$d' file.txt
+.EE
+# 3 lines after pattern match
+sedx '/start/,+3d' file.txt
+.EE
+# Every 3rd line
+sedx '1~3d' file.txt
+.EE
+# From pattern to pattern
+sedx '/<html>/,/<\\/html>/d' file.txt
 .RE
 .SH REGULAR EXPRESSIONS
-SedX uses Extended Regular Expressions (ERE) by default, similar to \fBsed -E\fR:
+.SS PCRE (Default)
 .RS
 .IP \(bu 2
-\fB(...)\fR - Grouping (no backslash needed)
+\fB(...)\fP - Capturing group
 .IP \(bu 2
-\fB+\fR - One or more
+\fB+\fP - One or more
 .IP \(bu 2
-\fB?\fR - Zero or one
+\fB?\fP - Zero or one
 .IP \(bu 2
-\fB|\fR - Alternation
+\fB*\fP - Zero or more
 .IP \(bu 2
-\fB[[:class:]]\fR - Character classes
+\fB|\fP - Alternation (OR)
+.IP \(bu 2
+\fB{n,m}\fP - Range quantifier
+.IP \(bu 2
+\fB[abc]\fP - Character class
+.IP \(bu 2
+\fB[^abc]\fP - Negated class
+.IP \(bu 2
+\fB\\d\fP, \fB\\w\fP, \fB\\s\fP - Shorthand classes
+.IP \(bu 2
+\fB^\fP, \fB$\fP - Start/end of line
+.RE
+.SS BRE Mode (\fB-B\fR flag)
+.RS
+All metacharacters must be escaped:
+.IP \(bu 2
+\fB\\(\\)\fP - Grouping (instead of \fB()\fP)
+.IP \(bu 2
+\fB\\+\fP - One or more (instead of \fB+\fP)
+.IP \(bu 2
+\fB\\?\fP - Zero or one (instead of \fB?\fP)
+.IP \(bu 2
+\fB\\|\\)\fP - Alternation (instead of \fB|\fP)
+.IP \(bu 2
+\fB\\{n,m\\}\fP - Range quantifier (instead of \fB{n,m}\fP)
+.RE
+.SS Backreferences
+.RS
+\fBPatterns\fR: Use \fB\\1\fP, \fB\\2\fP, etc.
+.br
+\fBReplacements\fR: Use \fB$1\fP, \fB$2\fP, etc. (SedX converts \fB\\1\fP to \fB$1\fP automatically)
+.RE
+.RS
+.EX
+.EE
+# Swap two words (PCRE)
+sedx 's/([a-z]+) ([a-z]+)/$2 $1/' file.txt
+.EE
+# Same in BRE mode
+sedx -B 's/\\([a-z]\\+\\) \\([a-z]\\+\\)/\\2 \\1/' file.txt
+.RE
+.SH EXAMPLES
+.SS Basic Operations
+.RS
+.EX
+.EE
+# Replace all occurrences
+sedx 's/foo/bar/g' file.txt
+.EE
+# Delete specific lines
+sedx '/^#/d' file.txt
+.EE
+# Print specific lines (with -n flag)
+sedx -n '10,20p' file.txt
+.RE
+.SS Pattern-Based Operations
+.RS
+.EX
+.EE
+# Only substitute in lines matching pattern
+sedx '/error/s/test/fix/' file.txt
+.EE
+# Delete between two patterns
+sedx '/<html>/,/<\\/html>/d' file.txt
+.EE
+# Negation - delete lines NOT matching pattern
+sedx '/keep/!d' file.txt
+.RE
+.SS Advanced Text Manipulation
+.RS
+.EX
+.EE
+# Remove duplicate adjacent lines
+sedx 'G; s/\\(.*\\)\\n\\1/\\1/; t; h' file.txt
+.EE
+# Add line numbers
+sedx '=' file.txt | sedx 'N; s/\\n/ /'
+.EE
+# Join every 2 lines
+sedx 'N; s/\\n/ /' file.txt
+.RE
+.SS Pipeline Usage
+.RS
+.EX
+.EE
+# Read from stdin, write to stdout
+cat file.txt | sedx 's/foo/bar/g'
+.EE
+# Chain multiple commands
+cat file.txt | sedx 's/foo/bar/g' | grep bar
+.EE
+# Process command output
+ps aux | sedx '1d' | grep nginx
+.EE
+# Case-insensitive pipeline
+echo "HELLO world" | sedx 's/hello/WORLD/gi'
+.RE
+.SS Backup and Rollback
+.RS
+.EX
+.EE
+# View history
+sedx history
+.EE
+# Show backup status
+sedx status
+.EE
+# Rollback last operation
+sedx rollback
+.EE
+# Rollback specific backup
+sedx rollback 20250125-120000-abc123
+.RE
+.SH STDIN/STDOUT MODE
+When no files are specified, SedX reads from stdin and writes to stdout.
+This makes it compatible with Unix pipelines.
+.RS
+.EX
+.EE
+# Read from stdin, write to stdout
+echo "hello world" | sedx 's/hello/HELLO/'
+.EE
+# Use in pipelines
+cat file.txt | sedx 's/foo/bar/g' | grep bar
+.EE
+# Process command output
+docker logs nginx 2>/dev/null | sedx '/error/d'
 .RE
 .PP
-Backreferences work in both patterns and replacements:
-.RS
+\fBStdin mode characteristics:\fP
+.RS 4
 .IP \(bu 2
-Patterns use \\1, \\2, etc.
+No backups created (can't backup a stream)
 .IP \(bu 2
-Replacements use $1, $2, etc. (automatically converted from \\1)
+No diff output (only transformed text)
+.IP \(bu 2
+Works with all regex flavors
 .RE
 .SH BACKUPS
-Backups are created automatically before every modification. They are stored in:
+Backups are created automatically before every modification.
+.SS Backup Location
 .RS
 .PP
-\fI~/.sedx/backups/\fR
+\fI~/.sedx/backups/\fP
 .PP
-Each backup has a timestamp in the filename:
+Each backup is stored in a timestamped directory:
+.sp
+\fI~/.sedx/backups/YYYYMMDD-HHMMSS-XXXXXXXX/\fP
+.br
+  operation.json  # Metadata (expression, timestamp, files)
+.br
+  files/          # Original file contents
 .RE
+.SS Backup Lifecycle
 .RS
-.PP
-\fIfile.txt.backup.20250107_143022\fR
+.IP \(bu 2
+Backups created before file modifications
+.IP \(bu 2
+Last 50 backups kept automatically
+.IP \(bu 2
+Old backups cleaned up on new operations
+.IP \(bu 2
+Backup removed after successful rollback
 .RE
-.PP
-To rollback a change:
+.SS Manual Backup Management
 .RS
-.PP
-\fBsedx rollback file.txt.backup.20250107_143022\fR
-.RE
-.PP
-Or rollback the last operation:
-.RS
-.PP
-\fBsedx rollback\fR
+.EX
+.EE
+# List all backups
+sedx backup list
+.EE
+# Show backup details
+sedx backup show 20250125-120000-abc123
+.EE
+# Remove specific backup
+sedx backup remove 20250125-120000-abc123
+.EE
+# Keep only 10 most recent
+sedx backup prune --keep=10
 .RE
 .SH DIFF OUTPUT
 SedX uses colored output to show changes:
-.RS
+.RS 4
 .IP \(bu 2
-\fBGreen\fR (+) - Lines that will be added
+\fBGreen (+)\fR - Lines that will be added
 .IP \(bu 2
-\fBRed\fR (-) - Lines that will be deleted
+\fBRed (-)\fR - Lines that will be deleted
 .IP \(bu 2
-\fBYellow\fR (→) - Lines that will be modified
+\fBYellow (→)\fR - Lines that will be modified
+.IP \(bu 2
+\fBDefault\fR - Context lines (unchanged)
 .RE
 .PP
-Context lines are shown in the default color to provide surrounding context.
+Set \fBNO_COLOR=1\fP environment variable to disable colors.
+.SH STREAMING MODE
+For files >= 100MB, SedX automatically switches to streaming mode:
+.RS
+.IP \(bu 2
+Constant memory usage (<100MB regardless of file size)
+.IP \(bu 2
+Line-by-line processing
+.IP \(bu 2
+Sliding window for diff context
+.RE
+.PP
+Streaming threshold configurable via:
+.RS
+.IP \(bu 2
+\fB~/.sedx/config.toml\fP: \fBmax_memory_mb\fP setting
+.IP \(bu 2
+\fB--no-streaming\fP flag to disable
+.RE
+.SH CONFIGURATION
+SedX stores configuration in \fI~/.sedx/config.toml\fP:
+.RS
+.EX
+.EE
+[backup]
+max_size_gb = 2                  # Warn for large backups
+max_disk_usage_percent = 60      # Error if disk usage too high
+backup_dir = "/custom/path"      # Optional custom location
+
+[compatibility]
+mode = "pcre"                    # Default regex flavor: pcre, ere, or bre
+show_warnings = true             # Show compatibility warnings
+
+[processing]
+context_lines = 2                # Diff context (max: 10)
+max_memory_mb = 100              # Streaming threshold
+streaming = true                 # Enable auto-detection
+.RE
+.PP
+Edit with: \fBsedx config\fP
+.br
+View with: \fBsedx config --show\fP
 .SH DIFFERENCES FROM GNU SED
 .TP
-\fBExtended Regex\fP
-SedX uses ERE by default. Use \fB([a-z]+)\fR instead of \fB\\([a-z]\\+\\)\fR.
+\fBRegex Syntax\fR
+SedX uses PCRE by default (modern, no escaping). Use \fB-B\fR flag for BRE compatibility.
 .TP
-\fBAutomatic Backups\fP
-SedX creates backups automatically. sed requires manual backups.
+\fBAutomatic Backups\fR
+SedX creates backups automatically. sed requires manual \fB-i\fP flag with backup argument.
 .TP
-\fBDry-run Mode\fP
+\fBDry-run Mode\fR
 SedX previews changes by default. sed has no preview mode.
 .TP
-\fBPattern Substitution\fP
-\fB/error/s/test/fix/\fR applies to ALL matching lines (GNU sed behavior).
+\fBPattern Substitution\fR
+\fB/error/s/test/fix/\fR applies to ALL matching lines (GNU sed compatible).
 .TP
-\fBNo In-place Editing\fP
-SedX doesn't support \fB-i\fR flag (yet). Use \fB--rollback\fP instead.
+\fBIn-place Editing\fR
+SedX doesn't support \fB-i\fR flag. Files are modified in place with automatic backup.
+Use \fB--rollback\fP to undo changes.
+.TP
+\fBBackreference Syntax\fR
+SedX uses \fB$1\fP, \fB$2\fP in replacements (converted from \fB\\1\fP, \fB\\2\fR automatically).
 .SH EXIT STATUS
 .TP
-0
+\fB0\fR
 Changes were successfully applied (or preview shown)
 .TP
-1
-No changes were needed or an error occurred
+\fB1\fR
+An error occurred
+.TP
+\fB2\fR
+Invalid command-line arguments
 .SH FILES
 .TP
 \fI~/.sedx/backups/\fR
 Default backup directory
 .TP
-\fI~/.sedx/history.json\fR
-Operation history log
+\fI~/.sedx/config.toml\fR
+Configuration file
 .SH ENVIRONMENT
 .TP
 \fBSEDX_BACKUP_DIR\fR
 Override default backup directory location
+.TP
+\fBEDITOR\fR, \fBVISUAL\fR
+Editor used by \fBsedx config\fR command
 .TP
 \fBNO_COLOR\fR
 Disable colored output (set to any value)
@@ -260,7 +748,8 @@ GitHub Issues: \fIhttps://github.com/InkyQuill/sedx/issues\fR
 .SH SEE ALSO
 .BR sed (1),
 .BR awk (1),
-.BR grep (1)
+.BR grep (1),
+.BR perlre (1)
 .SH AUTHOR
 InkyQuill <\fIhttps://github.com/InkyQuill\fR>
 .SH COPYRIGHT

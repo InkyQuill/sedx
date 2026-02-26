@@ -1,0 +1,3 @@
+MODIFIED: This is a very long line with lots of text that should test the streaming capability with long lines that have many words and characters
+MODIFIED: Another extremely long line that continues to test the streaming system with even more content and data to process through the buffer
+MODIFIED: A third lengthy line that contains various patterns and text to ensure the streaming implementation handles long lines correctly without issues
