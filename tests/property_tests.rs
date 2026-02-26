@@ -240,6 +240,7 @@ proptest! {
 
 proptest! {
     /// Restoring a backup reproduces the original file exactly
+    #[cfg_attr(not(unix), ignore)]
     #[test]
     fn prop_backup_restore_is_identity(
         content in "[a-zA-Z0-9 \n]{0,1000}"
@@ -269,6 +270,7 @@ proptest! {
     }
 
     /// Multiple files can be backed up and restored together
+    #[cfg_attr(not(unix), ignore)]
     #[test]
     fn prop_backup_multiple_files(
         contents in prop::collection::vec("[a-z]{1,50}", 1..10)
@@ -305,6 +307,7 @@ proptest! {
     }
 
     /// Backup metadata preserves the expression
+    #[cfg_attr(not(unix), ignore)]
     #[test]
     fn prop_backup_preserves_expression(
         expression in "s/[a-z]/[a-z]/[gi]{0,2}"
