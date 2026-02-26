@@ -2,6 +2,7 @@
 //!
 //! Provides functionality to check available disk space before creating backups
 
+#[cfg_attr(windows, allow(unused_imports))] // Context not used in Windows stubs
 use anyhow::{Context, Result};
 use std::path::Path;
 
