@@ -275,7 +275,7 @@ echo -e "${BLUE}--- Complex Real-World Scenarios ---${NC}"
 
 # Test 27: Config file update
 test_equality "Config update" \
-    "s/version=[0-9]+\.[0-9]+/version=2.0/" \
+    "s/version=[0-9.]+/version=2.0/" \
     "app_version=1.5.2" \
     "app_version=2.0"
 
