@@ -259,11 +259,29 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
         return parse_group(cmd);
     }
 
-    // IMPORTANT: Check for substitution commands FIRST
-    // because substitution commands can end with 'g' (global flag), 'p' (print flag), etc.
-    // which would otherwise be misidentified as get/print/hold commands
-    if cmd.contains("s/") || cmd.contains("s#") || cmd.contains("s:") || cmd.contains("s|") {
-        return parse_substitution(cmd);
+    // Dispatch based on the EARLIEST occurrence of a command marker in the command string.
+    // This correctly handles cases where a marker appears inside the text/pattern of
+    // another command (e.g., `2i\s/foo/bar/g` — insert literal "s/foo/bar/g"; or
+    // `s/i\foo/bar/` — substitution whose pattern contains "i\").
+    {
+        let candidates: &[(&str, fn(&str) -> Result<SedCommand>)] = &[
+            ("i\\", parse_insert as fn(&str) -> Result<SedCommand>),
+            ("a\\", parse_append as fn(&str) -> Result<SedCommand>),
+            ("c\\", parse_change as fn(&str) -> Result<SedCommand>),
+            ("s/", parse_substitution as fn(&str) -> Result<SedCommand>),
+            ("s#", parse_substitution as fn(&str) -> Result<SedCommand>),
+            ("s:", parse_substitution as fn(&str) -> Result<SedCommand>),
+            ("s|", parse_substitution as fn(&str) -> Result<SedCommand>),
+        ];
+
+        let earliest = candidates
+            .iter()
+            .filter_map(|(marker, handler)| cmd.find(marker).map(|pos| (pos, *handler)))
+            .min_by_key(|(pos, _)| *pos);
+
+        if let Some((_, handler)) = earliest {
+            return handler(cmd);
+        }
     }
 
     // Check for hold space commands
@@ -413,23 +431,7 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
         }
     }
 
-    // IMPORTANT: Check for insert/append/change commands BEFORE file I/O
-    // because i\a\c commands use backslash followed by text, and the text may
-    // contain letters like 'r', 'R', 'w', 'W' that would be misidentified as file I/O
-    if cmd.contains("i\\") {
-        // Insert command: addr i\text
-        return parse_insert(cmd);
-    }
-    if cmd.contains("a\\") {
-        // Append command: addr a\text
-        return parse_append(cmd);
-    }
-    if cmd.contains("c\\") {
-        // Change command: addr c\text
-        return parse_change(cmd);
-    }
-
-    // Check for r/R/w/W commands (file I/O) - AFTER i/a/c checks
+    // Check for r/R/w/W commands (file I/O) - AFTER i/a/c checks (moved earlier above)
     // Examples: "r /path/file", "5r file.txt", "/pat/r file"
     // These commands have filenames after them, so they don't "end with" the command char
     // IMPORTANT: Must check that the command char is NOT part of a pattern address like /pat/
@@ -1950,5 +1952,103 @@ mod tests {
     fn test_parse_exchange_simple() {
         let cmd = parse_single_command("x").unwrap();
         assert_eq!(cmd, SedCommand::Exchange { range: None });
+    }
+
+    #[test]
+    fn test_parse_insert_with_text_ending_in_command_char() {
+        // Regression: text ending in 'D' must not be dispatched as DeleteFirstLine
+        let result = parse_sed_expression("2i\\INSERTED").expect("should parse");
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            SedCommand::Insert { text, address } => {
+                assert_eq!(text, "INSERTED");
+                assert!(matches!(address, Address::LineNumber(2)));
+            }
+            other => panic!("expected Insert, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_append_with_text_ending_in_command_char() {
+        let result = parse_sed_expression("5a\\PATCHED").expect("should parse");
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            SedCommand::Append { text, address } => {
+                assert_eq!(text, "PATCHED");
+                assert!(matches!(address, Address::LineNumber(5)));
+            }
+            other => panic!("expected Append, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_change_pattern_addr_text_ending_h() {
+        // 'H' would otherwise trigger HoldAppend dispatch
+        let result = parse_sed_expression("/foo/c\\BAH").expect("should parse");
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            SedCommand::Change { text, .. } => assert_eq!(text, "BAH"),
+            other => panic!("expected Change, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_insert_with_text_containing_substitution_lookalike() {
+        // Regression: text "s/foo/bar/g" must produce Insert, not route to parse_substitution
+        let result = parse_sed_expression("2i\\s/foo/bar/g").expect("should parse");
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            SedCommand::Insert { text, address } => {
+                assert_eq!(text, "s/foo/bar/g");
+                assert!(matches!(address, Address::LineNumber(2)));
+            }
+            other => panic!("expected Insert, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_change_with_text_containing_substitution_lookalike() {
+        let result = parse_sed_expression("2c\\s/foo/bar/g").expect("should parse");
+        match &result[0] {
+            SedCommand::Change { text, .. } => assert_eq!(text, "s/foo/bar/g"),
+            other => panic!("expected Change, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_substitution_with_pattern_containing_iac_marker() {
+        // Substitution pattern contains "i\" — must route to substitution, not insert
+        let result = parse_sed_expression("s/i\\foo/bar/").expect("should parse");
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            SedCommand::Substitution { pattern, replacement, .. } => {
+                assert_eq!(pattern, "i\\foo");
+                assert_eq!(replacement, "bar");
+            }
+            other => panic!("expected Substitution, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_substitution_with_pattern_containing_c_marker() {
+        let result = parse_sed_expression("s/c\\d+/NUM/").expect("should parse");
+        match &result[0] {
+            SedCommand::Substitution { pattern, .. } => {
+                assert_eq!(pattern, "c\\d+");
+            }
+            other => panic!("expected Substitution, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_substitution_with_address_and_iac_in_pattern() {
+        let result = parse_sed_expression("5s/a\\b/X/").expect("should parse");
+        match &result[0] {
+            SedCommand::Substitution { pattern, range, .. } => {
+                assert_eq!(pattern, "a\\b");
+                assert!(matches!(range, Some((Address::LineNumber(5), _))));
+            }
+            other => panic!("expected Substitution, got {:?}", other),
+        }
     }
 }
