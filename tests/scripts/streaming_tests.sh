@@ -1,7 +1,7 @@
 #!/bin/bash
 # Streaming mode tests for SedX
 
-set -e
+# set -e  # Disabled: incompatible with test scripts that handle failures
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIXTURES_DIR="$(dirname "$SCRIPT_DIR")/fixtures"
@@ -31,21 +31,21 @@ run_streaming_test() {
 
     # Read the modified file
         cat "$TEMP_DIR/test_input.txt" > "$TEMP_DIR/output.txt"
-    grep -v '^---' "$TEMP_DIR/output.txt" | grep -v '^+++' | grep -v '^@' | grep -v '^[0-9]*c[0-9]*' | sed '/^> /!d; s/^> //' > "$TEMP_DIR/actual.txt" || true
+    grep -v '^---' "$TEMP_DIR/output.txt" | grep -v '^+++' | grep -v '^@' | grep -vE '^[0-9]+c[0-9]+$' | sed '/^> /!d; s/^> //' > "$TEMP_DIR/actual.txt" || true
 
     if [ ! -s "$TEMP_DIR/actual.txt" ]; then
-        grep -v '^---' "$TEMP_DIR/output.txt" | grep -v '^+++' | grep -v '^@' | grep -v '^[0-9]*c[0-9]*' | sed '/^> /d; /^< /d' > "$TEMP_DIR/actual.txt" || true
+        grep -v '^---' "$TEMP_DIR/output.txt" | grep -v '^+++' | grep -v '^@' | grep -vE '^[0-9]+c[0-9]+$' | sed '/^> /d; /^< /d' > "$TEMP_DIR/actual.txt" || true
     fi
 
     if diff -q "$TEMP_DIR/actual.txt" "$expected_file" > /dev/null 2>&1; then
         echo -e "${GREEN}PASSED${NC}"
-        ((TESTS_PASSED++))
+        TESTS_PASSED=$((TESTS_PASSED+1))
         return 0
     else
         echo -e "${RED}FAILED${NC}"
         echo "  Expected: $(cat "$expected_file" | head -1)"
         echo "  Got: $(cat "$TEMP_DIR/actual.txt" | head -1)"
-        ((TESTS_FAILED++))
+        TESTS_FAILED=$((TESTS_FAILED+1))
         return 1
     fi
 }

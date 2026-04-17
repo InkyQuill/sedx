@@ -2,8 +2,6 @@
 # Quick test runner for SedX
 # Runs a subset of critical tests for fast feedback
 
-set -e
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SEDX_BIN="${SEDX_BIN:-./target/release/sedx}"
 
@@ -43,18 +41,19 @@ for script_name in "${QUICK_TESTS[@]}"; do
 
     if bash "$script_path" > /tmp/quick_test_output.txt 2>&1; then
         echo -e "${GREEN}PASSED${NC}"
-
-        PASSED=$(grep -oP 'Passed: \K\d+' /tmp/quick_test_output.txt | tail -1)
-        if [ -n "$PASSED" ]; then
-            TOTAL_PASSED=$((TOTAL_PASSED + PASSED))
-        fi
     else
         echo -e "${RED}FAILED${NC}"
+    fi
 
-        FAILED=$(grep -oP 'Failed: \K\d+' /tmp/quick_test_output.txt | tail -1)
-        if [ -n "$FAILED" ]; then
-            TOTAL_FAILED=$((TOTAL_FAILED + FAILED))
-        fi
+    # Strip ANSI escape codes before grepping for counts
+    CLEAN_OUTPUT=$(sed 's/\x1b\[[0-9;]*m//g' /tmp/quick_test_output.txt)
+    PASSED=$(echo "$CLEAN_OUTPUT" | grep -oP 'Passed: \K\d+' | tail -1)
+    FAILED=$(echo "$CLEAN_OUTPUT" | grep -oP 'Failed: \K\d+' | tail -1)
+    if [ -n "$PASSED" ]; then
+        TOTAL_PASSED=$((TOTAL_PASSED + PASSED))
+    fi
+    if [ -n "$FAILED" ]; then
+        TOTAL_FAILED=$((TOTAL_FAILED + FAILED))
     fi
 
     rm -f /tmp/quick_test_output.txt

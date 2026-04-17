@@ -1,7 +1,7 @@
 #!/bin/bash
 # Stdin/Stdout pipeline tests for SedX
 
-set -e
+# set -e  # Disabled: incompatible with test scripts that handle failures
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIXTURES_DIR="$(dirname "$SCRIPT_DIR")/fixtures"
@@ -29,13 +29,13 @@ run_pipeline_test() {
 
     if diff -q "$TEMP_DIR/output.txt" "$expected_file" > /dev/null 2>&1; then
         echo -e "${GREEN}PASSED${NC}"
-        ((TESTS_PASSED++))
+        TESTS_PASSED=$((TESTS_PASSED+1))
         return 0
     else
         echo -e "${RED}FAILED${NC}"
         echo "  Expected: $(cat "$expected_file" | head -1)"
         echo "  Got: $(cat "$TEMP_DIR/output.txt" | head -1)"
-        ((TESTS_FAILED++))
+        TESTS_FAILED=$((TESTS_FAILED+1))
         return 1
     fi
 }

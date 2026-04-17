@@ -37,13 +37,13 @@ run_stdin_test() {
     # Compare with expected
     if [ "$result" = "$expected_interpreted" ]; then
         echo -e "${GREEN}PASSED${NC}"
-        ((TESTS_PASSED++))
+        TESTS_PASSED=$((TESTS_PASSED+1))
         return 0
     else
         echo -e "${RED}FAILED${NC}"
         echo "  Expected: '$expected_interpreted'"
         echo "  Got:      '$result'"
-        ((TESTS_FAILED++))
+        TESTS_FAILED=$((TESTS_FAILED+1))
         return 1
     fi
 }
@@ -155,12 +155,12 @@ echo -e "line1\nline2" | $SEDX_BIN 'w /tmp/test_w.txt' >/dev/null 2>&1
 if [ "$(cat /tmp/test_w.txt)" = "line1
 line2" ]; then
     echo -e "Testing: Write file command ... ${GREEN}PASSED${NC}"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED+1))
 else
     echo -e "Testing: Write file command ... ${RED}FAILED${NC}"
     echo "  Expected file contents: 'line1\nline2'"
     echo "  Got: '$(cat /tmp/test_w.txt)'"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED+1))
 fi
 rm -f /tmp/test_w.txt
 
@@ -181,12 +181,12 @@ if [ "$(cat /tmp/test_W.txt)" = "line1
 line2
 line3" ]; then
     echo -e "Testing: Write first line command ... ${GREEN}PASSED${NC}"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED+1))
 else
     echo -e "Testing: Write first line command ... ${RED}FAILED${NC}"
     echo "  Expected file contents: 'line1\nline2\nline3'"
     echo "  Got: '$(cat /tmp/test_W.txt)'"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED+1))
 fi
 rm -f /tmp/test_W.txt
 
@@ -203,12 +203,12 @@ rm -f /tmp/test_r2.txt
 echo -e "foo\nbar\nbaz" | $SEDX_BIN '/bar/w /tmp/test_w_pattern.txt' >/dev/null 2>&1
 if [ "$(cat /tmp/test_w_pattern.txt)" = "bar" ]; then
     echo -e "Testing: Write file with pattern address ... ${GREEN}PASSED${NC}"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED+1))
 else
     echo -e "Testing: Write file with pattern address ... ${RED}FAILED${NC}"
     echo "  Expected file contents: 'bar'"
     echo "  Got: '$(cat /tmp/test_w_pattern.txt)'"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED+1))
 fi
 rm -f /tmp/test_w_pattern.txt
 
