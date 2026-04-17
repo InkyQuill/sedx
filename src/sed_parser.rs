@@ -925,7 +925,7 @@ fn parse_insert(cmd: &str) -> Result<SedCommand> {
     };
 
     Ok(SedCommand::Insert {
-        text: parts[1].to_string(),
+        text: parts[1].strip_prefix('\n').unwrap_or(parts[1]).to_string(),
         address,
     })
 }
@@ -964,7 +964,7 @@ fn parse_append(cmd: &str) -> Result<SedCommand> {
     };
 
     Ok(SedCommand::Append {
-        text: parts[1].to_string(),
+        text: parts[1].strip_prefix('\n').unwrap_or(parts[1]).to_string(),
         address,
     })
 }
@@ -1003,7 +1003,7 @@ fn parse_change(cmd: &str) -> Result<SedCommand> {
     };
 
     Ok(SedCommand::Change {
-        text: parts[1].to_string(),
+        text: parts[1].strip_prefix('\n').unwrap_or(parts[1]).to_string(),
         address,
     })
 }
@@ -2049,6 +2049,54 @@ mod tests {
                 assert!(matches!(range, Some((Address::LineNumber(5), _))));
             }
             other => panic!("expected Substitution, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_insert_strips_leading_newline() {
+        // Multi-line form: i\<NL>TEXT — the newline is syntax, not part of the text
+        let result = parse_sed_expression("2i\\\nINSERTED").expect("should parse");
+        match &result[0] {
+            SedCommand::Insert { text, .. } => assert_eq!(text, "INSERTED"),
+            other => panic!("expected Insert, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_append_strips_leading_newline() {
+        let result = parse_sed_expression("3a\\\nPATCHED").expect("should parse");
+        match &result[0] {
+            SedCommand::Append { text, .. } => assert_eq!(text, "PATCHED"),
+            other => panic!("expected Append, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_change_strips_leading_newline() {
+        let result = parse_sed_expression("4c\\\nREPLACED").expect("should parse");
+        match &result[0] {
+            SedCommand::Change { text, .. } => assert_eq!(text, "REPLACED"),
+            other => panic!("expected Change, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_insert_inline_form_unchanged() {
+        // Inline form (no newline) — text must not be mangled
+        let result = parse_sed_expression("2i\\INSERTED").expect("should parse");
+        match &result[0] {
+            SedCommand::Insert { text, .. } => assert_eq!(text, "INSERTED"),
+            other => panic!("expected Insert, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_insert_empty_text_after_multiline_separator() {
+        // i\<NL> with no text inserts a blank line (empty string text)
+        let result = parse_sed_expression("2i\\\n").expect("should parse");
+        match &result[0] {
+            SedCommand::Insert { text, .. } => assert_eq!(text, ""),
+            other => panic!("expected Insert, got {:?}", other),
         }
     }
 }
