@@ -64,7 +64,7 @@ pub enum SedCommand {
     },
     Change {
         text: String,
-        address: Address, // Which line(s) to change
+        range: (Address, Address), // Which lines to change (inclusive)
     },
     Print {
         range: (Address, Address), // What to print
@@ -970,15 +970,14 @@ fn parse_append(cmd: &str) -> Result<SedCommand> {
 }
 
 fn parse_change(cmd: &str) -> Result<SedCommand> {
-    // Change: c\text or addr c\text
     let parts: Vec<&str> = cmd.splitn(2, "c\\").collect();
     if parts.len() != 2 {
         let suggestion = if cmd.contains('c') && !cmd.contains("c\\") {
             Some(
-                "Change command requires a backslash after 'c':\n  Format: [address]c\\text\n  Example: 5c\\NEW LINE\n  Example: /pattern/c\\REPLACED TEXT",
+                "Change command requires a backslash after 'c':\n  Format: [address]c\\text\n  Example: 5c\\REPLACED LINE\n  Example: /pattern/c\\Replacement",
             )
         } else {
-            Some("Valid change format: [address]c\\text\nExample: 5c\\NEW LINE")
+            Some("Valid change format: [address]c\\text\nExample: 5c\\REPLACED LINE")
         };
         return Err(anyhow!(
             "{}",
@@ -986,9 +985,8 @@ fn parse_change(cmd: &str) -> Result<SedCommand> {
         ));
     }
 
-    let address = if !parts[0].trim().is_empty() {
-        parse_address(parts[0].trim())?
-    } else {
+    let addr_part = parts[0].trim();
+    if addr_part.is_empty() {
         return Err(anyhow!(
             "{}",
             format_parse_error(
@@ -996,15 +994,29 @@ fn parse_change(cmd: &str) -> Result<SedCommand> {
                 None,
                 "change command requires an address",
                 Some(
-                    "Specify which line(s) to change:\n  5c\\text        - change line 5\n  /pat/c\\text     - change lines matching 'pat'\n  1,10c\\text     - change lines 1-10 to 'text'"
+                    "Specify which line(s) to change:\n  5c\\text          - change line 5\n  2,3c\\text         - change lines 2-3 (collapsed)\n  /pat/c\\text       - change lines matching 'pat'\n  $c\\text          - change last line"
                 ),
             )
         ));
-    };
+    }
 
+    let text = parts[1].strip_prefix('\n').unwrap_or(parts[1]).to_string();
+
+    // Range form: start,end
+    if let Some(comma_pos) = addr_part.find(',') {
+        let start = parse_address(addr_part[..comma_pos].trim())?;
+        let end = parse_address(addr_part[comma_pos + 1..].trim())?;
+        return Ok(SedCommand::Change {
+            text,
+            range: (start, end),
+        });
+    }
+
+    // Single address: collapse to (addr, addr)
+    let addr = parse_address(addr_part)?;
     Ok(SedCommand::Change {
-        text: parts[1].strip_prefix('\n').unwrap_or(parts[1]).to_string(),
-        address,
+        text,
+        range: (addr.clone(), addr),
     })
 }
 
@@ -2097,6 +2109,32 @@ mod tests {
         match &result[0] {
             SedCommand::Insert { text, .. } => assert_eq!(text, ""),
             other => panic!("expected Insert, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_change_with_range() {
+        let result = parse_sed_expression("2,3c\\REPLACED").expect("should parse");
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            SedCommand::Change { text, range } => {
+                assert_eq!(text, "REPLACED");
+                assert!(matches!(range.0, Address::LineNumber(2)));
+                assert!(matches!(range.1, Address::LineNumber(3)));
+            }
+            other => panic!("expected Change with range, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_change_single_address_uses_same_addr_for_both() {
+        let result = parse_sed_expression("5c\\REPLACED").expect("should parse");
+        match &result[0] {
+            SedCommand::Change { range, .. } => {
+                assert!(matches!(range.0, Address::LineNumber(5)));
+                assert!(matches!(range.1, Address::LineNumber(5)));
+            }
+            other => panic!("expected Change, got {:?}", other),
         }
     }
 }

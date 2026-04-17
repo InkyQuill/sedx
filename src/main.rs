@@ -240,7 +240,7 @@ fn get_command_range_option(cmd: &Command) -> Option<(Address, Address)> {
             ..
         } => Some((Address::LineNumber(0), Address::LineNumber(0))),
         Command::Change {
-            address: Address::LineNumber(_),
+            range: (Address::LineNumber(_), Address::LineNumber(_)),
             ..
         } => Some((Address::LineNumber(0), Address::LineNumber(0))),
         Command::Quit {

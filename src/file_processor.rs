@@ -862,22 +862,29 @@ impl StreamProcessor {
                                 }
                             }
                         }
-                        Command::Change { text, address } => {
-                            // Change (replace) the specified line with new text
-                            match address {
-                                Address::LineNumber(n) if *n == line_num => {
-                                    // Replace current line with new text
-                                    processed_line = text.clone();
-                                    line_changed = true;
-                                }
-                                Address::LineNumber(_) => {
-                                    // Not at the target line yet, continue
+                        Command::Change { text, range } => {
+                            // Change collapses lines start..=end to one TEXT line.
+                            // Streaming supports only the single-line case (start == end == LineNumber).
+                            match (&range.0, &range.1) {
+                                (Address::LineNumber(s), Address::LineNumber(e)) if s == e => {
+                                    if line_num == *s {
+                                        processed_line = text.clone();
+                                        line_changed = true;
+                                    }
                                 }
                                 _ => {
-                                    // Complex addresses (patterns) not yet supported - delegate to in-memory
+                                    // Range or non-line address: delegate to in-memory writer (preserves data).
+                                    // Task 5 prevents this delegation by tightening can_stream.
                                     drop(writer);
                                     let mut processor = FileProcessor::new(self.commands.clone());
-                                    return processor.process_file_with_context(file_path);
+                                    let _written = processor.apply_to_file(file_path)?;
+                                    return Ok(FileDiff {
+                                        file_path: file_path.display().to_string(),
+                                        changes: vec![],
+                                        all_lines: vec![],
+                                        printed_lines: vec![],
+                                        is_streaming: false,
+                                    });
                                 }
                             }
                         }
@@ -2349,8 +2356,8 @@ impl FileProcessor {
             Command::Append { text, address } => {
                 self.apply_append(lines, text, address)?;
             }
-            Command::Change { text, address } => {
-                self.apply_change(lines, text, address)?;
+            Command::Change { text, range } => {
+                self.apply_change(lines, text, range)?;
             }
             Command::Print { range } => {
                 // Collect lines to print (doesn't modify the file)
@@ -2782,11 +2789,24 @@ impl FileProcessor {
         Ok(())
     }
 
-    fn apply_change(&self, lines: &mut [String], text: &str, address: &Address) -> Result<()> {
-        let idx = self.resolve_address(address, lines, 0)?;
-        if idx < lines.len() {
-            lines[idx] = text.to_string();
+    fn apply_change(
+        &self,
+        lines: &mut Vec<String>,
+        text: &str,
+        range: &(Address, Address),
+    ) -> Result<()> {
+        if lines.is_empty() {
+            return Ok(());
         }
+        let last = lines.len() - 1;
+        let start = self.resolve_address(&range.0, lines, 0)?.min(last);
+        let end = self.resolve_address(&range.1, lines, last)?.min(last);
+        if start > end {
+            return Ok(());
+        }
+        // Replace lines[start..=end] with a single TEXT line (matches GNU sed)
+        lines.drain(start..=end);
+        lines.insert(start, text.to_string());
         Ok(())
     }
 
@@ -4181,5 +4201,25 @@ mod cycle_tests {
 
         // "foo baz" -> s -> "bar baz" -> h (hold="bar baz") -> g (pattern="bar baz")
         assert_eq!(result, vec!["bar baz"]);
+    }
+
+    #[test]
+    fn test_apply_change_range_collapses_lines() {
+        use crate::command::{Address, Command};
+        let lines: Vec<String> = vec!["a", "b", "c", "d"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let cmd = Command::Change {
+            text: "REPLACED".to_string(),
+            range: (Address::LineNumber(2), Address::LineNumber(3)),
+        };
+        let mut processor = FileProcessor::new(vec![cmd.clone()]);
+        let mut buf = lines.clone();
+        processor.apply_command(&mut buf, &cmd).expect("apply");
+        assert_eq!(
+            buf,
+            vec!["a".to_string(), "REPLACED".to_string(), "d".to_string()]
+        );
     }
 }

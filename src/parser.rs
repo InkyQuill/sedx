@@ -77,9 +77,9 @@ impl Parser {
                 text,
                 address: self.convert_address(address),
             }),
-            LegacySedCommand::Change { text, address } => Ok(Command::Change {
+            LegacySedCommand::Change { text, range } => Ok(Command::Change {
                 text,
-                address: self.convert_address(address),
+                range: (self.convert_address(range.0), self.convert_address(range.1)),
             }),
             LegacySedCommand::Group { range, commands } => {
                 let converted_commands = commands

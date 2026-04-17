@@ -34,8 +34,11 @@ pub enum Command {
     /// Append text after line (sed: 5a\text)
     Append { text: String, address: Address },
 
-    /// Change line (sed: 5c\text)
-    Change { text: String, address: Address },
+    /// Change line (sed: 5c\text, 2,3c\text)
+    Change {
+        text: String,
+        range: (Address, Address),
+    },
 
     /// Command group (sed: {s/foo/bar/; p})
     Group {
