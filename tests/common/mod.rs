@@ -11,16 +11,18 @@ pub fn sedx() -> Command {
     cmd
 }
 
-/// Returns a `sedx` invocation pre-wired to resolve `~` (and therefore
-/// `~/.sedx/backups/`) to the given directory, on every platform. Use this
-/// for any test that exercises file-mode editing, backups, `history`,
+/// Returns a `sedx` invocation pre-wired to resolve sedx's state dir
+/// (normally `~/.sedx/`) to the given directory, on every platform. Use
+/// this for any test that exercises file-mode editing, backups, `history`,
 /// or `rollback` so real `~/.sedx/` is never touched.
+///
+/// Uses `SEDX_HOME` rather than `HOME`/`USERPROFILE` because on Windows
+/// `dirs::home_dir()` reads the shell API (`SHGetKnownFolderPath`) and
+/// ignores env vars. sedx itself checks `SEDX_HOME` before falling back
+/// to `dirs::home_dir()` — see `backup_manager::sedx_home`.
 pub fn sedx_isolated(home_dir: &Path) -> Command {
     let mut cmd = sedx();
-    // dirs::home_dir() reads $HOME on Unix and %USERPROFILE% on Windows.
-    // Setting both is portable and idempotent.
-    cmd.env("HOME", home_dir);
-    cmd.env("USERPROFILE", home_dir);
+    cmd.env("SEDX_HOME", home_dir);
     cmd
 }
 

@@ -166,9 +166,7 @@ fn default_streaming() -> Option<bool> {
 
 /// Get the configuration file path
 pub fn config_file_path() -> Result<PathBuf> {
-    let home_dir =
-        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
-
+    let home_dir = crate::backup_manager::sedx_home()?;
     let config_dir = home_dir.join(".sedx");
     fs::create_dir_all(&config_dir).with_context(|| {
         format!(

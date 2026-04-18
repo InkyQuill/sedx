@@ -25,10 +25,25 @@ pub struct BackupManager {
     backups_dir: PathBuf,
 }
 
+/// Resolve sedx's state directory root.
+///
+/// Honors the `SEDX_HOME` env var if set (useful for tests that need to
+/// isolate `~/.sedx/` on every platform — `dirs::home_dir()` on Windows
+/// reads the shell API, not `HOME`/`USERPROFILE`, so an env-based override
+/// is the only portable way to redirect it). Falls back to
+/// `dirs::home_dir()` for normal use.
+pub fn sedx_home() -> Result<PathBuf> {
+    if let Ok(custom) = std::env::var("SEDX_HOME") {
+        if !custom.is_empty() {
+            return Ok(PathBuf::from(custom));
+        }
+    }
+    dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))
+}
+
 impl BackupManager {
     pub fn new() -> Result<Self> {
-        let home_dir =
-            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+        let home_dir = sedx_home()?;
         let backups_dir = home_dir.join(".sedx").join("backups");
 
         // Create backups directory if it doesn't exist
