@@ -489,17 +489,18 @@ For each input line:
 - Run with `cargo test`
 
 ### Integration Tests
-- Bash scripts in `tests/` directory
-- Compare SedX output with GNU sed
-- Run with `./tests/run_all_tests.sh`
+- Rust integration-test binaries under `tests/`
+- Run with `cargo test` (included automatically)
 
-**Test Suites:**
-- `regression_tests.sh` - GNU sed compatibility
-- `comprehensive_tests.sh` - Extended features
-- `streaming_tests.sh` - Large file handling
-- `phase4_tests.sh` - Multi-line pattern space
-- `phase5_tests.sh` - Flow control and file I/O
-- `hold_space_tests.sh` - Hold space operations
+**Test Binaries:**
+- `command_coverage` - Core sed command coverage
+- `diff_output` - Diff formatting
+- `pipeline` - stdin/stdout pipeline mode
+- `atomic_writes` - Atomic write and permission preservation
+- `backup_rollback` - Backup and rollback functionality
+- `streaming` - Large file streaming
+- `regex_flavors` - PCRE/ERE/BRE regex modes
+- `errors` - Error handling and edge cases
 
 ### Memory Profiling
 ```bash

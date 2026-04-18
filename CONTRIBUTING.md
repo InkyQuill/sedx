@@ -83,7 +83,14 @@ cargo test test_name
 cargo test -- --nocapture
 
 # Run integration tests
-./tests/regression_tests.sh
+cargo test --test command_coverage
+cargo test --test diff_output
+cargo test --test pipeline
+cargo test --test atomic_writes
+cargo test --test backup_rollback
+cargo test --test streaming
+cargo test --test regex_flavors
+cargo test --test errors
 ```
 
 ### Project Structure

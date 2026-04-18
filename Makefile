@@ -48,11 +48,8 @@ dev:
 
 ## test: Run all tests
 test:
-	@echo "$(COLOR_BLUE)Running Rust tests...$(COLOR_RESET)"
+	@echo "$(COLOR_BLUE)Running all tests (unit + integration)...$(COLOR_RESET)"
 	$(CARGO) test --all-features
-	@echo "$(COLOR_GREEN)Unit tests passed!$(COLOR_RESET)"
-	@echo "$(COLOR_BLUE)Running integration tests...$(COLOR_RESET)"
-	@./tests/regression_tests.sh
 	@echo "$(COLOR_GREEN)All tests passed!$(COLOR_RESET)"
 
 ## test-quick: Run quick tests only

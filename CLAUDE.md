@@ -132,34 +132,28 @@ cargo build --release
 ### Testing
 
 ```bash
-# Run Rust unit tests
+# Run all tests (unit + integration)
 cargo test
 
-# Run unit tests with output
-cargo test -- --nocapture
+# Run only unit tests
+cargo test --lib --bins
 
-# Run all tests (integration + comprehensive + phase-specific)
-./tests/run_all_tests.sh
+# Run one integration-test binary
+cargo test --test command_coverage
+cargo test --test diff_output
+cargo test --test pipeline
+cargo test --test atomic_writes
+cargo test --test backup_rollback
+cargo test --test streaming
+cargo test --test regex_flavors
+cargo test --test errors
 
-# Run quick tests only
-./tests/run_quick_tests.sh
+# Opt-in slow tests (e.g. 100 MB streaming)
+cargo test -- --ignored
 
-# Run specific test suites
-./tests/regression_tests.sh      # GNU sed compatibility
-./tests/comprehensive_tests.sh   # Extended test suite
-./tests/streaming_tests.sh       # Large file streaming
-./tests/phase4_tests.sh          # Phase 4 features
-./tests/scripts/phase5_tests.sh  # Phase 5 flow control & file I/O
-./tests/hold_space_tests.sh      # Hold space operations
-
-# Memory profiling for streaming
-./tests/memory_profile.sh
-
-# Benchmark against GNU sed
-./tests/benchmark.sh
-
-# Test specific expression patterns
-./target/release/sedx 's/foo/bar/g' test_file.txt
+# Benchmarking and memory profiling (shell tools, not tests)
+bash tests/tools/benchmark.sh
+bash tests/tools/memory_profile.sh
 ```
 
 ### Code Quality
@@ -497,7 +491,6 @@ The streaming feature is implemented in small, testable chunks:
 ```bash
 # After each chunk, run tests
 cargo test
-./tests/regression_tests.sh
 
 # Force streaming on small files for testing
 ./target/release/sedx 's/foo/bar/g' /tmp/small_test.txt
@@ -641,7 +634,7 @@ sedx '/unwanted/{z; s/EMPTY/now empty/}' file.txt
 3. Add handler in `apply_command_to_cycle()` for cycle-based mode
 4. Add handler in streaming mode if needed (check `capability.rs`)
 5. Update `commands_can_modify_files()` in `main.rs` if command modifies files
-6. Add tests in `tests/scripts/` or appropriate test suite
+6. Add tests in the appropriate `tests/*.rs` integration-test file
 
 **Flow Control Commands** (affects program counter):
 1. Add variant to `Command` enum with `range: Option<(Address, Address)>`

@@ -56,16 +56,21 @@ cargo test test_parse_substitution
 ### Running Tests
 
 ```bash
-# Run all Rust unit tests
+# Run all tests (unit + integration)
 cargo test
 
-# Run integration test suites
-./tests/run_all_tests.sh        # All tests
-./tests/run_quick_tests.sh      # Quick tests only
-./tests/regression_tests.sh     # GNU sed compatibility
-./tests/comprehensive_tests.sh  # Extended features
-./tests/streaming_tests.sh      # Large file streaming
-./tests/hold_space_tests.sh     # Hold space operations
+# Run one integration-test binary
+cargo test --test command_coverage
+cargo test --test diff_output
+cargo test --test pipeline
+cargo test --test atomic_writes
+cargo test --test backup_rollback
+cargo test --test streaming
+cargo test --test regex_flavors
+cargo test --test errors
+
+# Opt-in slow tests (e.g. 100 MB streaming)
+cargo test -- --ignored
 ```
 
 ### Code Quality
@@ -272,7 +277,6 @@ used. Now uses the full hold space content.
 1. **Run all tests:**
    ```bash
    cargo test
-   ./tests/run_all_tests.sh
    ```
 
 2. **Format code:**

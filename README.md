@@ -520,8 +520,8 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for gui
 # Run tests
 cargo test
 
-# Run integration tests
-./tests/run_all_tests.sh
+# Run integration tests (included in cargo test)
+cargo test
 
 # Format code
 cargo fmt

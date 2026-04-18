@@ -308,17 +308,8 @@ sedx '/error/w errors.log' logfile.txt
 ### Run All Tests
 
 ```bash
-# Unit tests (294 tests)
+# All tests (unit + integration)
 cargo test
-
-# Integration tests
-./tests/run_all_tests.sh
-
-# Streaming tests
-./tests/streaming_tests.sh
-
-# Phase 5 tests (flow control, file I/O)
-./tests/scripts/phase5_tests.sh
 ```
 
 ### Test Results
