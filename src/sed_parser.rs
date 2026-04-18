@@ -263,25 +263,24 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
     // This correctly handles cases where a marker appears inside the text/pattern of
     // another command (e.g., `2i\s/foo/bar/g` — insert literal "s/foo/bar/g"; or
     // `s/i\foo/bar/` — substitution whose pattern contains "i\").
-    {
-        let candidates: &[(&str, fn(&str) -> Result<SedCommand>)] = &[
-            ("i\\", parse_insert as fn(&str) -> Result<SedCommand>),
-            ("a\\", parse_append as fn(&str) -> Result<SedCommand>),
-            ("c\\", parse_change as fn(&str) -> Result<SedCommand>),
-            ("s/", parse_substitution as fn(&str) -> Result<SedCommand>),
-            ("s#", parse_substitution as fn(&str) -> Result<SedCommand>),
-            ("s:", parse_substitution as fn(&str) -> Result<SedCommand>),
-            ("s|", parse_substitution as fn(&str) -> Result<SedCommand>),
-        ];
+    type Handler = fn(&str) -> Result<SedCommand>;
+    const CANDIDATES: &[(&str, Handler)] = &[
+        ("i\\", parse_insert),
+        ("a\\", parse_append),
+        ("c\\", parse_change),
+        ("s/", parse_substitution),
+        ("s#", parse_substitution),
+        ("s:", parse_substitution),
+        ("s|", parse_substitution),
+    ];
 
-        let earliest = candidates
-            .iter()
-            .filter_map(|(marker, handler)| cmd.find(marker).map(|pos| (pos, *handler)))
-            .min_by_key(|(pos, _)| *pos);
+    let earliest = CANDIDATES
+        .iter()
+        .filter_map(|(marker, handler)| cmd.find(marker).map(|pos| (pos, *handler)))
+        .min_by_key(|(pos, _)| *pos);
 
-        if let Some((_, handler)) = earliest {
-            return handler(cmd);
-        }
+    if let Some((_, handler)) = earliest {
+        return handler(cmd);
     }
 
     // Check for hold space commands
@@ -2033,7 +2032,11 @@ mod tests {
         let result = parse_sed_expression("s/i\\foo/bar/").expect("should parse");
         assert_eq!(result.len(), 1);
         match &result[0] {
-            SedCommand::Substitution { pattern, replacement, .. } => {
+            SedCommand::Substitution {
+                pattern,
+                replacement,
+                ..
+            } => {
                 assert_eq!(pattern, "i\\foo");
                 assert_eq!(replacement, "bar");
             }

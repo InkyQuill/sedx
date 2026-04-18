@@ -9,14 +9,12 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 use tempfile::NamedTempFile;
 
-/// Preserve the destination file's mode across an atomic write.
+/// Preserve the destination file's mode across a write.
 /// Reads permissions BEFORE the write closure runs, then re-applies them after.
 /// Best-effort: silently ignores permission errors (e.g., when the file is new).
-/// On most local Linux filesystems `fs::write` truncates an existing file in place,
-/// so the mode survives incidentally; on overlayfs, some network filesystems, and
-/// any future switch to a rename-based atomic write, it does not. This wrap is the
-/// portable preservation mechanism. The streaming persist site uses an equivalent
-/// inline read-then-restore (see around the `temp_file.persist` call).
+/// Used for both in-memory `fs::write` and streaming `NamedTempFile::persist` — the
+/// rename-based atomic write loses the original mode on every filesystem, and
+/// `fs::write`'s in-place truncation only incidentally preserves it on local ext4.
 fn preserve_perms_after<F: FnOnce() -> Result<()>>(path: &Path, write: F) -> Result<()> {
     let perms = fs::metadata(path).ok().map(|m| m.permissions());
     write()?;
@@ -1266,18 +1264,16 @@ impl StreamProcessor {
                 .with_context(|| "Failed to flush temp file")?;
         } // writer dropped here
 
-        // Atomic rename: temp file becomes the actual file
-        // In dry-run mode, don't persist (temp file will be automatically deleted when dropped)
+        // Atomic rename: temp file becomes the actual file.
+        // In dry-run mode, don't persist (temp file is automatically deleted when dropped).
         if !self.dry_run {
-            let perms = fs::metadata(file_path).ok().map(|m| m.permissions());
-            temp_file.persist(file_path).with_context(|| {
-                format!("Failed to persist temp file to {}", file_path.display())
+            preserve_perms_after(file_path, || {
+                temp_file.persist(file_path).with_context(|| {
+                    format!("Failed to persist temp file to {}", file_path.display())
+                })?;
+                Ok(())
             })?;
-            if let Some(p) = perms {
-                let _ = fs::set_permissions(file_path, p);
-            }
         }
-        // If dry_run, temp_file is dropped here and automatically deleted
 
         // Build FileDiff result
         // NOTE: In streaming mode, we don't populate all_lines to save memory
@@ -3963,7 +3959,11 @@ mod tests {
         p.apply_to_file(&path).expect("apply");
 
         let after = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(after, 0o755, "expected mode preserved (0o755), got {:o}", after);
+        assert_eq!(
+            after, 0o755,
+            "expected mode preserved (0o755), got {:o}",
+            after
+        );
     }
 
     #[test]
@@ -3994,7 +3994,11 @@ mod tests {
         sp.process_streaming_forced(&path).expect("streaming apply");
 
         let after = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(after, 0o755, "streaming: expected mode 0o755, got {:o}", after);
+        assert_eq!(
+            after, 0o755,
+            "streaming: expected mode 0o755, got {:o}",
+            after
+        );
     }
 
     #[test]
@@ -4274,20 +4278,13 @@ mod cycle_tests {
     #[test]
     fn test_apply_change_range_collapses_lines() {
         use crate::command::{Address, Command};
-        let lines: Vec<String> = vec!["a", "b", "c", "d"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let mut buf: Vec<String> = ["a", "b", "c", "d"].iter().map(|s| s.to_string()).collect();
         let cmd = Command::Change {
             text: "REPLACED".to_string(),
             range: (Address::LineNumber(2), Address::LineNumber(3)),
         };
         let mut processor = FileProcessor::new(vec![cmd.clone()]);
-        let mut buf = lines.clone();
         processor.apply_command(&mut buf, &cmd).expect("apply");
-        assert_eq!(
-            buf,
-            vec!["a".to_string(), "REPLACED".to_string(), "d".to_string()]
-        );
+        assert_eq!(buf, vec!["a", "REPLACED", "d"]);
     }
 }

@@ -21,7 +21,7 @@ use logger::init_debug_logging;
 use parser::Parser;
 use std::fs;
 use std::io::{self, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use std::time::Instant;
 
@@ -365,14 +365,9 @@ fn execute_command(
     let file_paths: Vec<PathBuf> = files
         .iter()
         .filter_map(|f| {
-            let raw = PathBuf::from(f);
-            match fs::canonicalize(&raw) {
-                Ok(canonical) => Some(canonical),
-                Err(e) => {
-                    eprintln!("Error resolving {}: {}", raw.display(), e);
-                    None
-                }
-            }
+            fs::canonicalize(Path::new(f))
+                .inspect_err(|e| eprintln!("Error resolving {}: {}", f, e))
+                .ok()
         })
         .collect();
 
