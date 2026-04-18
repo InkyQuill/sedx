@@ -209,7 +209,7 @@ update:
 ## benchmark: Run benchmarks against GNU sed
 benchmark:
 	@echo "$(COLOR_BLUE)Running benchmarks...$(COLOR_RESET)"
-	@./tests/benchmark.sh
+	@./tests/tools/benchmark.sh
 
 ## version: Show version information
 version:
