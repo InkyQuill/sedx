@@ -360,7 +360,21 @@ fn execute_command(
     // Check if commands support streaming mode
     let supports_streaming = can_use_streaming(&commands);
 
-    let file_paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
+    // Follow symlinks: canonicalize each user-supplied path so all downstream steps
+    // (preview, backup, apply) operate on the real target file (GNU sed -i behavior).
+    let file_paths: Vec<PathBuf> = files
+        .iter()
+        .filter_map(|f| {
+            let raw = PathBuf::from(f);
+            match fs::canonicalize(&raw) {
+                Ok(canonical) => Some(canonical),
+                Err(e) => {
+                    eprintln!("Error resolving {}: {}", raw.display(), e);
+                    None
+                }
+            }
+        })
+        .collect();
 
     // Process all files and generate diffs (PREVIEW PHASE - always dry_run)
     // For each file, decide whether to use streaming or in-memory processing
