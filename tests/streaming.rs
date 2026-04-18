@@ -10,9 +10,7 @@ use tempfile::TempDir;
 fn forced_streaming_small_file_matches_in_memory() {
     let home = TempDir::new().unwrap();
     let dir = home.path();
-    let input: String = (0..1000)
-        .map(|i| format!("line {} foo\n", i))
-        .collect();
+    let input: String = (0..1000).map(|i| format!("line {} foo\n", i)).collect();
 
     let in_mem = write_file(dir, "mem.txt", &input);
     sedx_isolated(dir)
@@ -71,10 +69,7 @@ fn streaming_100mb_file_correctness() {
     // 1 million lines × ~100 bytes each ≈ 100 MB.
     let mut contents = String::with_capacity(100 * 1024 * 1024);
     for i in 0..1_000_000 {
-        contents.push_str(&format!(
-            "line {:07} foo {:0>50}\n",
-            i, "x"
-        ));
+        contents.push_str(&format!("line {:07} foo {:0>50}\n", i, "x"));
     }
     std::fs::write(&path, &contents).unwrap();
 

@@ -17,11 +17,7 @@ fn stdin_to_stdout_roundtrip() {
 
 #[test]
 fn stdin_mode_exits_zero_on_success() {
-    sedx()
-        .arg("s/./X/")
-        .write_stdin("a\n")
-        .assert()
-        .code(0);
+    sedx().arg("s/./X/").write_stdin("a\n").assert().code(0);
 }
 
 #[test]

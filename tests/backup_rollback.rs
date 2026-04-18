@@ -34,7 +34,11 @@ fn edit_creates_backup_with_metadata() {
     let metadata_path = backups_dir(home.path()).join(&id).join("operation.json");
     let metadata = read_file(&metadata_path);
 
-    assert!(metadata.contains("\"expression\""), "metadata: {}", metadata);
+    assert!(
+        metadata.contains("\"expression\""),
+        "metadata: {}",
+        metadata
+    );
     assert!(metadata.contains("s/foo/bar/"), "metadata: {}", metadata);
     assert!(metadata.contains(&id), "metadata: {}", metadata);
 }
@@ -85,7 +89,12 @@ fn no_backup_flag_skips_backup_creation() {
     let file = write_file(home.path(), "in.txt", "foo\n");
 
     sedx_isolated(home.path())
-        .args(["--no-backup", "--force", "s/foo/bar/", file.to_str().unwrap()])
+        .args([
+            "--no-backup",
+            "--force",
+            "s/foo/bar/",
+            file.to_str().unwrap(),
+        ])
         .assert()
         .success();
 
@@ -93,10 +102,11 @@ fn no_backup_flag_skips_backup_creation() {
     assert_eq!(read_file(&file), "bar\n");
     // No ~/.sedx/backups/ directory created.
     assert!(
-        !backups_dir(home.path()).exists() || backups_dir(home.path())
-            .read_dir()
-            .map(|mut r| r.next().is_none())
-            .unwrap_or(true),
+        !backups_dir(home.path()).exists()
+            || backups_dir(home.path())
+                .read_dir()
+                .map(|mut r| r.next().is_none())
+                .unwrap_or(true),
         "backup directory should be empty or absent"
     );
 }
