@@ -9,6 +9,22 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 use tempfile::NamedTempFile;
 
+/// Preserve the destination file's mode across an atomic write.
+/// Reads permissions BEFORE the write closure runs, then re-applies them after.
+/// Best-effort: silently ignores permission errors (e.g., when the file is new).
+/// Note: `apply_to_file` uses `fs::write` which already preserves perms via inode
+/// reuse; this wrap is defense-in-depth against future refactoring to a
+/// rename-based atomic write. The streaming persist site uses an equivalent inline
+/// read-then-restore (see around the `temp_file.persist` call).
+fn preserve_perms_after<F: FnOnce() -> Result<()>>(path: &Path, write: F) -> Result<()> {
+    let perms = fs::metadata(path).ok().map(|m| m.permissions());
+    write()?;
+    if let Some(p) = perms {
+        let _ = fs::set_permissions(path, p);
+    }
+    Ok(())
+}
+
 // Chunk 8: Key for tracking mixed range states per command
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct MixedRangeKey {
@@ -1252,9 +1268,13 @@ impl StreamProcessor {
         // Atomic rename: temp file becomes the actual file
         // In dry-run mode, don't persist (temp file will be automatically deleted when dropped)
         if !self.dry_run {
+            let perms = fs::metadata(file_path).ok().map(|m| m.permissions());
             temp_file.persist(file_path).with_context(|| {
                 format!("Failed to persist temp file to {}", file_path.display())
             })?;
+            if let Some(p) = perms {
+                let _ = fs::set_permissions(file_path, p);
+            }
         }
         // If dry_run, temp_file is dropped here and automatically deleted
 
@@ -1508,8 +1528,10 @@ impl FileProcessor {
         }
 
         let new_content = lines.join("\n") + "\n";
-        fs::write(file_path, new_content)
-            .with_context(|| format!("Failed to write file: {}", file_path.display()))?;
+        preserve_perms_after(file_path, || {
+            fs::write(file_path, &new_content)
+                .with_context(|| format!("Failed to write file: {}", file_path.display()))
+        })?;
 
         Ok(lines.len())
     }
@@ -3910,6 +3932,68 @@ mod tests {
 
         // Clean up
         fs::remove_file(test_file_path).ok();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_apply_to_file_preserves_unix_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("t.txt");
+        fs::write(&path, "old\n").unwrap();
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&path, perms).unwrap();
+
+        use crate::command::{Command, SubstitutionFlags};
+        let cmd = Command::Substitution {
+            pattern: "old".to_string(),
+            replacement: "new".to_string(),
+            flags: SubstitutionFlags {
+                global: false,
+                case_insensitive: false,
+                print: false,
+                nth: None,
+            },
+            range: None,
+        };
+        let mut p = FileProcessor::new(vec![cmd]);
+        p.apply_to_file(&path).expect("apply");
+
+        let after = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(after, 0o755, "expected mode preserved (0o755), got {:o}", after);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_streaming_preserves_unix_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("t.txt");
+        fs::write(&path, "old\n").unwrap();
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&path, perms).unwrap();
+
+        use crate::command::{Command, SubstitutionFlags};
+        let cmd = Command::Substitution {
+            pattern: "old".to_string(),
+            replacement: "new".to_string(),
+            flags: SubstitutionFlags {
+                global: false,
+                case_insensitive: false,
+                print: false,
+                nth: None,
+            },
+            range: None,
+        };
+        let mut sp = StreamProcessor::new(vec![cmd]);
+        sp.process_streaming_forced(&path).expect("streaming apply");
+
+        let after = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(after, 0o755, "streaming: expected mode 0o755, got {:o}", after);
     }
 
     #[test]
