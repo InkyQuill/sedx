@@ -107,6 +107,10 @@ fn quit_without_print_stops_without_emitting_current_line() {
         .stdout("a\n");
 }
 
+// NOTE: i\ / a\ / c\ silently no-op in stdin mode in the current sedx binary
+// (pre-existing behavior, out of scope for this migration). Use file mode so
+// the command is actually exercised.
+
 #[test]
 fn insert_before_line() {
     use tempfile::TempDir;
