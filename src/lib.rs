@@ -5,7 +5,6 @@
 
 pub mod backup_manager;
 pub mod bre_converter;
-pub mod capability;
 pub mod cli;
 pub mod command;
 pub mod config;
@@ -19,7 +18,6 @@ pub mod sed_parser;
 
 // Re-export commonly used types for convenience
 pub use backup_manager::{BackupManager, BackupMetadata, FileBackup};
-pub use capability::can_stream;
 pub use cli::RegexFlavor;
 pub use command::{Address, Command, SubstitutionFlags};
 pub use file_processor::{ChangeType, FileProcessor, LineChange, StreamProcessor};

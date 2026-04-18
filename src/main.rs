@@ -1,6 +1,5 @@
 mod backup_manager;
 mod bre_converter;
-mod capability;
 mod cli;
 mod command;
 mod config;
