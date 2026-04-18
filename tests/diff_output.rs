@@ -60,10 +60,8 @@ fn dry_run_shows_minus_prefix_for_deleted_lines() {
 }
 
 #[test]
-fn dry_run_shows_tilde_prefix_for_inserted_lines() {
-    // Insert produces a tilde (~) line showing the new text, followed by a
-    // minus (-) line for the duplicate of the line that got pushed down.
-    // We assert only that the inserted text appears with line numbering.
+fn dry_run_shows_plus_prefix_for_inserted_lines() {
+    // Insert produces a `+` line showing the new text.
     let home = TempDir::new().unwrap();
     let dir = home.path();
     let file = write_file(dir, "in.txt", "a\nb\n");
@@ -72,7 +70,7 @@ fn dry_run_shows_tilde_prefix_for_inserted_lines() {
         .args(["--dry-run", r"1i\HEAD", file.to_str().unwrap()])
         .assert()
         .success()
-        .stdout(predicate::str::contains("HEAD"));
+        .stdout(predicate::str::contains("+ HEAD"));
 }
 
 #[test]
@@ -112,7 +110,7 @@ fn dry_run_multi_file_produces_one_section_per_file() {
 
 #[test]
 fn no_color_env_suppresses_ansi_escapes() {
-    // sedx() already sets NO_COLOR=1. Assert that output contains no ESC byte.
+    // NO_COLOR=1 is set by sedx_isolated() via sedx(). Assert no ESC byte.
     let home = TempDir::new().unwrap();
     let dir = home.path();
     let file = write_file(dir, "in.txt", "foo\n");
