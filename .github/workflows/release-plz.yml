@@ -1,0 +1,70 @@
+name: Release-plz
+
+# Runs on every push to `main` and maintains the automated release flow.
+# See release-plz.toml for the full flow description.
+#
+# Uses a PAT (`secrets.RELEASE_PLZ_TOKEN`) rather than the default
+# GITHUB_TOKEN because pushes made with GITHUB_TOKEN do NOT trigger
+# downstream workflows — cargo-dist's release.yml would never fire on the
+# tag otherwise.
+#
+# Security note: this workflow consumes only `github.ref` (a safe ref
+# identifier). No untrusted fields such as commit messages, PR titles, or
+# issue bodies are ever interpolated into `run:` blocks.
+#
+# See: https://release-plz.ieni.dev/docs/github/
+
+on:
+  push:
+    branches: [main]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  contents: read
+
+jobs:
+  release-plz-release:
+    name: Release-plz release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PLZ_TOKEN }}
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Run release-plz
+        uses: MarcoIeni/release-plz-action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+
+  release-plz-pr:
+    name: Release-plz PR
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PLZ_TOKEN }}
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Run release-plz
+        uses: MarcoIeni/release-plz-action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
