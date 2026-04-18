@@ -225,8 +225,20 @@ fn can_use_streaming(commands: &[Command]) -> bool {
     true
 }
 
-/// Extract range from a command (if any)
+/// Extract range from a command (if any).
+///
+/// Returns `None` for commands that are unconditionally streamable (no range check needed).
+/// Returns `Some(range)` where the range will be validated by `is_range_supported_in_streaming`.
+/// Returns a sentinel non-streamable range for commands that cannot stream with the given address.
 fn get_command_range_option(cmd: &Command) -> Option<(Address, Address)> {
+    // Sentinel: a Negated address, which is_range_supported_in_streaming already rejects.
+    fn unsupported() -> (Address, Address) {
+        (
+            Address::Negated(Box::new(Address::LineNumber(0))),
+            Address::LineNumber(0),
+        )
+    }
+
     match cmd {
         Command::Substitution { range, .. } => range.as_ref().map(|r| (r.0.clone(), r.1.clone())),
         Command::Delete { range } => Some(range.clone()),
@@ -235,14 +247,20 @@ fn get_command_range_option(cmd: &Command) -> Option<(Address, Address)> {
             address: Address::LineNumber(_),
             ..
         } => Some((Address::LineNumber(0), Address::LineNumber(0))),
+        // Non-line-number address on Insert: not streamable
+        Command::Insert { .. } => Some(unsupported()),
         Command::Append {
             address: Address::LineNumber(_),
             ..
         } => Some((Address::LineNumber(0), Address::LineNumber(0))),
+        // Non-line-number address on Append: not streamable
+        Command::Append { .. } => Some(unsupported()),
         Command::Change {
-            range: (Address::LineNumber(_), Address::LineNumber(_)),
+            range: (Address::LineNumber(s), Address::LineNumber(e)),
             ..
-        } => Some((Address::LineNumber(0), Address::LineNumber(0))),
+        } if s == e => Some((Address::LineNumber(0), Address::LineNumber(0))),
+        // Range change or non-line-number address on Change: not streamable
+        Command::Change { .. } => Some(unsupported()),
         Command::Quit {
             address: Some(Address::LineNumber(_)) | None,
             ..

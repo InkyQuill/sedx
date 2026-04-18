@@ -836,12 +836,9 @@ impl StreamProcessor {
                                 Address::LineNumber(_) => {
                                     // Not at the target line yet, continue
                                 }
-                                _ => {
-                                    // Complex addresses (patterns) not yet supported - delegate to in-memory
-                                    drop(writer);
-                                    let mut processor = FileProcessor::new(self.commands.clone());
-                                    return processor.process_file_with_context(file_path);
-                                }
+                                _ => unreachable!(
+                                    "non-streamable address reached streaming handler; get_command_range_option/is_range_supported_in_streaming should have rejected this"
+                                ),
                             }
                         }
                         Command::Append { text, address } => {
@@ -854,12 +851,9 @@ impl StreamProcessor {
                                 Address::LineNumber(_) => {
                                     // Not at the target line yet or already passed it, continue
                                 }
-                                _ => {
-                                    // Complex addresses (patterns) not yet supported - delegate to in-memory
-                                    drop(writer);
-                                    let mut processor = FileProcessor::new(self.commands.clone());
-                                    return processor.process_file_with_context(file_path);
-                                }
+                                _ => unreachable!(
+                                    "non-streamable address reached streaming handler; get_command_range_option/is_range_supported_in_streaming should have rejected this"
+                                ),
                             }
                         }
                         Command::Change { text, range } => {
@@ -872,20 +866,9 @@ impl StreamProcessor {
                                         line_changed = true;
                                     }
                                 }
-                                _ => {
-                                    // Range or non-line address: delegate to in-memory writer (preserves data).
-                                    // Task 5 prevents this delegation by tightening can_stream.
-                                    drop(writer);
-                                    let mut processor = FileProcessor::new(self.commands.clone());
-                                    let _written = processor.apply_to_file(file_path)?;
-                                    return Ok(FileDiff {
-                                        file_path: file_path.display().to_string(),
-                                        changes: vec![],
-                                        all_lines: vec![],
-                                        printed_lines: vec![],
-                                        is_streaming: false,
-                                    });
-                                }
+                                _ => unreachable!(
+                                    "non-streamable Change address reached streaming handler; get_command_range_option/is_range_supported_in_streaming should have rejected this"
+                                ),
                             }
                         }
                         Command::Quit { address } => {

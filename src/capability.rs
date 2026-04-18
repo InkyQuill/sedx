@@ -30,10 +30,17 @@ pub fn can_stream(commands: &[Command]) -> bool {
                     return false;
                 }
             }
-            Command::Insert { .. } | Command::Append { .. } | Command::Change { .. } => {
-                // Insert/Append/Change are streamable for single-line addresses
-                // but not for ranges
-                return true;
+            Command::Insert { address, .. } | Command::Append { address, .. } => {
+                if !is_simple_line_address(address) {
+                    return false;
+                }
+            }
+            Command::Change { range, .. } => {
+                // Streamable only for the degenerate single-LineNumber form (start == end)
+                match (&range.0, &range.1) {
+                    (Address::LineNumber(s), Address::LineNumber(e)) if s == e => {}
+                    _ => return false,
+                }
             }
             Command::Group {
                 range,
@@ -167,6 +174,10 @@ fn is_range_streamable(range: &(Address, Address)) -> bool {
         // Default: conservative - not streamable
         _ => false,
     }
+}
+
+fn is_simple_line_address(addr: &Address) -> bool {
+    matches!(addr, Address::LineNumber(_))
 }
 
 #[cfg(test)]
@@ -398,5 +409,61 @@ mod tests {
             },
         ];
         assert!(can_stream(&cmds));
+    }
+
+    #[test]
+    fn test_can_stream_insert_with_pattern_address_is_false() {
+        let cmd = Command::Insert {
+            text: "X".to_string(),
+            address: Address::Pattern("foo".to_string()),
+        };
+        assert!(!can_stream(&[cmd]));
+    }
+
+    #[test]
+    fn test_can_stream_insert_with_line_address_is_true() {
+        let cmd = Command::Insert {
+            text: "X".to_string(),
+            address: Address::LineNumber(2),
+        };
+        assert!(can_stream(&[cmd]));
+    }
+
+    #[test]
+    fn test_can_stream_change_with_range_is_false() {
+        let cmd = Command::Change {
+            text: "X".to_string(),
+            range: (Address::LineNumber(2), Address::LineNumber(3)),
+        };
+        assert!(!can_stream(&[cmd]));
+    }
+
+    #[test]
+    fn test_can_stream_change_with_single_line_is_true() {
+        let cmd = Command::Change {
+            text: "X".to_string(),
+            range: (Address::LineNumber(5), Address::LineNumber(5)),
+        };
+        assert!(can_stream(&[cmd]));
+    }
+
+    #[test]
+    fn test_can_stream_insert_with_last_line_address_is_false() {
+        // The streaming handler can't handle LastLine; can_stream must agree.
+        let cmd = Command::Insert {
+            text: "X".to_string(),
+            address: Address::LastLine,
+        };
+        assert!(!can_stream(&[cmd]));
+    }
+
+    #[test]
+    fn test_can_stream_change_with_line_to_last_line_is_false() {
+        // (LineNumber, LastLine) — handler would panic; can_stream must reject.
+        let cmd = Command::Change {
+            text: "X".to_string(),
+            range: (Address::LineNumber(2), Address::LastLine),
+        };
+        assert!(!can_stream(&[cmd]));
     }
 }
