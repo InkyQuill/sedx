@@ -93,6 +93,40 @@ cargo test --test regex_flavors
 cargo test --test errors
 ```
 
+### Catching CI failures before you push (optional)
+
+The repo ships a pre-push git hook that runs the same checks CI runs
+(`cargo fmt --check` + stable and beta `cargo clippy` + `cargo test
+--all-features` + `cargo doc`). Opt in with:
+
+```bash
+make install-hook          # or: just install-hook
+```
+
+Full parity requires Rust beta, installed once:
+
+```bash
+rustup toolchain install beta --profile minimal --component clippy
+```
+
+Without beta installed, `make check-ci` and the hook still run — they
+just skip the beta clippy step with a yellow warning. CI runs on both
+stable and beta, so beta-only lints (like `clippy::collapsible_match`)
+will catch you in CI if you don't run beta locally.
+
+Bypass the hook for a single push when you need to:
+
+```bash
+git push --no-verify
+# or:
+SEDX_SKIP_HOOK=1 git push
+```
+
+**Drift note for maintainers:** `make check-ci` must stay in sync with
+the `test` and `docs` jobs in `.github/workflows/ci.yml`. If you change
+either, update both in the same commit — otherwise the hook silently
+under-protects.
+
 ### Project Structure
 
 ```
