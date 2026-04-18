@@ -251,12 +251,122 @@ fn is_inside_pattern_address(cmd: &str, pos: usize) -> bool {
     false
 }
 
+/// Attempt to dispatch a file-I/O command (`r` / `R` / `w` / `W`). Returns
+/// `Ok(Some(_))` on a successful dispatch, `Ok(None)` if the command does
+/// not look like a file-I/O command (so callers fall through to other
+/// dispatchers), or `Err(_)` if a file-I/O dispatch fired but the sub-parser
+/// itself failed.
+///
+/// This helper exists so file-I/O dispatch can run BEFORE the marker-based
+/// (`s/`, `i\`, `a\`, `c\`) dispatch. A filename payload like
+/// `/var/folders/xx/yy/T/.tmpZZ/data.txt` legitimately contains `s/` (inside
+/// the `folders/` segment), and without this ordering the whole command
+/// `R /var/folders/...` gets misrouted to `parse_substitution`.
+fn try_parse_file_io(cmd: &str) -> Result<Option<SedCommand>> {
+    let trimmed = cmd.trim();
+    if !(trimmed.contains('r')
+        || trimmed.contains('R')
+        || trimmed.contains('w')
+        || trimmed.contains('W'))
+    {
+        return Ok(None);
+    }
+
+    // Positions of each command character. Pattern-address `/.../` content
+    // is filtered out because that's where `r`/`R` etc. commonly appear as
+    // incidental letters rather than as command chars.
+    let mut r_positions: Vec<usize> = trimmed.match_indices('r').map(|(i, _)| i).collect();
+    let mut r_upper_positions: Vec<usize> = trimmed.match_indices('R').map(|(i, _)| i).collect();
+    let mut w_positions: Vec<usize> = trimmed.match_indices('w').map(|(i, _)| i).collect();
+    let mut w_upper_positions: Vec<usize> = trimmed.match_indices('W').map(|(i, _)| i).collect();
+
+    r_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
+    r_upper_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
+    w_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
+    w_upper_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
+
+    // If an insert / append / change marker (`i\`, `a\`, `c\`) appears in
+    // the command, its text payload follows the backslash and may contain
+    // any characters — including `r`, `R`, `w`, `W`. Positions past the
+    // earliest i/a/c marker are therefore part of the text payload, not
+    // file-I/O command characters.
+    let iac_pos = [
+        trimmed.find("i\\"),
+        trimmed.find("a\\"),
+        trimmed.find("c\\"),
+    ]
+    .into_iter()
+    .flatten()
+    .min();
+
+    let keep = |&pos: &usize| -> bool {
+        match iac_pos {
+            Some(iac) => pos < iac,
+            None => true,
+        }
+    };
+    let all_positions: Vec<(usize, char)> = r_positions
+        .iter()
+        .copied()
+        .filter(keep)
+        .map(|p| (p, 'r'))
+        .chain(
+            r_upper_positions
+                .iter()
+                .copied()
+                .filter(keep)
+                .map(|p| (p, 'R')),
+        )
+        .chain(w_positions.iter().copied().filter(keep).map(|p| (p, 'w')))
+        .chain(
+            w_upper_positions
+                .iter()
+                .copied()
+                .filter(keep)
+                .map(|p| (p, 'W')),
+        )
+        .collect();
+
+    let Some(&(pos, char_at_pos)) = all_positions.iter().min_by_key(|(p, _)| p) else {
+        return Ok(None);
+    };
+
+    // After the command char there must be a filename (possibly with
+    // leading whitespace). An empty tail means this is just a suffix
+    // character of a different command (e.g. `/pat/w` with the `w` closing
+    // the pattern? — doesn't happen in practice, but be conservative).
+    let rest = &trimmed[pos + 1..];
+    if rest.trim().is_empty() {
+        return Ok(None);
+    }
+
+    let parsed = match char_at_pos {
+        'r' => parse_read_file(cmd)?,
+        'R' => parse_read_line(cmd)?,
+        'w' => parse_write_file(cmd)?,
+        'W' => parse_write_first_line(cmd)?,
+        _ => unreachable!(),
+    };
+    Ok(Some(parsed))
+}
+
 fn parse_single_command(cmd: &str) -> Result<SedCommand> {
     let cmd = cmd.trim();
 
     // Check for command grouping with braces
     if cmd.contains('{') {
         return parse_group(cmd);
+    }
+
+    // Check for r/R/w/W (file I/O) commands FIRST, before the marker-based
+    // dispatch below. File I/O commands carry a filename payload that may
+    // legitimately contain any of the marker substrings — e.g. a path
+    // segment like `/folders/` trips the "s/" marker and misroutes the
+    // whole command to `parse_substitution`. See `try_parse_file_io` for
+    // the details of how pattern-address delimiters are filtered out so
+    // this does not misfire on real substitutions.
+    if let Some(cmd_out) = try_parse_file_io(cmd)? {
+        return Ok(cmd_out);
     }
 
     // Dispatch based on the EARLIEST occurrence of a command marker in the command string.
@@ -430,57 +540,8 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
         }
     }
 
-    // Check for r/R/w/W commands (file I/O) - AFTER i/a/c checks (moved earlier above)
-    // Examples: "r /path/file", "5r file.txt", "/pat/r file"
-    // These commands have filenames after them, so they don't "end with" the command char
-    // IMPORTANT: Must check that the command char is NOT part of a pattern address like /pat/
-    // Pattern addresses are delimited by forward slashes, so we skip r/R/w/W inside /.../
-    if trimmed.contains('r')
-        || trimmed.contains('R')
-        || trimmed.contains('w')
-        || trimmed.contains('W')
-    {
-        // Find all positions of each command character
-        let mut r_positions: Vec<usize> = trimmed.match_indices('r').map(|(i, _)| i).collect();
-        let mut r_upper_positions: Vec<usize> =
-            trimmed.match_indices('R').map(|(i, _)| i).collect();
-        let mut w_positions: Vec<usize> = trimmed.match_indices('w').map(|(i, _)| i).collect();
-        let mut w_upper_positions: Vec<usize> =
-            trimmed.match_indices('W').map(|(i, _)| i).collect();
-
-        // Filter out positions that are inside pattern addresses (between '/' characters)
-        // Pattern addresses have the form /pattern/ or \pattern\
-        r_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
-        r_upper_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
-        w_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
-        w_upper_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
-
-        // Find which position comes first among the remaining (non-pattern) positions
-        let all_positions: Vec<(usize, char)> = r_positions
-            .into_iter()
-            .map(|p| (p, 'r'))
-            .chain(r_upper_positions.into_iter().map(|p| (p, 'R')))
-            .chain(w_positions.into_iter().map(|p| (p, 'w')))
-            .chain(w_upper_positions.into_iter().map(|p| (p, 'W')))
-            .collect();
-
-        if let Some(&(pos, char_at_pos)) = all_positions.iter().min_by_key(|(p, _)| p) {
-            let rest = &trimmed[pos + 1..];
-
-            // After the command char, there should be a filename (possibly with spaces)
-            // The filename can be anything, so if there's content after, it's likely a file I/O command
-            if !rest.trim().is_empty() {
-                // Has content after command char - likely filename
-                return match char_at_pos {
-                    'r' => parse_read_file(cmd),
-                    'R' => parse_read_line(cmd),
-                    'w' => parse_write_file(cmd),
-                    'W' => parse_write_first_line(cmd),
-                    _ => unreachable!(),
-                };
-            }
-        }
-    }
+    // File-I/O dispatch has moved to the top of parse_single_command via
+    // try_parse_file_io(). See the comment there.
 
     // Determine command type by looking at the last character or special patterns
     if cmd.ends_with('Q') && !cmd.starts_with('s') {
@@ -2014,6 +2075,50 @@ mod tests {
                 assert!(matches!(address, Address::LineNumber(2)));
             }
             other => panic!("expected Insert, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_read_file_with_path_containing_s_slash_segment() {
+        // Regression: a path like /var/folders/.../data.txt contains the
+        // substring "s/" inside "folders/". The marker-based dispatch used
+        // to pick that up as a substitution command and misroute the whole
+        // invocation. File-I/O must be dispatched first.
+        let result =
+            parse_sed_expression("R /var/folders/tb/abc/T/.tmpXYZ/data.txt").expect("should parse");
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            SedCommand::ReadLine { filename, range } => {
+                assert_eq!(filename, "/var/folders/tb/abc/T/.tmpXYZ/data.txt");
+                assert!(range.is_none());
+            }
+            other => panic!("expected ReadLine, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_read_file_with_line_address_and_s_slash_in_path() {
+        let result = parse_sed_expression("2r /var/folders/xx/yy/extra.txt").expect("should parse");
+        match &result[0] {
+            SedCommand::ReadFile { filename, range } => {
+                assert_eq!(filename, "/var/folders/xx/yy/extra.txt");
+                assert!(matches!(range, Some(Address::LineNumber(2))));
+            }
+            other => panic!("expected ReadFile, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_write_file_with_s_slash_in_path_no_address() {
+        // Same fix as read_file: W with a path that contains `folders/`
+        // must not be misrouted through the substitution marker dispatch.
+        let result = parse_sed_expression("W /var/folders/xx/yy/out.txt").expect("should parse");
+        match &result[0] {
+            SedCommand::WriteFirstLine { filename, range } => {
+                assert_eq!(filename, "/var/folders/xx/yy/out.txt");
+                assert!(range.is_none());
+            }
+            other => panic!("expected WriteFirstLine, got {:?}", other),
         }
     }
 
