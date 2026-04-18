@@ -217,6 +217,7 @@ pub struct LineChange {
     pub line_number: usize,
     pub change_type: ChangeType,
     pub content: String,
+    #[allow(dead_code)] // Used by library consumers
     pub old_content: Option<String>, // For Modified type
 }
 
@@ -227,16 +228,6 @@ pub struct FileDiff {
     pub all_lines: Vec<(usize, String, ChangeType)>, // (line_number, content, change_type)
     pub printed_lines: Vec<String>,                  // Lines from print commands
     pub is_streaming: bool, // True if processed in streaming mode (all_lines may be empty)
-}
-
-// Legacy structure for backward compatibility
-#[derive(Debug)]
-#[allow(dead_code)] // Legacy type - kept for API compatibility
-pub struct FileChange {
-    pub line_number: usize,
-    #[allow(dead_code)] // Part of legacy API
-    pub old_content: String,
-    pub new_content: String,
 }
 
 pub struct FileProcessor {
@@ -1384,24 +1375,7 @@ impl FileProcessor {
         true
     }
 
-    /// Legacy method - returns simple changes (for backward compatibility)
-    #[allow(dead_code)] // Public API - kept for compatibility
-    pub fn process_file(&mut self, file_path: &Path) -> Result<Vec<FileChange>> {
-        let diff = self.process_file_with_context(file_path)?;
-
-        Ok(diff
-            .changes
-            .iter()
-            .filter(|c| c.change_type == ChangeType::Modified)
-            .map(|c| FileChange {
-                line_number: c.line_number,
-                old_content: c.old_content.clone().unwrap_or_default(),
-                new_content: c.content.clone(),
-            })
-            .collect())
-    }
-
-    /// New method - returns detailed diff with context
+    /// Returns detailed diff with context
     pub fn process_file_with_context(&mut self, file_path: &Path) -> Result<FileDiff> {
         let content = fs::read_to_string(file_path)
             .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
