@@ -12,10 +12,11 @@ use tempfile::NamedTempFile;
 /// Preserve the destination file's mode across an atomic write.
 /// Reads permissions BEFORE the write closure runs, then re-applies them after.
 /// Best-effort: silently ignores permission errors (e.g., when the file is new).
-/// Note: `apply_to_file` uses `fs::write` which already preserves perms via inode
-/// reuse; this wrap is defense-in-depth against future refactoring to a
-/// rename-based atomic write. The streaming persist site uses an equivalent inline
-/// read-then-restore (see around the `temp_file.persist` call).
+/// On most local Linux filesystems `fs::write` truncates an existing file in place,
+/// so the mode survives incidentally; on overlayfs, some network filesystems, and
+/// any future switch to a rename-based atomic write, it does not. This wrap is the
+/// portable preservation mechanism. The streaming persist site uses an equivalent
+/// inline read-then-restore (see around the `temp_file.persist` call).
 fn preserve_perms_after<F: FnOnce() -> Result<()>>(path: &Path, write: F) -> Result<()> {
     let perms = fs::metadata(path).ok().map(|m| m.permissions());
     write()?;
