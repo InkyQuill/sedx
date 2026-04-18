@@ -29,7 +29,7 @@ COLOR_GREEN = \033[32m
 COLOR_YELLOW = \033[33m
 COLOR_BLUE = \033[34m
 
-.PHONY: all build test install uninstall clean completions man release help
+.PHONY: all build test install uninstall clean completions man release help check-ci install-hook
 
 # Default target
 all: build
@@ -145,6 +145,31 @@ fmt-check:
 	@echo "$(COLOR_BLUE)Checking code formatting...$(COLOR_RESET)"
 	$(CARGO) fmt --check
 	@echo "$(COLOR_GREEN)Code is formatted$(COLOR_RESET)"
+
+## check-ci: Run the same checks CI runs (fmt + clippy stable+beta + test + docs)
+check-ci:
+	@echo "$(COLOR_BLUE)Running CI-equivalent checks locally...$(COLOR_RESET)"
+	$(CARGO) fmt --check
+	$(CARGO) clippy --all-targets --all-features -- -D warnings
+	@if command -v rustup >/dev/null 2>&1 && rustup toolchain list 2>/dev/null | grep -q '^beta'; then \
+		echo "$(COLOR_BLUE)Running beta clippy...$(COLOR_RESET)"; \
+		$(CARGO) +beta clippy --all-targets --all-features -- -D warnings; \
+	else \
+		echo "$(COLOR_YELLOW)Skipping beta clippy (beta toolchain not installed; 'rustup toolchain install beta' to enable)$(COLOR_RESET)"; \
+	fi
+	$(CARGO) test --all-features
+	$(CARGO) doc --no-deps --all-features
+	@echo "$(COLOR_GREEN)CI-equivalent checks passed$(COLOR_RESET)"
+
+## install-hook: Install the pre-push git hook (copies from contrib/hooks/)
+install-hook:
+	@if [ ! -d .git ]; then \
+		echo "$(COLOR_YELLOW)Not a git checkout; nothing to install$(COLOR_RESET)"; \
+		exit 1; \
+	fi
+	@install -m 0755 contrib/hooks/pre-push .git/hooks/pre-push
+	@echo "$(COLOR_GREEN)Pre-push hook installed at .git/hooks/pre-push$(COLOR_RESET)"
+	@echo "$(COLOR_YELLOW)Bypass once with: git push --no-verify$(COLOR_RESET)"
 
 ## release: Build release binaries for all platforms
 release:
