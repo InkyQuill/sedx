@@ -105,7 +105,16 @@ sedx/
 │   ├── diff_formatter.rs    # Output formatting
 │   └── backup_manager.rs    # Backup/rollback system
 ├── tests/
-│   └── regression_tests.sh  # Integration tests
+│   ├── common/              # Shared integration-test helpers
+│   ├── command_coverage.rs  # One smoke test per Command variant
+│   ├── diff_output.rs       # --dry-run output shape
+│   ├── pipeline.rs          # stdin→stdout, -e composition, exit codes
+│   ├── atomic_writes.rs     # Mode preservation, symlink follow
+│   ├── backup_rollback.rs   # Backup + rollback + history
+│   ├── streaming.rs         # Large-file correctness
+│   ├── regex_flavors.rs     # -E / -B / default PCRE plumbing
+│   ├── errors.rs            # Exit codes + error-message surface
+│   └── tools/               # Benchmark & memory-profile scripts
 └── Cargo.toml
 ```
 
@@ -113,12 +122,13 @@ sedx/
 
 When adding sed features:
 
-1. Research GNU sed behavior thoroughly
+1. Research GNU sed behavior thoroughly (as a reference, not a parity target)
 2. Update `sed_parser.rs` to parse the new command
 3. Implement logic in `file_processor.rs`
-4. Add comprehensive tests comparing with GNU sed
-5. Update README.md with examples
-6. Ensure existing tests still pass
+4. Add unit tests in `sed_parser.rs` and/or `file_processor.rs`
+5. Add an integration test in the appropriate `tests/*.rs` file (usually `tests/command_coverage.rs`) that spawns the binary and asserts on output
+6. Update README.md with examples
+7. Ensure existing tests still pass (`cargo test`)
 
 ## Style Guidelines
 

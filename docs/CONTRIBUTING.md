@@ -112,13 +112,17 @@ sedx/
 │   ├── regex_error.rs     # Enhanced error messages
 │   ├── error_helpers.rs   # Error handling utilities
 │   └── lib.rs             # Library exports
-├── tests/                  # Integration tests
-│   ├── run_all_tests.sh
-│   ├── regression_tests.sh
-│   ├── comprehensive_tests.sh
-│   ├── streaming_tests.sh
-│   ├── scripts/           # Phase-specific test scripts
-│   └── memory_profile.sh  # Memory usage testing
+├── tests/                  # Integration tests (Rust)
+│   ├── common/             # Shared test helpers
+│   ├── command_coverage.rs # Smoke test per Command variant
+│   ├── diff_output.rs      # --dry-run output shape
+│   ├── pipeline.rs         # stdin→stdout, -e, exit codes
+│   ├── atomic_writes.rs    # Mode preservation, symlink follow
+│   ├── backup_rollback.rs  # Backup / rollback / history
+│   ├── streaming.rs        # Large-file correctness
+│   ├── regex_flavors.rs    # -E / -B / default PCRE plumbing
+│   ├── errors.rs           # Exit codes + error messages
+│   └── tools/              # Benchmark & memory-profile scripts
 ├── docs/                   # Documentation
 │   ├── ARCHITECTURE.md    # Architecture documentation
 │   ├── CONTRIBUTING.md    # This file
@@ -177,27 +181,36 @@ mod tests {
 
 ### Integration Tests
 
-Integration tests compare SedX output with GNU sed to ensure compatibility.
+Integration tests are Rust binaries under `tests/*.rs`. Each test spawns the
+real `sedx` binary via `assert_cmd` and asserts on stdout/stderr/exit code and
+filesystem side effects. Tests assert sedx's own behavior — we do not
+cross-compare against GNU sed.
+
+Shared helpers live in `tests/common/mod.rs`: `sedx()` for stdin-mode tests,
+`sedx_isolated(home_dir)` for any test that touches `~/.sedx/backups/`
+(isolates backup directory into a tempdir), plus `write_file` / `read_file`.
 
 **Adding a new integration test:**
 
-1. Create a test function in the appropriate test script
-2. Create a temporary test file with known content
-3. Run both GNU sed and SedX with the same expression
-4. Compare outputs
-5. Clean up test files
+1. Pick the appropriate `tests/*.rs` file — most new coverage goes into
+   `tests/command_coverage.rs`.
+2. Create a tempdir per test with `tempfile::TempDir::new()`; write any
+   input files with `common::write_file(dir, name, content)`.
+3. Invoke sedx via `common::sedx()` (stdin mode, no backups) or
+   `common::sedx_isolated(dir)` (file mode with isolated `~/.sedx/`).
+4. Assert on `.stdout(...)`, `.stderr(...)`, `.success()` / `.failure()`,
+   and read back files with `common::read_file(path)` for side-effect checks.
 
 **Example:**
-```bash
-test_substitution_with_backreference() {
-    local test_file="/tmp/test_br_$$.txt"
-    echo "foo bar baz" > "$test_file"
-
-    local expected=$(sed 's/\([a-z]\+\) \([a-z]\+\)/\2 \1/' "$test_file")
-    local actual=$(./target/release/sedx 's/([a-z]+) ([a-z]+)/$2 $1/' "$test_file")
-
-    assertEquals "$expected" "$actual"
-    rm -f "$test_file"
+```rust
+#[test]
+fn substitution_swaps_via_backreferences() {
+    common::sedx()
+        .arg(r"s/([a-z]+) ([a-z]+)/$2 $1/")
+        .write_stdin("foo bar\n")
+        .assert()
+        .success()
+        .stdout("bar foo\n");
 }
 ```
 

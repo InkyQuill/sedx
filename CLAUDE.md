@@ -510,10 +510,15 @@ Last 50 backups are kept automatically. Old backups cleaned up when creating new
 - Parser tests in `sed_parser.rs` modules
 - Test command parsing, address resolution, backreference conversion
 
-**Integration tests** (`./tests/*.sh`):
-- Bash scripts comparing SedX output with GNU sed
-- Test against real sed to ensure compatibility
-- Cover: substitutions, deletes, ranges, patterns, negation, grouping, hold space, flow control, file I/O
+**Integration tests** (`cargo test --test <name>`):
+- Rust integration-test binaries under `tests/*.rs` that spawn the real
+  `sedx` binary via `assert_cmd` and assert on stdout/stderr/exit code
+  plus filesystem side effects
+- Assert sedx's own behavior — no GNU-sed cross-comparison
+- Binaries: `command_coverage`, `diff_output`, `pipeline`, `atomic_writes`,
+  `backup_rollback`, `streaming`, `regex_flavors`, `errors`
+- Shared helpers in `tests/common/mod.rs` (`sedx()`, `sedx_isolated()`,
+  `write_file`, `read_file`)
 
 **Manual testing workflow**:
 ```bash
@@ -661,7 +666,7 @@ sedx '/unwanted/{z; s/EMPTY/now empty/}' file.txt
 1. Add `apply_*()` method in `FileProcessor`
 2. Update `apply_command()` match statement
 3. Add unit tests in `sed_parser.rs` `#[cfg(test)]` module
-4. Add integration tests in bash scripts under `tests/`
+4. Add an integration test in the appropriate `tests/*.rs` file (typically `tests/command_coverage.rs`), spawning the binary via `common::sedx()` or `common::sedx_isolated()`
 
 **Streaming Implementation** (for large file support):
 1. Update `capability.rs::can_stream()` to check if command supports streaming
