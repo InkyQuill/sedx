@@ -26,7 +26,16 @@ fn forced_streaming_small_file_matches_in_memory() {
         .assert()
         .success();
 
-    assert_eq!(read_file(&in_mem), read_file(&streamed));
+    let mem_out = read_file(&in_mem);
+    let stream_out = read_file(&streamed);
+
+    // Paths must agree on the output bytes.
+    assert_eq!(mem_out, stream_out);
+
+    // Positive check: the substitution actually ran (both paths broken the
+    // same way would satisfy only the equality above).
+    assert!(!mem_out.contains("foo"));
+    assert_eq!(mem_out.matches("bar").count(), 1000);
 }
 
 #[cfg(unix)]
