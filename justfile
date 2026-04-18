@@ -33,11 +33,8 @@ dev:
 
 # Run all tests
 test:
-    @echo "Running Rust tests..."
+    @echo "Running all tests (unit + integration)..."
     {{cargo}} test --all-features
-    @echo "Unit tests passed!"
-    @echo "Running integration tests..."
-    @./tests/regression_tests.sh
     @echo "All tests passed!"
 
 # Run quick tests only
@@ -196,7 +193,7 @@ update:
 # Run benchmarks against GNU sed
 benchmark:
     @echo "Running benchmarks..."
-    @./tests/benchmark.sh
+    @./tests/tools/benchmark.sh
 
 # Show version information
 version:
