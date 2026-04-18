@@ -22,13 +22,22 @@ fn missing_input_file_emits_warning_to_stderr() {
     // Current behavior (codified, not asserted as correct): missing files
     // produce a stderr warning and exit 0 with "No changes would be made."
     // If that policy is tightened to exit non-zero, update this test.
+    //
+    // The OS error message varies by platform:
+    //   Unix:    "No such file or directory"
+    //   Windows: "The system cannot find the path specified."
+    // We accept either phrasing — the assertion is that the missing-file
+    // error is surfaced in stderr, not that any one OS's wording is used.
     let home = TempDir::new().unwrap();
     sedx_isolated(home.path())
         .args(["s/foo/bar/", "/nonexistent/definitely/missing.txt"])
         .assert()
         .success()
         .stderr(predicate::str::contains("Error resolving"))
-        .stderr(predicate::str::contains("No such file"));
+        .stderr(
+            predicate::str::contains("No such file")
+                .or(predicate::str::contains("cannot find the path")),
+        );
 }
 
 #[cfg(unix)]
