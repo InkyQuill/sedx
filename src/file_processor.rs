@@ -539,23 +539,18 @@ impl StreamProcessor {
             .with_context(|| format!("Invalid regex pattern: {}", start_pat))?;
 
         let in_range = match state {
-            MixedRangeState::LookingForPattern => {
-                if start_re.is_match(line) {
-                    *state = MixedRangeState::InRangeUntilLine {
-                        target_line: end_line,
-                    };
-                    true
-                } else {
-                    false
-                }
+            MixedRangeState::LookingForPattern if start_re.is_match(line) => {
+                *state = MixedRangeState::InRangeUntilLine {
+                    target_line: end_line,
+                };
+                true
             }
+            MixedRangeState::LookingForPattern => false,
             MixedRangeState::InRangeUntilLine { target_line } => {
                 if self.current_line >= *target_line {
                     *state = MixedRangeState::LookingForPattern; // Reset for next occurrence
-                    true // Include the end line
-                } else {
-                    true
                 }
+                true // Always inside the range while state is InRangeUntilLine
             }
             _ => false,
         };
@@ -578,25 +573,20 @@ impl StreamProcessor {
             .or_insert(MixedRangeState::LookingForPattern);
 
         let in_range = match state {
-            MixedRangeState::LookingForPattern => {
-                if self.current_line >= start_line {
-                    *state = MixedRangeState::InRangeUntilPattern {
-                        end_pattern: end_pat.to_string(),
-                    };
-                    true
-                } else {
-                    false
-                }
+            MixedRangeState::LookingForPattern if self.current_line >= start_line => {
+                *state = MixedRangeState::InRangeUntilPattern {
+                    end_pattern: end_pat.to_string(),
+                };
+                true
             }
+            MixedRangeState::LookingForPattern => false,
             MixedRangeState::InRangeUntilPattern { end_pattern } => {
                 let end_re = Regex::new(end_pattern)
                     .with_context(|| format!("Invalid regex pattern: {}", end_pattern))?;
                 if end_re.is_match(line) {
                     *state = MixedRangeState::LookingForPattern; // Reset for next occurrence
-                    true // Include the end line
-                } else {
-                    true
                 }
+                true // Always inside the range while state is InRangeUntilPattern
             }
             _ => false,
         };
