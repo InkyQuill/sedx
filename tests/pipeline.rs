@@ -47,17 +47,13 @@ fn multiple_e_flags_compose_left_to_right() {
 
 #[test]
 fn stdin_output_is_backup_and_diff_free() {
-    // In pipeline mode sedx must emit only the transformed text — no
-    // "Backup created:", no "Total:", no "Rollback with:" lines.
-    let output = sedx()
+    // In pipeline mode stdout must be only the transformed text. Exact-match
+    // predicate implicitly rules out any "Backup created:", "Total:", or
+    // "Rollback with:" lines that sedx prints in file mode.
+    sedx()
         .arg("s/foo/bar/")
         .write_stdin("foo\nbaz\n")
         .assert()
         .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let text = String::from_utf8(output).unwrap();
-    assert_eq!(text, "bar\nbaz\n");
+        .stdout("bar\nbaz\n");
 }
