@@ -74,29 +74,6 @@ pub fn convert_bre_to_pcre(pattern: &str) -> String {
     result
 }
 
-/// Detect if a pattern is in Basic Regular Expression (BRE) format
-///
-/// # Detection Rules
-///
-/// A pattern is considered BRE if it contains:
-/// - Escaped parentheses: `\(`, `\)`
-/// - Escaped braces: `\{`, `\}`
-/// - Escaped quantifiers: `\+`, `\?`
-/// - Escaped alternation: `\|`
-#[allow(dead_code)] // Kept for potential future use
-pub fn is_bre_pattern(pattern: &str) -> bool {
-    pattern.contains("\\(") || pattern.contains("\\)") ||
-    pattern.contains("\\{") || pattern.contains("\\}") ||
-    pattern.contains("\\+") || pattern.contains("\\?") ||
-    pattern.contains("\\|") ||
-    // Check for backreferences \1-\9
-    (pattern.contains("\\1") || pattern.contains("\\2") ||
-     pattern.contains("\\3") || pattern.contains("\\4") ||
-     pattern.contains("\\5") || pattern.contains("\\6") ||
-     pattern.contains("\\7") || pattern.contains("\\8") ||
-     pattern.contains("\\9"))
-}
-
 /// Convert sed-style backreferences in replacement string to Rust regex style
 ///
 /// # Conversion Rules
@@ -159,6 +136,26 @@ pub fn convert_sed_backreferences(replacement: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Detect if a pattern is in Basic Regular Expression (BRE) format (test helper).
+    fn is_bre_pattern(pattern: &str) -> bool {
+        pattern.contains("\\(")
+            || pattern.contains("\\)")
+            || pattern.contains("\\{")
+            || pattern.contains("\\}")
+            || pattern.contains("\\+")
+            || pattern.contains("\\?")
+            || pattern.contains("\\|")
+            || (pattern.contains("\\1")
+                || pattern.contains("\\2")
+                || pattern.contains("\\3")
+                || pattern.contains("\\4")
+                || pattern.contains("\\5")
+                || pattern.contains("\\6")
+                || pattern.contains("\\7")
+                || pattern.contains("\\8")
+                || pattern.contains("\\9"))
+    }
 
     #[test]
     fn test_convert_parentheses() {

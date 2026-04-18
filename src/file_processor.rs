@@ -40,19 +40,21 @@ enum MixedRangeState {
 
 /// Pattern range state for streaming mode (Chunk 8)
 #[derive(Clone, PartialEq)]
-#[allow(dead_code)] // Reserved for future use in mixed range handling
 enum PatternRangeState {
     LookingForStart, // Looking for start pattern
     InRange,         // Currently inside /start/,/end/ range
-    // Chunk 8: Mixed range states
-    #[allow(dead_code)] // Reserved for future use
+    // Matched exhaustively in check_pattern_range() but not yet constructed;
+    // these guard the /start/,N and /start/,+N range variants planned for Chunk 8.
+    #[allow(dead_code)]
+    // Variant for /start/,N ranges — constructed when that range type is implemented.
     WaitingForLineNumber {
         target_line: usize,
-    }, // /start/,10 - waiting to reach line 10
-    #[allow(dead_code)] // Reserved for future use
+    },
+    #[allow(dead_code)]
+    // Variant for /start/,+N ranges — constructed when relative-offset range type is implemented.
     CountingRelativeLines {
         remaining: usize,
-    }, // /start/,+5 - counting N lines after match
+    },
 }
 
 // ============================================================================
@@ -94,16 +96,10 @@ impl LineIterator {
         }
     }
 
-    /// Check if at EOF
-    #[allow(dead_code)] // Kept for potential future use
+    /// Check if at EOF (used by tests)
+    #[cfg(test)]
     fn is_eof(&self) -> bool {
         self.current >= self.lines.len()
-    }
-
-    /// Peek at current position without consuming
-    #[allow(dead_code)] // Kept for potential future use
-    fn peek(&self) -> usize {
-        self.current
     }
 }
 
@@ -161,14 +157,6 @@ struct CycleState {
     /// Input line iterator for n/N commands
     line_iter: LineIterator,
 
-    /// Pattern range states (for /start/,/end/ ranges)
-    #[allow(dead_code)] // Reserved for future use
-    pattern_range_states: HashMap<(String, String), PatternRangeState>,
-
-    /// Mixed range states for tracking complex ranges (Chunk 8)
-    #[allow(dead_code)] // Reserved for future use
-    mixed_range_states: HashMap<MixedRangeKey, MixedRangeState>,
-
     /// Line number range states (for 1,3 ranges)
     /// Maps (start_line, end_line) -> (in_range, ended)
     /// in_range: true if we're currently inside the range
@@ -192,8 +180,6 @@ impl CycleState {
             stdout_outputs: Vec::new(), // Phase 5: Initialize stdout outputs
             current_filename: filename, // Phase 5: Initialize filename
             line_iter: LineIterator::new(lines),
-            pattern_range_states: HashMap::new(),
-            mixed_range_states: HashMap::new(),
             line_range_states: HashMap::new(),
             substitution_made: false, // Phase 5: Initialize substitution flag
         }
@@ -217,8 +203,9 @@ pub struct LineChange {
     pub line_number: usize,
     pub change_type: ChangeType,
     pub content: String,
-    #[allow(dead_code)] // Used by library consumers
-    pub old_content: Option<String>, // For Modified type
+    #[allow(dead_code)]
+    // Present on Modified variants; library consumers use this to inspect pre/post content of a changed line.
+    pub old_content: Option<String>,
 }
 
 #[derive(Debug)]
@@ -248,15 +235,6 @@ pub struct FileProcessor {
     regex_flavor: crate::cli::RegexFlavor,
 }
 
-/// Result of applying a command in streaming mode
-#[derive(Debug)]
-#[allow(dead_code)] // Reserved for future streaming enhancements
-enum StreamResult {
-    Output(String), // Line should be output
-    Skip,           // Don't output (deleted)
-    StopProcessing, // Quit command encountered
-}
-
 /// Processor for streaming large files with constant memory usage
 pub struct StreamProcessor {
     commands: Vec<Command>,
@@ -278,7 +256,7 @@ pub struct StreamProcessor {
 }
 
 impl StreamProcessor {
-    #[allow(dead_code)] // Part of public API for library users
+    #[allow(dead_code)] // Part of the public StreamProcessor API — used by property tests and library consumers.
     pub fn new(commands: Vec<Command>) -> Self {
         Self::with_regex_flavor(commands, crate::cli::RegexFlavor::PCRE)
     }
@@ -326,7 +304,7 @@ impl StreamProcessor {
     }
 
     /// Check if file should use streaming based on size
-    #[allow(dead_code)] // Kept for potential future use
+    #[allow(dead_code)] // Called by process_streaming; both are part of the public StreamProcessor API for large-file handling.
     fn should_use_streaming(file_size: u64) -> bool {
         const STREAMING_THRESHOLD: u64 = 100 * 1024 * 1024; // 100MB
         file_size >= STREAMING_THRESHOLD
@@ -697,7 +675,7 @@ impl StreamProcessor {
     /// Process a file using streaming approach (constant memory)
     ///
     /// Currently implements substitution commands. More command types will be added.
-    #[allow(dead_code)] // Kept for potential future use
+    #[allow(dead_code)] // Part of the public StreamProcessor API — library consumers call this to process large files without loading them fully into memory.
     pub fn process_streaming(&mut self, file_path: &Path) -> Result<FileDiff> {
         // Check file exists and get size
         let metadata = fs::metadata(file_path)
@@ -1325,7 +1303,7 @@ impl FileProcessor {
     }
 
     /// Get the lines that were printed by print commands (for quiet mode)
-    #[allow(dead_code)] // Public API - kept for compatibility
+    #[allow(dead_code)] // Part of the public FileProcessor API — library consumers call this to retrieve p-command output in -n mode.
     pub fn get_printed_lines(&self) -> &[String] {
         &self.printed_lines
     }

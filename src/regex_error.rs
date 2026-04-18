@@ -50,7 +50,8 @@ pub enum RegexErrorType {
         position: Option<usize>,
     },
     /// Other regex error
-    #[allow(dead_code)] // Fallback variant for future error types
+    #[allow(dead_code)]
+    // Exhaustive fallback variant in the public RegexErrorType enum; matched in format/suggestion arms.
     Other { message: String },
 }
 

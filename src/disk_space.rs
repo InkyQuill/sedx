@@ -15,10 +15,12 @@ pub struct DiskSpaceInfo {
     /// Available disk space in bytes
     pub available_bytes: u64,
     /// Used disk space in bytes
-    #[allow(dead_code)] // Kept for API completeness and potential future use
+    #[allow(dead_code)]
+    // Part of the public DiskSpaceInfo API — library consumers inspect the full disk usage breakdown.
     pub used_bytes: u64,
     /// Percentage of disk used
-    #[allow(dead_code)] // Kept for API completeness and potential future use
+    #[allow(dead_code)]
+    // Part of the public DiskSpaceInfo API — library consumers inspect the full disk usage breakdown.
     pub used_percent: f64,
 }
 
@@ -121,7 +123,6 @@ pub fn get_disk_space(path: &Path) -> Result<DiskSpaceInfo> {
 ///
 /// Windows implementation not yet available - always returns error
 #[cfg(windows)]
-#[allow(dead_code)] // Stub function on Windows, used on Unix
 pub fn get_disk_space(_path: &Path) -> Result<DiskSpaceInfo> {
     Err(anyhow::anyhow!(
         "Windows disk space checking not yet implemented. \
@@ -182,7 +183,6 @@ pub fn check_disk_space_for_backup(
 ///
 /// Windows version - skips disk space checking
 #[cfg(windows)]
-#[allow(dead_code)] // Stub function on Windows, used on Unix
 pub fn check_disk_space_for_backup(
     _backup_dir: &Path,
     _file_size: u64,
