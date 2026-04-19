@@ -203,8 +203,13 @@ pub struct LineChange {
     pub line_number: usize,
     pub change_type: ChangeType,
     pub content: String,
+    /// Pre-change content, populated on `ChangeType::Modified` variants so
+    /// that consumers inspecting a `LineChange` can show the before/after
+    /// pair. Read from the `#[cfg(test)]` block in `diff_formatter.rs` and
+    /// from any downstream library consumer that iterates a `FileDiff`.
+    /// The sedx binary itself only writes this field; the `dead_code`
+    /// allow is necessary until a non-test reader lands in production.
     #[allow(dead_code)]
-    // Present on Modified variants; library consumers use this to inspect pre/post content of a changed line.
     pub old_content: Option<String>,
 }
 
@@ -256,7 +261,13 @@ pub struct StreamProcessor {
 }
 
 impl StreamProcessor {
-    #[allow(dead_code)] // Part of the public StreamProcessor API — used by property tests and library consumers.
+    /// Default-flavor constructor. Callers that want a non-PCRE flavor
+    /// should use `with_regex_flavor` directly. Consumed by
+    /// `tests/property_tests.rs` and by library users that re-export
+    /// `StreamProcessor` via `sedx::StreamProcessor`. The sedx binary
+    /// itself always goes through `with_regex_flavor`, so the `dead_code`
+    /// allow is necessary until a binary caller lands.
+    #[allow(dead_code)]
     pub fn new(commands: Vec<Command>) -> Self {
         Self::with_regex_flavor(commands, crate::cli::RegexFlavor::PCRE)
     }
