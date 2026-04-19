@@ -1458,9 +1458,12 @@ fn parse_read_file(cmd: &str) -> Result<Command> {
 fn parse_write_file(cmd: &str) -> Result<Command> {
     let cmd = cmd.trim();
 
-    // Find the 'w' command character
+    // Find the 'w' command character — skip any 'w' that is inside a pattern
+    // address (e.g. `/wrong/w filename` must not match the 'w' in "wrong").
     let w_pos = cmd
-        .find('w')
+        .char_indices()
+        .find(|&(pos, ch)| ch == 'w' && !is_inside_pattern_address(cmd, pos))
+        .map(|(pos, _)| pos)
         .ok_or_else(|| anyhow!("Write file command missing 'w'"))?;
 
     // Split into: address_part (before 'w') and rest_part (after 'w' including 'w')
@@ -1501,9 +1504,12 @@ fn parse_write_file(cmd: &str) -> Result<Command> {
 fn parse_read_line(cmd: &str) -> Result<Command> {
     let cmd = cmd.trim();
 
-    // Find the 'R' command character
+    // Find the 'R' command character — skip any 'R' that is inside a pattern
+    // address (e.g. `/wRong/R filename` must not match the 'R' in "wRong").
     let r_pos = cmd
-        .find('R')
+        .char_indices()
+        .find(|&(pos, ch)| ch == 'R' && !is_inside_pattern_address(cmd, pos))
+        .map(|(pos, _)| pos)
         .ok_or_else(|| anyhow!("Read line command missing 'R'"))?;
 
     // Split into: address_part (before 'R') and rest_part (after 'R' including 'R')
@@ -1544,9 +1550,12 @@ fn parse_read_line(cmd: &str) -> Result<Command> {
 fn parse_write_first_line(cmd: &str) -> Result<Command> {
     let cmd = cmd.trim();
 
-    // Find the 'W' command character
+    // Find the 'W' command character — skip any 'W' that is inside a pattern
+    // address (e.g. `/Wrong/W filename` must not match the 'W' in "Wrong").
     let w_pos = cmd
-        .find('W')
+        .char_indices()
+        .find(|&(pos, ch)| ch == 'W' && !is_inside_pattern_address(cmd, pos))
+        .map(|(pos, _)| pos)
         .ok_or_else(|| anyhow!("Write first line command missing 'W'"))?;
 
     // Split into: address_part (before 'W') and rest_part (after 'W' including 'W')
@@ -2147,6 +2156,48 @@ mod tests {
     #[test]
     fn parse_pattern_addr_capital_w_with_absolute_path() {
         let commands = parse_sed_expression("/err/W /var/log/first.log").unwrap();
+        assert_eq!(commands.len(), 1);
+        match &commands[0] {
+            Command::WriteFirstLine { filename, range } => {
+                assert_eq!(filename, "/var/log/first.log");
+                assert!(range.is_some());
+            }
+            other => panic!("expected WriteFirstLine, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_pattern_addr_with_w_in_pattern() {
+        // `/wrong/w /tmp/out` — the `w` inside `/wrong/` must be skipped.
+        let commands = parse_sed_expression("/wrong/w /tmp/out.log").unwrap();
+        assert_eq!(commands.len(), 1);
+        match &commands[0] {
+            Command::WriteFile { filename, range } => {
+                assert_eq!(filename, "/tmp/out.log");
+                assert!(range.is_some());
+            }
+            other => panic!("expected WriteFile, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_pattern_addr_with_capital_r_in_pattern() {
+        // `/wRong/R data.txt` — the `R` inside `/wRong/` must be skipped.
+        let commands = parse_sed_expression("/wRong/R data.txt").unwrap();
+        assert_eq!(commands.len(), 1);
+        match &commands[0] {
+            Command::ReadLine { filename, range } => {
+                assert_eq!(filename, "data.txt");
+                assert!(range.is_some());
+            }
+            other => panic!("expected ReadLine, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_pattern_addr_with_capital_w_in_pattern() {
+        // `/Wrong/W /var/log/first.log` — the `W` inside `/Wrong/` must be skipped.
+        let commands = parse_sed_expression("/Wrong/W /var/log/first.log").unwrap();
         assert_eq!(commands.len(), 1);
         match &commands[0] {
             Command::WriteFirstLine { filename, range } => {
