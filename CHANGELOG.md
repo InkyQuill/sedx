@@ -5,6 +5,43 @@ All notable changes to SedX are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-04-19
+
+### Added
+- Implement Windows get_disk_space via windows-sys
+- Honor SEDX_HOME env var for portable test isolation
+- Support address ranges (2,3c\TEXT) like GNU sed
+
+
+### Changed
+- Drop windows-test cfg guard + clean stale comments
+- Share check_disk_space_for_backup across platforms
+- Drop unused PatternRangeState variants
+- Tighten phase-2 comment + add escaped-slash regression test
+- Emit command::Command directly from sed_parser
+- Sweep speculative #[allow(dead_code)] markers
+- Delete unused format_preview + FileChange
+- Drop dangling module references in lib.rs and main.rs
+- Simplify recently-touched code on fix/correctness-bugs
+
+
+### Fixed
+- Resolve Windows-only clippy errors
+- Recurse into Group for read-only command detection
+- Print pattern space on EOF instead of silently dropping
+- Suppress 'no backup' warning for read-only expressions
+- Don't write files for read-only expressions
+- Apply pattern-address skip to r/w/R/W parsers
+- Correct is_inside_pattern_address for path args
+- Consolidate backref conversion in Parser::convert_replacement
+- Dispatch file-I/O before the s/ marker check
+- Follow symlinks on edit (write to target, not link)
+- Preserve file permissions across atomic write
+- Route non-line-address i/a/c to in-memory path; eliminate silent no-op
+- Strip leading newline from i/a/c text (multi-line form)
+- Dispatch i\/a\/c commands before per-character last-char checks
+
+
 ## [1.0.0] - 2026-02-25
 
 ### Added

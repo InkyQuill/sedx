@@ -1,6 +1,6 @@
 [package]
 name = "sedx"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 description = "A safe, modern replacement for GNU sed with automatic backups, preview mode, and rollback"
 authors = ["InkyQuill <inkyquill@users.noreply.github.com>"]
