@@ -1,6 +1,6 @@
 [package]
 name = "sedx"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2024"
 description = "A safe, modern replacement for GNU sed with automatic backups, preview mode, and rollback"
 authors = ["InkyQuill <inkyquill@users.noreply.github.com>"]
@@ -82,3 +82,22 @@ install-updater = false
 # hand-edited to append a crates.io publish job (cargo-dist 0.22 doesn't
 # generate one natively).
 allow-dirty = ["ci"]
+
+# Override cargo-dist 0.22.1's hard-coded matrix runners. The upstream
+# defaults (ubuntu-20.04, macos-13, windows-2019) are all retired or
+# deprecated GitHub runner images, so the release matrix hangs forever
+# waiting for runners that no longer exist. Same fix the sibling `sel`
+# project applied.
+#
+# Note aarch64-unknown-linux-gnu uses the native ARM runner
+# (`ubuntu-24.04-arm`) rather than cross-compiling from x86_64.
+# cargo-dist 0.22.1 emits no `packages_install` entry for that target,
+# so without `gcc-aarch64-linux-gnu` on the runner the cross-link fails
+# with "incompatible with elf64-x86-64". Building natively sidesteps
+# the whole class of toolchain mismatch.
+[workspace.metadata.dist.github-custom-runners]
+aarch64-apple-darwin = "macos-14"
+x86_64-apple-darwin = "macos-14"
+aarch64-unknown-linux-gnu = "ubuntu-24.04-arm"
+x86_64-unknown-linux-gnu = "ubuntu-24.04"
+x86_64-pc-windows-msvc = "windows-2022"
