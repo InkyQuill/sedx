@@ -638,7 +638,9 @@ fn execute_command(
     if let Some(id) = backup_id {
         println!("\nBackup ID: {}", id);
         println!("Rollback with: sedx rollback {}", id);
-    } else {
+    } else if can_modify_files {
+        // Read-only expressions don't write to disk, so there's nothing to undo —
+        // only warn about the missing backup when a write actually occurred.
         println!("\nNo backup created - changes cannot be undone");
     }
 
