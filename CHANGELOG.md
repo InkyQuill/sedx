@@ -5,6 +5,19 @@ All notable changes to SedX are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-04-19
+
+### Added
+- Claude Code skill `prefer-sedx-over-sed` with one-liner installer (`contrib/claude-skill/`)
+- Gzip-compressed backups (~5× smaller on typical text) with backward-compatible restore of legacy uncompressed backups
+- `make check-windows` target + wiring into `make check-ci` for local Windows cross-lint
+
+### Changed
+- Removed scaffolding that doesn't fit a Rust CLI: `Dockerfile`, `.dockerignore`, `justfile` (Makefile is the sole build runner), `scripts/package.sh` (cargo-dist owns this), `docs/ROADMAP.md` + `docs/PRODUCTION_ROADMAP.md` (stale pre-1.0 docs), `TEST_SUITE_SUMMARY.txt`
+
+### Fixed
+- Release workflow matrix hung forever on v1.1.0 waiting for retired GitHub runner images (ubuntu-20.04, macos-13, windows-2019); pinned cargo-dist matrix to current runners in `[workspace.metadata.dist.github-custom-runners]`
+
 ## [1.1.0] — 2026-04-19
 
 ### Added
