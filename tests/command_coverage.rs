@@ -270,6 +270,18 @@ fn delete_first_line_of_pattern_space_consumes_pairs() {
 }
 
 #[test]
+fn n_at_eof_on_odd_input_prints_last_line() {
+    // N; s/\n/ /  on 3 lines: a+N→"a\nb"→subst→"a b" (prints), then
+    // pattern space = "c", N hits EOF → GNU sed flushes "c" and ends.
+    common::sedx()
+        .arg(r"N; s/\n/ /")
+        .write_stdin("a\nb\nc\n")
+        .assert()
+        .success()
+        .stdout("a b\nc\n");
+}
+
+#[test]
 fn label_and_unconditional_branch() {
     // b skips to :end, so the second s/ is never applied to line 1.
     common::sedx()
