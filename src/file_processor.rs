@@ -38,23 +38,13 @@ enum MixedRangeState {
     InRangeUntilPattern { end_pattern: String },
 }
 
-/// Pattern range state for streaming mode (Chunk 8)
+/// Pattern range state for streaming pattern-to-pattern ranges (`/start/,/end/`).
+/// Mixed-form ranges like `/start/,N` and `/start/,+N` are tracked separately by
+/// `MixedRangeState`; this enum only covers the pure-pattern case.
 #[derive(Clone, PartialEq)]
 enum PatternRangeState {
-    LookingForStart, // Looking for start pattern
-    InRange,         // Currently inside /start/,/end/ range
-    // Matched exhaustively in check_pattern_range() but not yet constructed;
-    // these guard the /start/,N and /start/,+N range variants planned for Chunk 8.
-    #[allow(dead_code)]
-    // Variant for /start/,N ranges — constructed when that range type is implemented.
-    WaitingForLineNumber {
-        target_line: usize,
-    },
-    #[allow(dead_code)]
-    // Variant for /start/,+N ranges — constructed when relative-offset range type is implemented.
-    CountingRelativeLines {
-        remaining: usize,
-    },
+    LookingForStart,
+    InRange,
 }
 
 // ============================================================================
@@ -493,9 +483,6 @@ impl StreamProcessor {
                     true
                 }
             }
-            // These states should not appear in pattern-to-pattern ranges, but handle them gracefully
-            PatternRangeState::WaitingForLineNumber { .. }
-            | PatternRangeState::CountingRelativeLines { .. } => false,
         };
 
         Ok(in_range)
