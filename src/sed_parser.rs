@@ -145,28 +145,18 @@ fn is_inside_pattern_address(cmd: &str, pos: usize) -> bool {
         return true;
     }
 
-    // Phase 2: handle characters that sit in the replacement/right-hand-side
-    // of a slash-delimited expression (e.g. the `r` in `s/foo/bar/`).  The
-    // left-to-right scan above exits in `None` state for those positions
-    // because the pattern sub-region already closed, yet the position is still
-    // inside the overall delimited construct.
-    //
-    // Heuristic: if there is a `/` somewhere before `pos` (so we know we are
-    // past at least one delimiter), AND there is a `/` somewhere after `pos`
-    // with NO whitespace between `pos` and that slash, then `pos` is inside
-    // a delimiter-bounded expression and NOT a standalone command character.
+    // Phase 2 covers the substitution replacement region (e.g. the `r` in
+    // `s/foo/bar/`), where Phase 1 exits in the `None` state because the
+    // pattern sub-region already closed. Discriminator: whitespace before the
+    // next slash indicates a filename argument, not a paired closing delimiter.
     let has_slash_before = (0..pos)
         .rev()
         .any(|j| bytes[j] == b'/' && (j == 0 || bytes[j - 1] != b'\\'));
     if !has_slash_before {
         return false;
     }
-    // Find next `/` after `pos`; if it is reachable without crossing whitespace
-    // then `pos` is inside a delimited construct.
     for &byte in bytes.iter().skip(pos + 1) {
         if byte.is_ascii_whitespace() {
-            // Whitespace before the next slash → the slash starts a separate
-            // token (e.g. a filename), not a paired closing delimiter.
             break;
         }
         if byte == b'/' {
@@ -2205,6 +2195,20 @@ mod tests {
                 assert!(range.is_some());
             }
             other => panic!("expected WriteFirstLine, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_pattern_addr_with_escaped_slash_in_pattern() {
+        // Escaped `/` inside the pattern must not close the pattern address.
+        let commands = parse_sed_expression("/foo\\/bar/r /tmp/out.txt").unwrap();
+        assert_eq!(commands.len(), 1);
+        match &commands[0] {
+            Command::ReadFile { filename, range } => {
+                assert_eq!(filename, "/tmp/out.txt");
+                assert!(range.is_some());
+            }
+            other => panic!("expected ReadFile, got {:?}", other),
         }
     }
 }
