@@ -119,10 +119,14 @@ pub fn get_disk_space(path: &Path) -> Result<DiskSpaceInfo> {
     })
 }
 
-/// Check disk space for a given path (Windows stub)
+/// Check disk space for a given path (Windows stub).
 ///
-/// Windows implementation not yet available - always returns error
+/// Windows implementation is not yet available. This stub has no in-tree caller
+/// (`check_disk_space_for_backup` is `#[cfg(unix)]`), but we keep it so that any
+/// future Windows-only code path can link against a stable symbol — the
+/// `#[allow(dead_code)]` guards against `-D dead-code` on the Windows build.
 #[cfg(windows)]
+#[allow(dead_code)]
 pub fn get_disk_space(_path: &Path) -> Result<DiskSpaceInfo> {
     Err(anyhow::anyhow!(
         "Windows disk space checking not yet implemented. \

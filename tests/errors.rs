@@ -2,7 +2,9 @@
 
 mod common;
 
-use common::{sedx, sedx_isolated, write_file};
+#[cfg(unix)]
+use common::write_file;
+use common::{sedx, sedx_isolated};
 use predicates::prelude::*;
 use tempfile::TempDir;
 
