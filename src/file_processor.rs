@@ -4151,8 +4151,7 @@ mod cycle_tests {
 
     #[test]
     fn test_hold_space_h_g() {
-        // Test h and g commands (copy to/from hold space)
-        // NOTE: This test doesn't use ranges - range checking not yet implemented
+        // Test h and g commands (copy to/from hold space).
         let commands = vec![
             // h: copy pattern space to hold space
             Command::Hold { range: None },
@@ -4171,8 +4170,7 @@ mod cycle_tests {
 
     #[test]
     fn test_hold_space_x() {
-        // Test x command (exchange pattern and hold spaces)
-        // NOTE: This test doesn't use ranges - range checking not yet implemented
+        // Test x command (exchange pattern and hold spaces).
         let commands = vec![
             // h: copy pattern space to hold space
             Command::Hold { range: None },
@@ -4191,8 +4189,7 @@ mod cycle_tests {
 
     #[test]
     fn test_substitution_and_hold() {
-        // Test combination of substitution and hold space
-        // NOTE: This test doesn't use ranges - range checking not yet implemented
+        // Test combination of substitution and hold space.
         let commands = vec![
             // s/foo/bar/ - substitution
             Command::Substitution {

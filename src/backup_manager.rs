@@ -95,7 +95,6 @@ impl BackupManager {
         // Default: warn if backup > 2GB or > 40% of free space
         // Error if backup > 60% of free space
         const MAX_BACKUP_SIZE_GB: u64 = 2;
-        #[cfg_attr(windows, allow(dead_code))] // Only used on Unix
         const ERROR_PERCENT: f64 = 60.0;
 
         // Warn if backup is very large
@@ -108,15 +107,11 @@ impl BackupManager {
         }
 
         // Check disk space with error threshold
-        // Skip on Windows in test mode (disk_space check not implemented there)
-        #[cfg(not(all(windows, test)))]
-        let _disk_check_result = crate::disk_space::check_disk_space_for_backup(
+        if let Err(e) = crate::disk_space::check_disk_space_for_backup(
             &self.backups_dir,
             total_size,
             ERROR_PERCENT,
-        );
-        #[cfg(not(all(windows, test)))]
-        if let Err(e) = _disk_check_result {
+        ) {
             // Provide helpful error message
             return Err(e.context(format!(
                 "Cannot create backup. Files size: {}",
