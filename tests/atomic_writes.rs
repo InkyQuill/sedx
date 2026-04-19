@@ -1,5 +1,10 @@
 //! Tests for atomic write semantics: Unix mode preservation and symlink follow.
 //! Covers both the in-memory (<100MB) and streaming (≥100MB) write paths.
+//!
+//! Every test here exercises a Unix-only invariant (mode bits, symlinks), so
+//! the whole file is gated — on Windows the test binary has no tests.
+
+#![cfg(unix)]
 
 mod common;
 
