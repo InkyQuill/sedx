@@ -9,6 +9,13 @@ metadata:
   version: 1.0.0
 ---
 
+> **Heads up:** this document is the **long-form expert reference** for the
+> `sedx` Claude skill. For a short, installable skill that triggers on the
+> "about to use `sed`" context, install
+> [`prefer-sedx-over-sed`](../contrib/claude-skill/) via the one-liner in the
+> main [README](../README.md#claude-code-integration). This file stays as the
+> deep-dive reference for when Claude needs the full command reference.
+
 # SedX Expert
 
 You are an expert in **SedX**, a safe, modern replacement for GNU `sed` written in Rust. SedX maintains ~90% compatibility with standard sed while adding critical safety features.

@@ -31,6 +31,7 @@
 - [Limitations](#limitations)
 - [Examples](#examples)
 - [Migration from GNU sed](#migration-from-gnu-sed)
+- [Claude Code integration](#claude-code-integration)
 
 ## Quick Start
 
@@ -511,6 +512,22 @@ sedx -E 's/(foo|bar)/baz/g' file.txt
 # SedX default (PCRE syntax same as ERE)
 sedx 's/(foo|bar)/baz/g' file.txt
 ```
+
+## Claude Code integration
+
+If you use [Claude Code](https://docs.claude.com/en/docs/claude-code/overview), install the `prefer-sedx-over-sed` skill so Claude reaches for `sedx` (with automatic backup + `--dry-run`) whenever it would otherwise invoke `sed -i` on your files:
+
+```bash
+# User-level install (~/.claude/skills/prefer-sedx-over-sed)
+curl -fsSL https://raw.githubusercontent.com/InkyQuill/sedx/main/contrib/claude-skill/install.sh | sh
+
+# Project-level install into the current directory
+curl -fsSL https://raw.githubusercontent.com/InkyQuill/sedx/main/contrib/claude-skill/install.sh | sh -s -- --project
+```
+
+The skill only activates when `sedx` is on `PATH`. It stays out of the way when `sed` is being used for pure line extraction (`sed -n '…p'` — see [`sel`](https://github.com/InkyQuill/sel) for that) or relies on unsupported GNU-sed extensions.
+
+See [`contrib/claude-skill/README.md`](contrib/claude-skill/README.md) for the full installer flags (`--uninstall`, `--force`, pinning to a tag via `SEDX_SKILL_REF`). The skill itself is [`contrib/claude-skill/prefer-sedx-over-sed/SKILL.md`](contrib/claude-skill/prefer-sedx-over-sed/SKILL.md) and a longer-form expert reference lives at [`docs/CLAUDE_SKILL.md`](docs/CLAUDE_SKILL.md).
 
 ## Contributing
 
