@@ -112,41 +112,68 @@ pub fn parse_sed_expression(expr: &str) -> Result<Vec<Command>> {
 /// Returns true if the position is inside the delimiters (not at the delimiters themselves)
 fn is_inside_pattern_address(cmd: &str, pos: usize) -> bool {
     let bytes = cmd.as_bytes();
-    let n = bytes.len();
+    let limit = pos.min(bytes.len());
 
-    // We need to count delimiter pairs before the position
-    // Each pair consists of an opening delimiter and its matching closing delimiter
-    // We're "inside" if we've seen an odd number of opening delimiters before this position
+    // Phase 1: left-to-right open/close scan up to `pos`.
+    // A pattern address opens with `/` (or `\X` backslash-custom-delim).
+    // Once open, `\X` escapes the next char; the matching opener char closes.
+    let mut i = 0;
+    let mut current_opener: Option<u8> = None;
+    while i < limit {
+        let byte = bytes[i];
+        match current_opener {
+            None => {
+                if byte == b'/' || byte == b'\\' {
+                    current_opener = Some(byte);
+                }
+            }
+            Some(opener) => {
+                if byte == b'\\' && i + 1 < limit {
+                    i += 2;
+                    continue;
+                }
+                if byte == opener {
+                    current_opener = None;
+                }
+            }
+        }
+        i += 1;
+    }
 
-    // For simplicity, let's just look for the pattern: /.../ where pos is between the slashes
-    // We need to find the LAST '/' BEFORE pos and check if it has a matching '/' AFTER pos
+    // If we are still waiting for a closer, we are inside a pattern address.
+    if current_opener.is_some() {
+        return true;
+    }
 
-    // Find the last '/' or '\' before pos
-    let mut last_delim_before = None;
-    for i in (0..pos).rev() {
-        if bytes[i] == b'/' || bytes[i] == b'\\' {
-            last_delim_before = Some(i);
+    // Phase 2: handle characters that sit in the replacement/right-hand-side
+    // of a slash-delimited expression (e.g. the `r` in `s/foo/bar/`).  The
+    // left-to-right scan above exits in `None` state for those positions
+    // because the pattern sub-region already closed, yet the position is still
+    // inside the overall delimited construct.
+    //
+    // Heuristic: if there is a `/` somewhere before `pos` (so we know we are
+    // past at least one delimiter), AND there is a `/` somewhere after `pos`
+    // with NO whitespace between `pos` and that slash, then `pos` is inside
+    // a delimiter-bounded expression and NOT a standalone command character.
+    let has_slash_before = (0..pos)
+        .rev()
+        .any(|j| bytes[j] == b'/' && (j == 0 || bytes[j - 1] != b'\\'));
+    if !has_slash_before {
+        return false;
+    }
+    // Find next `/` after `pos`; if it is reachable without crossing whitespace
+    // then `pos` is inside a delimited construct.
+    for &byte in bytes.iter().skip(pos + 1) {
+        if byte.is_ascii_whitespace() {
+            // Whitespace before the next slash → the slash starts a separate
+            // token (e.g. a filename), not a paired closing delimiter.
             break;
         }
-    }
-
-    let start_pos = match last_delim_before {
-        Some(sp) => sp,
-        None => return false, // No delimiter before pos, so we're not inside
-    };
-
-    // Look for the NEXT '/' or '\' after start_pos
-    for i in (start_pos + 1)..n {
-        if bytes[i] == bytes[start_pos] {
-            // Same delimiter character
-            // Found matching closing delimiter
-            // Check if pos is between the delimiters
-            return pos > start_pos && pos < i;
+        if byte == b'/' {
+            return true;
         }
     }
 
-    // No matching closing delimiter found
-    // Assume we're NOT inside (unclosed pattern)
     false
 }
 
@@ -1385,9 +1412,12 @@ fn parse_test_false(cmd: &str) -> Result<Command> {
 fn parse_read_file(cmd: &str) -> Result<Command> {
     let cmd = cmd.trim();
 
-    // Find the 'r' command character
+    // Find the 'r' command character — skip any 'r' that is inside a pattern
+    // address (e.g. `/err/r filename` must not match the 'r' in "err").
     let r_pos = cmd
-        .find('r')
+        .char_indices()
+        .find(|&(pos, ch)| ch == 'r' && !is_inside_pattern_address(cmd, pos))
+        .map(|(pos, _)| pos)
         .ok_or_else(|| anyhow!("Read file command missing 'r'"))?;
 
     // Split into: address_part (before 'r') and rest_part (after 'r' including 'r')
@@ -2083,6 +2113,47 @@ mod tests {
                 assert!(matches!(range.1, Address::LineNumber(5)));
             }
             other => panic!("expected Change, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_pattern_addr_r_with_absolute_path() {
+        // /err/r /etc/hosts — the `/etc/hosts` argument must not be re-interpreted
+        // as a new pattern delimiter. The r command's filename should be `/etc/hosts`.
+        let commands = parse_sed_expression("/err/r /etc/hosts").unwrap();
+        assert_eq!(commands.len(), 1);
+        match &commands[0] {
+            Command::ReadFile { filename, range } => {
+                assert_eq!(filename, "/etc/hosts");
+                assert!(range.is_some());
+            }
+            other => panic!("expected ReadFile, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_pattern_addr_w_with_absolute_path() {
+        let commands = parse_sed_expression("/err/w /tmp/out.log").unwrap();
+        assert_eq!(commands.len(), 1);
+        match &commands[0] {
+            Command::WriteFile { filename, range } => {
+                assert_eq!(filename, "/tmp/out.log");
+                assert!(range.is_some());
+            }
+            other => panic!("expected WriteFile, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_pattern_addr_capital_w_with_absolute_path() {
+        let commands = parse_sed_expression("/err/W /var/log/first.log").unwrap();
+        assert_eq!(commands.len(), 1);
+        match &commands[0] {
+            Command::WriteFirstLine { filename, range } => {
+                assert_eq!(filename, "/var/log/first.log");
+                assert!(range.is_some());
+            }
+            other => panic!("expected WriteFirstLine, got {:?}", other),
         }
     }
 }
