@@ -3,7 +3,6 @@
 # Rust
 **/*.rs.bk
 *.pdb
-Cargo.lock
 
 # IDEs
 .vscode/
