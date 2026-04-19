@@ -29,7 +29,7 @@ COLOR_GREEN = \033[32m
 COLOR_YELLOW = \033[33m
 COLOR_BLUE = \033[34m
 
-.PHONY: all build test install uninstall clean completions man release help check-ci install-hook
+.PHONY: all build test install uninstall clean completions man release help check-ci check-windows install-hook
 
 # Default target
 all: build
@@ -157,9 +157,25 @@ check-ci:
 	else \
 		echo "$(COLOR_YELLOW)Skipping beta clippy (beta toolchain not installed; 'rustup toolchain install beta' to enable)$(COLOR_RESET)"; \
 	fi
+	@if command -v rustup >/dev/null 2>&1 && rustup target list --installed 2>/dev/null | grep -q '^x86_64-pc-windows-gnu$$'; then \
+		echo "$(COLOR_BLUE)Running Windows cross-clippy...$(COLOR_RESET)"; \
+		$(CARGO) clippy --target x86_64-pc-windows-gnu --all-targets --all-features -- -D warnings; \
+	else \
+		echo "$(COLOR_YELLOW)Skipping Windows cross-clippy (target not installed; 'make check-windows' to install and run)$(COLOR_RESET)"; \
+	fi
 	$(CARGO) test --all-features
 	$(CARGO) doc --no-deps --all-features
 	@echo "$(COLOR_GREEN)CI-equivalent checks passed$(COLOR_RESET)"
+
+## check-windows: Lint the codebase against the Windows target (catches platform-gated unused-import / dead-code errors locally)
+check-windows:
+	@if ! rustup target list --installed 2>/dev/null | grep -q '^x86_64-pc-windows-gnu$$'; then \
+		echo "$(COLOR_BLUE)Installing Windows target (x86_64-pc-windows-gnu)…$(COLOR_RESET)"; \
+		rustup target add x86_64-pc-windows-gnu; \
+	fi
+	@echo "$(COLOR_BLUE)Running clippy against x86_64-pc-windows-gnu…$(COLOR_RESET)"
+	$(CARGO) clippy --target x86_64-pc-windows-gnu --all-targets --all-features -- -D warnings
+	@echo "$(COLOR_GREEN)Windows cross-lint passed$(COLOR_RESET)"
 
 ## install-hook: Install the pre-push git hook (copies from contrib/hooks/)
 install-hook:
