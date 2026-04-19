@@ -33,11 +33,8 @@ dev:
 
 # Run all tests
 test:
-    @echo "Running Rust tests..."
+    @echo "Running all tests (unit + integration)..."
     {{cargo}} test --all-features
-    @echo "Unit tests passed!"
-    @echo "Running integration tests..."
-    @./tests/regression_tests.sh
     @echo "All tests passed!"
 
 # Run quick tests only
@@ -133,6 +130,31 @@ fmt-check:
 # Run fmt check and clippy
 check: fmt-check lint
 
+# Run the same checks CI runs (fmt + clippy stable+beta + test + docs)
+check-ci:
+    @echo "Running CI-equivalent checks locally..."
+    {{cargo}} fmt --check
+    {{cargo}} clippy --all-targets --all-features -- -D warnings
+    @if command -v rustup >/dev/null 2>&1 && rustup toolchain list 2>/dev/null | grep -q '^beta'; then \
+        echo "Running beta clippy..."; \
+        {{cargo}} +beta clippy --all-targets --all-features -- -D warnings; \
+    else \
+        echo "Skipping beta clippy (beta toolchain not installed; 'rustup toolchain install beta' to enable)"; \
+    fi
+    {{cargo}} test --all-features
+    {{cargo}} doc --no-deps --all-features
+    @echo "CI-equivalent checks passed"
+
+# Install the pre-push git hook (copies from contrib/hooks/)
+install-hook:
+    @if [ ! -d .git ]; then \
+        echo "Not a git checkout; nothing to install"; \
+        exit 1; \
+    fi
+    install -m 0755 contrib/hooks/pre-push .git/hooks/pre-push
+    @echo "Pre-push hook installed at .git/hooks/pre-push"
+    @echo "Bypass once with: git push --no-verify"
+
 # Build release binaries for all platforms
 release:
     @echo "Building release binaries for all platforms..."
@@ -196,7 +218,7 @@ update:
 # Run benchmarks against GNU sed
 benchmark:
     @echo "Running benchmarks..."
-    @./tests/benchmark.sh
+    @./tests/tools/benchmark.sh
 
 # Show version information
 version:

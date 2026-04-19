@@ -29,7 +29,7 @@ COLOR_GREEN = \033[32m
 COLOR_YELLOW = \033[33m
 COLOR_BLUE = \033[34m
 
-.PHONY: all build test install uninstall clean completions man release help
+.PHONY: all build test install uninstall clean completions man release help check-ci check-windows install-hook
 
 # Default target
 all: build
@@ -48,11 +48,8 @@ dev:
 
 ## test: Run all tests
 test:
-	@echo "$(COLOR_BLUE)Running Rust tests...$(COLOR_RESET)"
+	@echo "$(COLOR_BLUE)Running all tests (unit + integration)...$(COLOR_RESET)"
 	$(CARGO) test --all-features
-	@echo "$(COLOR_GREEN)Unit tests passed!$(COLOR_RESET)"
-	@echo "$(COLOR_BLUE)Running integration tests...$(COLOR_RESET)"
-	@./tests/regression_tests.sh
 	@echo "$(COLOR_GREEN)All tests passed!$(COLOR_RESET)"
 
 ## test-quick: Run quick tests only
@@ -149,6 +146,47 @@ fmt-check:
 	$(CARGO) fmt --check
 	@echo "$(COLOR_GREEN)Code is formatted$(COLOR_RESET)"
 
+## check-ci: Run the same checks CI runs (fmt + clippy stable+beta + test + docs)
+check-ci:
+	@echo "$(COLOR_BLUE)Running CI-equivalent checks locally...$(COLOR_RESET)"
+	$(CARGO) fmt --check
+	$(CARGO) clippy --all-targets --all-features -- -D warnings
+	@if command -v rustup >/dev/null 2>&1 && rustup toolchain list 2>/dev/null | grep -q '^beta'; then \
+		echo "$(COLOR_BLUE)Running beta clippy...$(COLOR_RESET)"; \
+		$(CARGO) +beta clippy --all-targets --all-features -- -D warnings; \
+	else \
+		echo "$(COLOR_YELLOW)Skipping beta clippy (beta toolchain not installed; 'rustup toolchain install beta' to enable)$(COLOR_RESET)"; \
+	fi
+	@if command -v rustup >/dev/null 2>&1 && rustup target list --installed 2>/dev/null | grep -q '^x86_64-pc-windows-gnu$$'; then \
+		echo "$(COLOR_BLUE)Running Windows cross-clippy...$(COLOR_RESET)"; \
+		$(CARGO) clippy --target x86_64-pc-windows-gnu --all-targets --all-features -- -D warnings; \
+	else \
+		echo "$(COLOR_YELLOW)Skipping Windows cross-clippy (target not installed; 'make check-windows' to install and run)$(COLOR_RESET)"; \
+	fi
+	$(CARGO) test --all-features
+	$(CARGO) doc --no-deps --all-features
+	@echo "$(COLOR_GREEN)CI-equivalent checks passed$(COLOR_RESET)"
+
+## check-windows: Lint the codebase against the Windows target (catches platform-gated unused-import / dead-code errors locally)
+check-windows:
+	@if ! rustup target list --installed 2>/dev/null | grep -q '^x86_64-pc-windows-gnu$$'; then \
+		echo "$(COLOR_BLUE)Installing Windows target (x86_64-pc-windows-gnu)…$(COLOR_RESET)"; \
+		rustup target add x86_64-pc-windows-gnu; \
+	fi
+	@echo "$(COLOR_BLUE)Running clippy against x86_64-pc-windows-gnu…$(COLOR_RESET)"
+	$(CARGO) clippy --target x86_64-pc-windows-gnu --all-targets --all-features -- -D warnings
+	@echo "$(COLOR_GREEN)Windows cross-lint passed$(COLOR_RESET)"
+
+## install-hook: Install the pre-push git hook (copies from contrib/hooks/)
+install-hook:
+	@if [ ! -d .git ]; then \
+		echo "$(COLOR_YELLOW)Not a git checkout; nothing to install$(COLOR_RESET)"; \
+		exit 1; \
+	fi
+	@install -m 0755 contrib/hooks/pre-push .git/hooks/pre-push
+	@echo "$(COLOR_GREEN)Pre-push hook installed at .git/hooks/pre-push$(COLOR_RESET)"
+	@echo "$(COLOR_YELLOW)Bypass once with: git push --no-verify$(COLOR_RESET)"
+
 ## release: Build release binaries for all platforms
 release:
 	@echo "$(COLOR_BOLD)$(COLOR_YELLOW)Building release binaries for all platforms...$(COLOR_RESET)"
@@ -209,7 +247,7 @@ update:
 ## benchmark: Run benchmarks against GNU sed
 benchmark:
 	@echo "$(COLOR_BLUE)Running benchmarks...$(COLOR_RESET)"
-	@./tests/benchmark.sh
+	@./tests/tools/benchmark.sh
 
 ## version: Show version information
 version:

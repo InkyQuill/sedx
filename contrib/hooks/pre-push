@@ -1,0 +1,35 @@
+#!/bin/sh
+#
+# sedx pre-push hook — run the CI-equivalent checks locally before pushing.
+#
+# Install:
+#     make install-hook
+#   or
+#     just install-hook
+#
+# Bypass (one push):
+#     git push --no-verify
+#   or
+#     SEDX_SKIP_HOOK=1 git push
+#
+# Uninstall:
+#     rm .git/hooks/pre-push
+#
+# This script is intentionally short: it delegates to the `check-ci` Make
+# target so the check list lives in ONE place (the Makefile) and can't drift
+# between the hook and the developer's day-to-day invocation.
+
+set -e
+
+if [ -n "$SEDX_SKIP_HOOK" ]; then
+    echo "pre-push: SEDX_SKIP_HOOK set, skipping local CI checks"
+    exit 0
+fi
+
+# `make` is usually invoked from the repo root; chdir there so the hook
+# works no matter where the push was triggered from (git invokes hooks with
+# the repo as CWD, but be defensive).
+cd "$(git rev-parse --show-toplevel)"
+
+echo "pre-push: running 'make check-ci' (bypass with 'git push --no-verify')"
+exec make check-ci

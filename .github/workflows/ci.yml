@@ -92,23 +92,3 @@ jobs:
       - name: Build documentation
         run: cargo doc --no-deps --all-features
 
-  # Run integration tests
-  integration:
-    name: Integration Tests
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build release binary
-        run: cargo build --release
-
-      - name: Run regression tests
-        run: ./tests/regression_tests.sh
-
-      - name: Run comprehensive tests
-        run: ./tests/comprehensive_tests.sh

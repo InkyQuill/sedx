@@ -83,8 +83,49 @@ cargo test test_name
 cargo test -- --nocapture
 
 # Run integration tests
-./tests/regression_tests.sh
+cargo test --test command_coverage
+cargo test --test diff_output
+cargo test --test pipeline
+cargo test --test atomic_writes
+cargo test --test backup_rollback
+cargo test --test streaming
+cargo test --test regex_flavors
+cargo test --test errors
 ```
+
+### Catching CI failures before you push (optional)
+
+The repo ships a pre-push git hook that runs the same checks CI runs
+(`cargo fmt --check` + stable and beta `cargo clippy` + `cargo test
+--all-features` + `cargo doc`). Opt in with:
+
+```bash
+make install-hook          # or: just install-hook
+```
+
+Full parity requires Rust beta, installed once:
+
+```bash
+rustup toolchain install beta --profile minimal --component clippy
+```
+
+Without beta installed, `make check-ci` and the hook still run — they
+just skip the beta clippy step with a yellow warning. CI runs on both
+stable and beta, so beta-only lints (like `clippy::collapsible_match`)
+will catch you in CI if you don't run beta locally.
+
+Bypass the hook for a single push when you need to:
+
+```bash
+git push --no-verify
+# or:
+SEDX_SKIP_HOOK=1 git push
+```
+
+**Drift note for maintainers:** `make check-ci` must stay in sync with
+the `test` and `docs` jobs in `.github/workflows/ci.yml`. If you change
+either, update both in the same commit — otherwise the hook silently
+under-protects.
 
 ### Project Structure
 
@@ -98,7 +139,16 @@ sedx/
 │   ├── diff_formatter.rs    # Output formatting
 │   └── backup_manager.rs    # Backup/rollback system
 ├── tests/
-│   └── regression_tests.sh  # Integration tests
+│   ├── common/              # Shared integration-test helpers
+│   ├── command_coverage.rs  # One smoke test per Command variant
+│   ├── diff_output.rs       # --dry-run output shape
+│   ├── pipeline.rs          # stdin→stdout, -e composition, exit codes
+│   ├── atomic_writes.rs     # Mode preservation, symlink follow
+│   ├── backup_rollback.rs   # Backup + rollback + history
+│   ├── streaming.rs         # Large-file correctness
+│   ├── regex_flavors.rs     # -E / -B / default PCRE plumbing
+│   ├── errors.rs            # Exit codes + error-message surface
+│   └── tools/               # Benchmark & memory-profile scripts
 └── Cargo.toml
 ```
 
@@ -106,12 +156,13 @@ sedx/
 
 When adding sed features:
 
-1. Research GNU sed behavior thoroughly
+1. Research GNU sed behavior thoroughly (as a reference, not a parity target)
 2. Update `sed_parser.rs` to parse the new command
 3. Implement logic in `file_processor.rs`
-4. Add comprehensive tests comparing with GNU sed
-5. Update README.md with examples
-6. Ensure existing tests still pass
+4. Add unit tests in `sed_parser.rs` and/or `file_processor.rs`
+5. Add an integration test in the appropriate `tests/*.rs` file (usually `tests/command_coverage.rs`) that spawns the binary and asserts on output
+6. Update README.md with examples
+7. Ensure existing tests still pass (`cargo test`)
 
 ## Style Guidelines
 

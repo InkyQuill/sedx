@@ -7,38 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-#[allow(dead_code)] // Default config template for future use
-const DEFAULT_CONFIG: &str = r#"# SedX Configuration File
-# See 'sedx config' command to edit this file
-
-[backup]
-# Maximum backup size in GB before warning (default: 2)
-#max_size_gb = 2
-
-# Maximum percentage of free space to use for backups (default: 60)
-#max_disk_usage_percent = 60
-
-# Custom backup directory (optional)
-#backup_dir = "/mnt/backups/sedx"
-
-[compatibility]
-# Regex mode: "pcre" (default), "ere", or "bre"
-#mode = "pcre"
-
-# Show incompatibility warnings (default: true)
-#show_warnings = true
-
-[processing]
-# Number of context lines to show around changes (default: 2)
-#context_lines = 2
-
-# Maximum memory usage for streaming in MB (default: 100)
-#max_memory_mb = 100
-
-# Enable streaming mode for files >= 100MB (default: true)
-#streaming = true
-"#;
-
 /// SedX configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -166,9 +134,7 @@ fn default_streaming() -> Option<bool> {
 
 /// Get the configuration file path
 pub fn config_file_path() -> Result<PathBuf> {
-    let home_dir =
-        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
-
+    let home_dir = crate::backup_manager::sedx_home()?;
     let config_dir = home_dir.join(".sedx");
     fs::create_dir_all(&config_dir).with_context(|| {
         format!(
@@ -303,7 +269,7 @@ pub fn ensure_complete_config() -> Result<()> {
 }
 
 /// Save configuration to file
-#[allow(dead_code)] // Public API - kept for future use
+#[allow(dead_code)] // Part of the public config API — lets library consumers persist modified Config values to disk.
 pub fn save_config(config: &Config) -> Result<()> {
     let config_path = config_file_path()?;
 

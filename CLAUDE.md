@@ -132,34 +132,28 @@ cargo build --release
 ### Testing
 
 ```bash
-# Run Rust unit tests
+# Run all tests (unit + integration)
 cargo test
 
-# Run unit tests with output
-cargo test -- --nocapture
+# Run only unit tests
+cargo test --lib --bins
 
-# Run all tests (integration + comprehensive + phase-specific)
-./tests/run_all_tests.sh
+# Run one integration-test binary
+cargo test --test command_coverage
+cargo test --test diff_output
+cargo test --test pipeline
+cargo test --test atomic_writes
+cargo test --test backup_rollback
+cargo test --test streaming
+cargo test --test regex_flavors
+cargo test --test errors
 
-# Run quick tests only
-./tests/run_quick_tests.sh
+# Opt-in slow tests (e.g. 100 MB streaming)
+cargo test -- --ignored
 
-# Run specific test suites
-./tests/regression_tests.sh      # GNU sed compatibility
-./tests/comprehensive_tests.sh   # Extended test suite
-./tests/streaming_tests.sh       # Large file streaming
-./tests/phase4_tests.sh          # Phase 4 features
-./tests/scripts/phase5_tests.sh  # Phase 5 flow control & file I/O
-./tests/hold_space_tests.sh      # Hold space operations
-
-# Memory profiling for streaming
-./tests/memory_profile.sh
-
-# Benchmark against GNU sed
-./tests/benchmark.sh
-
-# Test specific expression patterns
-./target/release/sedx 's/foo/bar/g' test_file.txt
+# Benchmarking and memory profiling (shell tools, not tests)
+bash tests/tools/benchmark.sh
+bash tests/tools/memory_profile.sh
 ```
 
 ### Code Quality
@@ -497,7 +491,6 @@ The streaming feature is implemented in small, testable chunks:
 ```bash
 # After each chunk, run tests
 cargo test
-./tests/regression_tests.sh
 
 # Force streaming on small files for testing
 ./target/release/sedx 's/foo/bar/g' /tmp/small_test.txt
@@ -517,10 +510,15 @@ Last 50 backups are kept automatically. Old backups cleaned up when creating new
 - Parser tests in `sed_parser.rs` modules
 - Test command parsing, address resolution, backreference conversion
 
-**Integration tests** (`./tests/*.sh`):
-- Bash scripts comparing SedX output with GNU sed
-- Test against real sed to ensure compatibility
-- Cover: substitutions, deletes, ranges, patterns, negation, grouping, hold space, flow control, file I/O
+**Integration tests** (`cargo test --test <name>`):
+- Rust integration-test binaries under `tests/*.rs` that spawn the real
+  `sedx` binary via `assert_cmd` and assert on stdout/stderr/exit code
+  plus filesystem side effects
+- Assert sedx's own behavior — no GNU-sed cross-comparison
+- Binaries: `command_coverage`, `diff_output`, `pipeline`, `atomic_writes`,
+  `backup_rollback`, `streaming`, `regex_flavors`, `errors`
+- Shared helpers in `tests/common/mod.rs` (`sedx()`, `sedx_isolated()`,
+  `write_file`, `read_file`)
 
 **Manual testing workflow**:
 ```bash
@@ -641,7 +639,7 @@ sedx '/unwanted/{z; s/EMPTY/now empty/}' file.txt
 3. Add handler in `apply_command_to_cycle()` for cycle-based mode
 4. Add handler in streaming mode if needed (check `capability.rs`)
 5. Update `commands_can_modify_files()` in `main.rs` if command modifies files
-6. Add tests in `tests/scripts/` or appropriate test suite
+6. Add tests in the appropriate `tests/*.rs` integration-test file
 
 **Flow Control Commands** (affects program counter):
 1. Add variant to `Command` enum with `range: Option<(Address, Address)>`
@@ -668,7 +666,7 @@ sedx '/unwanted/{z; s/EMPTY/now empty/}' file.txt
 1. Add `apply_*()` method in `FileProcessor`
 2. Update `apply_command()` match statement
 3. Add unit tests in `sed_parser.rs` `#[cfg(test)]` module
-4. Add integration tests in bash scripts under `tests/`
+4. Add an integration test in the appropriate `tests/*.rs` file (typically `tests/command_coverage.rs`), spawning the binary via `common::sedx()` or `common::sedx_isolated()`
 
 **Streaming Implementation** (for large file support):
 1. Update `capability.rs::can_stream()` to check if command supports streaming

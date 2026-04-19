@@ -1,0 +1,64 @@
+//! Tests that the -E, -B, and default (PCRE) regex-flavor flags wire through
+//! to the appropriate converter and produce the right behavior end-to-end.
+
+mod common;
+
+use common::sedx;
+
+#[test]
+fn default_is_pcre_dollar_backrefs() {
+    // In PCRE mode, backreferences in the replacement use $1/$2.
+    sedx()
+        .arg(r"s/(foo)(bar)/$2$1/")
+        .write_stdin("foobar\n")
+        .assert()
+        .success()
+        .stdout("barfoo\n");
+}
+
+#[test]
+fn ere_flag_accepts_backslash_backrefs_in_replacement() {
+    // In ERE mode the parser converts \1/\2 in the replacement to PCRE $1/$2
+    // internally, so the script writes GNU-sed-style backrefs.
+    sedx()
+        .args(["-E", r"s/(foo)(bar)/\2\1/"])
+        .write_stdin("foobar\n")
+        .assert()
+        .success()
+        .stdout("barfoo\n");
+}
+
+#[test]
+fn bre_flag_requires_escaped_groups_and_quantifiers() {
+    // In BRE mode, groups are \(...\) and +, ?, | are literal unless escaped.
+    sedx()
+        .args(["-B", r"s/\(foo\)\(bar\)/\2\1/"])
+        .write_stdin("foobar\n")
+        .assert()
+        .success()
+        .stdout("barfoo\n");
+}
+
+#[test]
+fn escaped_paren_is_group_in_bre_and_literal_in_pcre() {
+    // Proves -B is load-bearing with a clean differentiator:
+    //   In BRE, `\(foo\)` is a group matching "foo".
+    //   In PCRE, `\(foo\)` is a literal match for the string "(foo)".
+    // Same input "foo" produces different results under each flavor.
+
+    // BRE: matches and substitutes.
+    sedx()
+        .args(["-B", r"s/\(foo\)/X/"])
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("X\n");
+
+    // PCRE (default): no match; input is unchanged.
+    sedx()
+        .arg(r"s/\(foo\)/X/")
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("foo\n");
+}

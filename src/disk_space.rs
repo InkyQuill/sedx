@@ -2,27 +2,26 @@
 //!
 //! Provides functionality to check available disk space before creating backups
 
-#[cfg_attr(windows, allow(unused_imports))] // Context not used in Windows stubs
 use anyhow::{Context, Result};
 use std::path::Path;
 
 /// Information about disk space usage
 #[derive(Debug, Clone)]
-#[cfg_attr(windows, allow(dead_code))] // Fields only used on Unix
 pub struct DiskSpaceInfo {
     /// Total disk space in bytes
     pub total_bytes: u64,
     /// Available disk space in bytes
     pub available_bytes: u64,
     /// Used disk space in bytes
-    #[allow(dead_code)] // Kept for API completeness and potential future use
+    #[allow(dead_code)]
+    // Part of the public DiskSpaceInfo API — library consumers inspect the full disk usage breakdown.
     pub used_bytes: u64,
     /// Percentage of disk used
-    #[allow(dead_code)] // Kept for API completeness and potential future use
+    #[allow(dead_code)]
+    // Part of the public DiskSpaceInfo API — library consumers inspect the full disk usage breakdown.
     pub used_percent: f64,
 }
 
-#[cfg_attr(windows, allow(dead_code))] // Methods only used on Unix
 impl DiskSpaceInfo {
     /// Convert bytes to human-readable format (e.g., "1.5 GB")
     pub fn bytes_to_human(bytes: u64) -> String {
@@ -64,8 +63,8 @@ impl DiskSpaceInfo {
 /// `DiskSpaceInfo` with disk usage statistics
 ///
 /// # Platform support
-/// - Linux/macOS: Uses `statvfs` system call
-/// - Windows: Uses `GetDiskFreeSpaceEx` via windows-rs (not yet implemented)
+/// - Unix (Linux/macOS): `statvfs(3)` system call via `libc`.
+/// - Windows: `GetDiskFreeSpaceExW` via `windows-sys`.
 #[cfg(unix)]
 pub fn get_disk_space(path: &Path) -> Result<DiskSpaceInfo> {
     use std::ffi::CString;
@@ -117,16 +116,64 @@ pub fn get_disk_space(path: &Path) -> Result<DiskSpaceInfo> {
     })
 }
 
-/// Check disk space for a given path (Windows stub)
+/// Check available disk space for a given path (Windows).
 ///
-/// Windows implementation not yet available - always returns error
+/// Uses the `GetDiskFreeSpaceExW` Win32 API. `lpFreeBytesAvailableToCaller`
+/// is used as `available_bytes` — that reflects any per-user quota the caller
+/// is subject to, which is what we actually care about for backup sizing.
 #[cfg(windows)]
-#[allow(dead_code)] // Stub function on Windows, used on Unix
-pub fn get_disk_space(_path: &Path) -> Result<DiskSpaceInfo> {
-    Err(anyhow::anyhow!(
-        "Windows disk space checking not yet implemented. \
-        Please use Linux or macOS, or disable disk space checks."
-    ))
+pub fn get_disk_space(path: &Path) -> Result<DiskSpaceInfo> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+
+    // Null-terminated UTF-16 path for the W-suffixed Win32 entrypoint.
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let mut free_bytes_available: u64 = 0;
+    let mut total_bytes: u64 = 0;
+    let mut total_free_bytes: u64 = 0;
+
+    // # Safety
+    //
+    // `GetDiskFreeSpaceExW` writes to three `u64` out-parameters, each pointing
+    // to a stack-local that outlives the call. `wide.as_ptr()` references a
+    // null-terminated UTF-16 buffer whose backing storage (`wide`) is kept
+    // alive for the duration of the call. Return value is checked for errors.
+    let ok = unsafe {
+        GetDiskFreeSpaceExW(
+            wide.as_ptr(),
+            &mut free_bytes_available,
+            &mut total_bytes,
+            &mut total_free_bytes,
+        )
+    };
+
+    if ok == 0 {
+        return Err(anyhow::anyhow!(
+            "Failed to get disk space for '{}': {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        ));
+    }
+
+    let available_bytes = free_bytes_available;
+    let used_bytes = total_bytes.saturating_sub(available_bytes);
+    let used_percent = if total_bytes > 0 {
+        (used_bytes as f64 / total_bytes as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    Ok(DiskSpaceInfo {
+        total_bytes,
+        available_bytes,
+        used_bytes,
+        used_percent,
+    })
 }
 
 /// Check if there's enough disk space for a backup
@@ -138,7 +185,6 @@ pub fn get_disk_space(_path: &Path) -> Result<DiskSpaceInfo> {
 ///
 /// # Returns
 /// `Ok(())` if there's enough space, `Err` otherwise
-#[cfg(unix)]
 pub fn check_disk_space_for_backup(
     backup_dir: &Path,
     file_size: u64,
@@ -178,31 +224,15 @@ pub fn check_disk_space_for_backup(
     Ok(())
 }
 
-/// Check if there's enough disk space for a backup (Windows stub)
-///
-/// Windows version - skips disk space checking
-#[cfg(windows)]
-#[allow(dead_code)] // Stub function on Windows, used on Unix
-pub fn check_disk_space_for_backup(
-    _backup_dir: &Path,
-    _file_size: u64,
-    _max_percent: f64,
-) -> Result<()> {
-    // Skip disk space checking on Windows
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    #[cfg(unix)]
     fn test_get_disk_space() {
-        let space = get_disk_space(Path::new("/"));
-        assert!(space.is_ok());
-
-        let space = space.unwrap();
+        // `env::temp_dir` is always a valid directory on both Unix (`/tmp` or
+        // `$TMPDIR`) and Windows (`%TEMP%`), so the test is portable.
+        let space = get_disk_space(&std::env::temp_dir()).expect("disk space");
         assert!(space.total_bytes > 0);
         assert!(space.available_bytes > 0);
         assert!(space.used_percent >= 0.0 && space.used_percent <= 100.0);

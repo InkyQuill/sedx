@@ -9,6 +9,21 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 use tempfile::NamedTempFile;
 
+/// Preserve the destination file's mode across a write.
+/// Reads permissions BEFORE the write closure runs, then re-applies them after.
+/// Best-effort: silently ignores permission errors (e.g., when the file is new).
+/// Used for both in-memory `fs::write` and streaming `NamedTempFile::persist` — the
+/// rename-based atomic write loses the original mode on every filesystem, and
+/// `fs::write`'s in-place truncation only incidentally preserves it on local ext4.
+fn preserve_perms_after<F: FnOnce() -> Result<()>>(path: &Path, write: F) -> Result<()> {
+    let perms = fs::metadata(path).ok().map(|m| m.permissions());
+    write()?;
+    if let Some(p) = perms {
+        let _ = fs::set_permissions(path, p);
+    }
+    Ok(())
+}
+
 // Chunk 8: Key for tracking mixed range states per command
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct MixedRangeKey {
@@ -23,21 +38,13 @@ enum MixedRangeState {
     InRangeUntilPattern { end_pattern: String },
 }
 
-/// Pattern range state for streaming mode (Chunk 8)
+/// Pattern range state for streaming pattern-to-pattern ranges (`/start/,/end/`).
+/// Mixed-form ranges like `/start/,N` and `/start/,+N` are tracked separately by
+/// `MixedRangeState`; this enum only covers the pure-pattern case.
 #[derive(Clone, PartialEq)]
-#[allow(dead_code)] // Reserved for future use in mixed range handling
 enum PatternRangeState {
-    LookingForStart, // Looking for start pattern
-    InRange,         // Currently inside /start/,/end/ range
-    // Chunk 8: Mixed range states
-    #[allow(dead_code)] // Reserved for future use
-    WaitingForLineNumber {
-        target_line: usize,
-    }, // /start/,10 - waiting to reach line 10
-    #[allow(dead_code)] // Reserved for future use
-    CountingRelativeLines {
-        remaining: usize,
-    }, // /start/,+5 - counting N lines after match
+    LookingForStart,
+    InRange,
 }
 
 // ============================================================================
@@ -79,16 +86,10 @@ impl LineIterator {
         }
     }
 
-    /// Check if at EOF
-    #[allow(dead_code)] // Kept for potential future use
+    /// Check if at EOF (used by tests)
+    #[cfg(test)]
     fn is_eof(&self) -> bool {
         self.current >= self.lines.len()
-    }
-
-    /// Peek at current position without consuming
-    #[allow(dead_code)] // Kept for potential future use
-    fn peek(&self) -> usize {
-        self.current
     }
 }
 
@@ -146,14 +147,6 @@ struct CycleState {
     /// Input line iterator for n/N commands
     line_iter: LineIterator,
 
-    /// Pattern range states (for /start/,/end/ ranges)
-    #[allow(dead_code)] // Reserved for future use
-    pattern_range_states: HashMap<(String, String), PatternRangeState>,
-
-    /// Mixed range states for tracking complex ranges (Chunk 8)
-    #[allow(dead_code)] // Reserved for future use
-    mixed_range_states: HashMap<MixedRangeKey, MixedRangeState>,
-
     /// Line number range states (for 1,3 ranges)
     /// Maps (start_line, end_line) -> (in_range, ended)
     /// in_range: true if we're currently inside the range
@@ -177,8 +170,6 @@ impl CycleState {
             stdout_outputs: Vec::new(), // Phase 5: Initialize stdout outputs
             current_filename: filename, // Phase 5: Initialize filename
             line_iter: LineIterator::new(lines),
-            pattern_range_states: HashMap::new(),
-            mixed_range_states: HashMap::new(),
             line_range_states: HashMap::new(),
             substitution_made: false, // Phase 5: Initialize substitution flag
         }
@@ -202,7 +193,14 @@ pub struct LineChange {
     pub line_number: usize,
     pub change_type: ChangeType,
     pub content: String,
-    pub old_content: Option<String>, // For Modified type
+    /// Pre-change content, populated on `ChangeType::Modified` variants so
+    /// that consumers inspecting a `LineChange` can show the before/after
+    /// pair. Read from the `#[cfg(test)]` block in `diff_formatter.rs` and
+    /// from any downstream library consumer that iterates a `FileDiff`.
+    /// The sedx binary itself only writes this field; the `dead_code`
+    /// allow is necessary until a non-test reader lands in production.
+    #[allow(dead_code)]
+    pub old_content: Option<String>,
 }
 
 #[derive(Debug)]
@@ -212,16 +210,6 @@ pub struct FileDiff {
     pub all_lines: Vec<(usize, String, ChangeType)>, // (line_number, content, change_type)
     pub printed_lines: Vec<String>,                  // Lines from print commands
     pub is_streaming: bool, // True if processed in streaming mode (all_lines may be empty)
-}
-
-// Legacy structure for backward compatibility
-#[derive(Debug)]
-#[allow(dead_code)] // Legacy type - kept for API compatibility
-pub struct FileChange {
-    pub line_number: usize,
-    #[allow(dead_code)] // Part of legacy API
-    pub old_content: String,
-    pub new_content: String,
 }
 
 pub struct FileProcessor {
@@ -240,15 +228,6 @@ pub struct FileProcessor {
     read_positions: HashMap<String, usize>, // Current line position for R command (filename -> line_index)
     // Regex flavor for enhanced error reporting
     regex_flavor: crate::cli::RegexFlavor,
-}
-
-/// Result of applying a command in streaming mode
-#[derive(Debug)]
-#[allow(dead_code)] // Reserved for future streaming enhancements
-enum StreamResult {
-    Output(String), // Line should be output
-    Skip,           // Don't output (deleted)
-    StopProcessing, // Quit command encountered
 }
 
 /// Processor for streaming large files with constant memory usage
@@ -272,7 +251,13 @@ pub struct StreamProcessor {
 }
 
 impl StreamProcessor {
-    #[allow(dead_code)] // Part of public API for library users
+    /// Default-flavor constructor. Callers that want a non-PCRE flavor
+    /// should use `with_regex_flavor` directly. Consumed by
+    /// `tests/property_tests.rs` and by library users that re-export
+    /// `StreamProcessor` via `sedx::StreamProcessor`. The sedx binary
+    /// itself always goes through `with_regex_flavor`, so the `dead_code`
+    /// allow is necessary until a binary caller lands.
+    #[allow(dead_code)]
     pub fn new(commands: Vec<Command>) -> Self {
         Self::with_regex_flavor(commands, crate::cli::RegexFlavor::PCRE)
     }
@@ -320,7 +305,7 @@ impl StreamProcessor {
     }
 
     /// Check if file should use streaming based on size
-    #[allow(dead_code)] // Kept for potential future use
+    #[allow(dead_code)] // Called by process_streaming; both are part of the public StreamProcessor API for large-file handling.
     fn should_use_streaming(file_size: u64) -> bool {
         const STREAMING_THRESHOLD: u64 = 100 * 1024 * 1024; // 100MB
         file_size >= STREAMING_THRESHOLD
@@ -498,9 +483,6 @@ impl StreamProcessor {
                     true
                 }
             }
-            // These states should not appear in pattern-to-pattern ranges, but handle them gracefully
-            PatternRangeState::WaitingForLineNumber { .. }
-            | PatternRangeState::CountingRelativeLines { .. } => false,
         };
 
         Ok(in_range)
@@ -524,23 +506,18 @@ impl StreamProcessor {
             .with_context(|| format!("Invalid regex pattern: {}", start_pat))?;
 
         let in_range = match state {
-            MixedRangeState::LookingForPattern => {
-                if start_re.is_match(line) {
-                    *state = MixedRangeState::InRangeUntilLine {
-                        target_line: end_line,
-                    };
-                    true
-                } else {
-                    false
-                }
+            MixedRangeState::LookingForPattern if start_re.is_match(line) => {
+                *state = MixedRangeState::InRangeUntilLine {
+                    target_line: end_line,
+                };
+                true
             }
+            MixedRangeState::LookingForPattern => false,
             MixedRangeState::InRangeUntilLine { target_line } => {
                 if self.current_line >= *target_line {
                     *state = MixedRangeState::LookingForPattern; // Reset for next occurrence
-                    true // Include the end line
-                } else {
-                    true
                 }
+                true // Always inside the range while state is InRangeUntilLine
             }
             _ => false,
         };
@@ -563,25 +540,20 @@ impl StreamProcessor {
             .or_insert(MixedRangeState::LookingForPattern);
 
         let in_range = match state {
-            MixedRangeState::LookingForPattern => {
-                if self.current_line >= start_line {
-                    *state = MixedRangeState::InRangeUntilPattern {
-                        end_pattern: end_pat.to_string(),
-                    };
-                    true
-                } else {
-                    false
-                }
+            MixedRangeState::LookingForPattern if self.current_line >= start_line => {
+                *state = MixedRangeState::InRangeUntilPattern {
+                    end_pattern: end_pat.to_string(),
+                };
+                true
             }
+            MixedRangeState::LookingForPattern => false,
             MixedRangeState::InRangeUntilPattern { end_pattern } => {
                 let end_re = Regex::new(end_pattern)
                     .with_context(|| format!("Invalid regex pattern: {}", end_pattern))?;
                 if end_re.is_match(line) {
                     *state = MixedRangeState::LookingForPattern; // Reset for next occurrence
-                    true // Include the end line
-                } else {
-                    true
                 }
+                true // Always inside the range while state is InRangeUntilPattern
             }
             _ => false,
         };
@@ -701,7 +673,7 @@ impl StreamProcessor {
     /// Process a file using streaming approach (constant memory)
     ///
     /// Currently implements substitution commands. More command types will be added.
-    #[allow(dead_code)] // Kept for potential future use
+    #[allow(dead_code)] // Part of the public StreamProcessor API — library consumers call this to process large files without loading them fully into memory.
     pub fn process_streaming(&mut self, file_path: &Path) -> Result<FileDiff> {
         // Check file exists and get size
         let metadata = fs::metadata(file_path)
@@ -836,12 +808,9 @@ impl StreamProcessor {
                                 Address::LineNumber(_) => {
                                     // Not at the target line yet, continue
                                 }
-                                _ => {
-                                    // Complex addresses (patterns) not yet supported - delegate to in-memory
-                                    drop(writer);
-                                    let mut processor = FileProcessor::new(self.commands.clone());
-                                    return processor.process_file_with_context(file_path);
-                                }
+                                _ => unreachable!(
+                                    "non-streamable address reached streaming handler; get_command_range_option/is_range_supported_in_streaming should have rejected this"
+                                ),
                             }
                         }
                         Command::Append { text, address } => {
@@ -854,31 +823,24 @@ impl StreamProcessor {
                                 Address::LineNumber(_) => {
                                     // Not at the target line yet or already passed it, continue
                                 }
-                                _ => {
-                                    // Complex addresses (patterns) not yet supported - delegate to in-memory
-                                    drop(writer);
-                                    let mut processor = FileProcessor::new(self.commands.clone());
-                                    return processor.process_file_with_context(file_path);
-                                }
+                                _ => unreachable!(
+                                    "non-streamable address reached streaming handler; get_command_range_option/is_range_supported_in_streaming should have rejected this"
+                                ),
                             }
                         }
-                        Command::Change { text, address } => {
-                            // Change (replace) the specified line with new text
-                            match address {
-                                Address::LineNumber(n) if *n == line_num => {
-                                    // Replace current line with new text
-                                    processed_line = text.clone();
-                                    line_changed = true;
+                        Command::Change { text, range } => {
+                            // Change collapses lines start..=end to one TEXT line.
+                            // Streaming supports only the single-line case (start == end == LineNumber).
+                            match (&range.0, &range.1) {
+                                (Address::LineNumber(s), Address::LineNumber(e)) if s == e => {
+                                    if line_num == *s {
+                                        processed_line = text.clone();
+                                        line_changed = true;
+                                    }
                                 }
-                                Address::LineNumber(_) => {
-                                    // Not at the target line yet, continue
-                                }
-                                _ => {
-                                    // Complex addresses (patterns) not yet supported - delegate to in-memory
-                                    drop(writer);
-                                    let mut processor = FileProcessor::new(self.commands.clone());
-                                    return processor.process_file_with_context(file_path);
-                                }
+                                _ => unreachable!(
+                                    "non-streamable Change address reached streaming handler; get_command_range_option/is_range_supported_in_streaming should have rejected this"
+                                ),
                             }
                         }
                         Command::Quit { address } => {
@@ -1259,14 +1221,16 @@ impl StreamProcessor {
                 .with_context(|| "Failed to flush temp file")?;
         } // writer dropped here
 
-        // Atomic rename: temp file becomes the actual file
-        // In dry-run mode, don't persist (temp file will be automatically deleted when dropped)
+        // Atomic rename: temp file becomes the actual file.
+        // In dry-run mode, don't persist (temp file is automatically deleted when dropped).
         if !self.dry_run {
-            temp_file.persist(file_path).with_context(|| {
-                format!("Failed to persist temp file to {}", file_path.display())
+            preserve_perms_after(file_path, || {
+                temp_file.persist(file_path).with_context(|| {
+                    format!("Failed to persist temp file to {}", file_path.display())
+                })?;
+                Ok(())
             })?;
         }
-        // If dry_run, temp_file is dropped here and automatically deleted
 
         // Build FileDiff result
         // NOTE: In streaming mode, we don't populate all_lines to save memory
@@ -1337,7 +1301,7 @@ impl FileProcessor {
     }
 
     /// Get the lines that were printed by print commands (for quiet mode)
-    #[allow(dead_code)] // Public API - kept for compatibility
+    #[allow(dead_code)] // Part of the public FileProcessor API — library consumers call this to retrieve p-command output in -n mode.
     pub fn get_printed_lines(&self) -> &[String] {
         &self.printed_lines
     }
@@ -1387,24 +1351,7 @@ impl FileProcessor {
         true
     }
 
-    /// Legacy method - returns simple changes (for backward compatibility)
-    #[allow(dead_code)] // Public API - kept for compatibility
-    pub fn process_file(&mut self, file_path: &Path) -> Result<Vec<FileChange>> {
-        let diff = self.process_file_with_context(file_path)?;
-
-        Ok(diff
-            .changes
-            .iter()
-            .filter(|c| c.change_type == ChangeType::Modified)
-            .map(|c| FileChange {
-                line_number: c.line_number,
-                old_content: c.old_content.clone().unwrap_or_default(),
-                new_content: c.content.clone(),
-            })
-            .collect())
-    }
-
-    /// New method - returns detailed diff with context
+    /// Returns detailed diff with context
     pub fn process_file_with_context(&mut self, file_path: &Path) -> Result<FileDiff> {
         let content = fs::read_to_string(file_path)
             .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
@@ -1518,8 +1465,10 @@ impl FileProcessor {
         }
 
         let new_content = lines.join("\n") + "\n";
-        fs::write(file_path, new_content)
-            .with_context(|| format!("Failed to write file: {}", file_path.display()))?;
+        preserve_perms_after(file_path, || {
+            fs::write(file_path, &new_content)
+                .with_context(|| format!("Failed to write file: {}", file_path.display()))
+        })?;
 
         Ok(lines.len())
     }
@@ -2220,9 +2169,14 @@ impl FileProcessor {
             state.line_num += 1;
             Ok(CycleResult::Continue)
         } else {
-            // At EOF: don't modify pattern space, just continue
-            // GNU sed doesn't add a newline at EOF
-            Ok(CycleResult::Continue)
+            // GNU sed parity: N at EOF prints the pattern space (unless -n)
+            // then terminates without reading another line. DeleteLine halts
+            // the command loop and suppresses the cycle-end auto-print so the
+            // pattern space is emitted exactly once via side_effects.
+            if !self.no_default_output {
+                state.side_effects.push(state.pattern_space.clone());
+            }
+            Ok(CycleResult::DeleteLine)
         }
     }
 
@@ -2349,8 +2303,8 @@ impl FileProcessor {
             Command::Append { text, address } => {
                 self.apply_append(lines, text, address)?;
             }
-            Command::Change { text, address } => {
-                self.apply_change(lines, text, address)?;
+            Command::Change { text, range } => {
+                self.apply_change(lines, text, range)?;
             }
             Command::Print { range } => {
                 // Collect lines to print (doesn't modify the file)
@@ -2782,11 +2736,24 @@ impl FileProcessor {
         Ok(())
     }
 
-    fn apply_change(&self, lines: &mut [String], text: &str, address: &Address) -> Result<()> {
-        let idx = self.resolve_address(address, lines, 0)?;
-        if idx < lines.len() {
-            lines[idx] = text.to_string();
+    fn apply_change(
+        &self,
+        lines: &mut Vec<String>,
+        text: &str,
+        range: &(Address, Address),
+    ) -> Result<()> {
+        if lines.is_empty() {
+            return Ok(());
         }
+        let last = lines.len() - 1;
+        let start = self.resolve_address(&range.0, lines, 0)?.min(last);
+        let end = self.resolve_address(&range.1, lines, last)?.min(last);
+        if start > end {
+            return Ok(());
+        }
+        // Replace lines[start..=end] with a single TEXT line (matches GNU sed)
+        lines.drain(start..=end);
+        lines.insert(start, text.to_string());
         Ok(())
     }
 
@@ -3910,6 +3877,76 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn test_apply_to_file_preserves_unix_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("t.txt");
+        fs::write(&path, "old\n").unwrap();
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&path, perms).unwrap();
+
+        use crate::command::{Command, SubstitutionFlags};
+        let cmd = Command::Substitution {
+            pattern: "old".to_string(),
+            replacement: "new".to_string(),
+            flags: SubstitutionFlags {
+                global: false,
+                case_insensitive: false,
+                print: false,
+                nth: None,
+            },
+            range: None,
+        };
+        let mut p = FileProcessor::new(vec![cmd]);
+        p.apply_to_file(&path).expect("apply");
+
+        let after = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            after, 0o755,
+            "expected mode preserved (0o755), got {:o}",
+            after
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_streaming_preserves_unix_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("t.txt");
+        fs::write(&path, "old\n").unwrap();
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&path, perms).unwrap();
+
+        use crate::command::{Command, SubstitutionFlags};
+        let cmd = Command::Substitution {
+            pattern: "old".to_string(),
+            replacement: "new".to_string(),
+            flags: SubstitutionFlags {
+                global: false,
+                case_insensitive: false,
+                print: false,
+                nth: None,
+            },
+            range: None,
+        };
+        let mut sp = StreamProcessor::new(vec![cmd]);
+        sp.process_streaming_forced(&path).expect("streaming apply");
+
+        let after = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            after, 0o755,
+            "streaming: expected mode 0o755, got {:o}",
+            after
+        );
+    }
+
+    #[test]
     fn test_group_parsing() {
         // Test that group commands are parsed correctly
         let parser = Parser::new(RegexFlavor::PCRE);
@@ -4114,8 +4151,7 @@ mod cycle_tests {
 
     #[test]
     fn test_hold_space_h_g() {
-        // Test h and g commands (copy to/from hold space)
-        // NOTE: This test doesn't use ranges - range checking not yet implemented
+        // Test h and g commands (copy to/from hold space).
         let commands = vec![
             // h: copy pattern space to hold space
             Command::Hold { range: None },
@@ -4134,8 +4170,7 @@ mod cycle_tests {
 
     #[test]
     fn test_hold_space_x() {
-        // Test x command (exchange pattern and hold spaces)
-        // NOTE: This test doesn't use ranges - range checking not yet implemented
+        // Test x command (exchange pattern and hold spaces).
         let commands = vec![
             // h: copy pattern space to hold space
             Command::Hold { range: None },
@@ -4154,8 +4189,7 @@ mod cycle_tests {
 
     #[test]
     fn test_substitution_and_hold() {
-        // Test combination of substitution and hold space
-        // NOTE: This test doesn't use ranges - range checking not yet implemented
+        // Test combination of substitution and hold space.
         let commands = vec![
             // s/foo/bar/ - substitution
             Command::Substitution {
@@ -4181,5 +4215,18 @@ mod cycle_tests {
 
         // "foo baz" -> s -> "bar baz" -> h (hold="bar baz") -> g (pattern="bar baz")
         assert_eq!(result, vec!["bar baz"]);
+    }
+
+    #[test]
+    fn test_apply_change_range_collapses_lines() {
+        use crate::command::{Address, Command};
+        let mut buf: Vec<String> = ["a", "b", "c", "d"].iter().map(|s| s.to_string()).collect();
+        let cmd = Command::Change {
+            text: "REPLACED".to_string(),
+            range: (Address::LineNumber(2), Address::LineNumber(3)),
+        };
+        let mut processor = FileProcessor::new(vec![cmd.clone()]);
+        processor.apply_command(&mut buf, &cmd).expect("apply");
+        assert_eq!(buf, vec!["a", "REPLACED", "d"]);
     }
 }

@@ -25,10 +25,25 @@ pub struct BackupManager {
     backups_dir: PathBuf,
 }
 
+/// Resolve sedx's state directory root.
+///
+/// Honors the `SEDX_HOME` env var if set (useful for tests that need to
+/// isolate `~/.sedx/` on every platform — `dirs::home_dir()` on Windows
+/// reads the shell API, not `HOME`/`USERPROFILE`, so an env-based override
+/// is the only portable way to redirect it). Falls back to
+/// `dirs::home_dir()` for normal use.
+pub fn sedx_home() -> Result<PathBuf> {
+    if let Ok(custom) = std::env::var("SEDX_HOME") {
+        if !custom.is_empty() {
+            return Ok(PathBuf::from(custom));
+        }
+    }
+    dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))
+}
+
 impl BackupManager {
     pub fn new() -> Result<Self> {
-        let home_dir =
-            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+        let home_dir = sedx_home()?;
         let backups_dir = home_dir.join(".sedx").join("backups");
 
         // Create backups directory if it doesn't exist
@@ -80,9 +95,6 @@ impl BackupManager {
         // Default: warn if backup > 2GB or > 40% of free space
         // Error if backup > 60% of free space
         const MAX_BACKUP_SIZE_GB: u64 = 2;
-        #[allow(dead_code)] // Documented threshold for future warning implementation
-        const WARN_PERCENT: f64 = 40.0;
-        #[cfg_attr(windows, allow(dead_code))] // Only used on Unix
         const ERROR_PERCENT: f64 = 60.0;
 
         // Warn if backup is very large
@@ -95,15 +107,11 @@ impl BackupManager {
         }
 
         // Check disk space with error threshold
-        // Skip on Windows in test mode (disk_space check not implemented there)
-        #[cfg(not(all(windows, test)))]
-        let _disk_check_result = crate::disk_space::check_disk_space_for_backup(
+        if let Err(e) = crate::disk_space::check_disk_space_for_backup(
             &self.backups_dir,
             total_size,
             ERROR_PERCENT,
-        );
-        #[cfg(not(all(windows, test)))]
-        if let Err(e) = _disk_check_result {
+        ) {
             // Provide helpful error message
             return Err(e.context(format!(
                 "Cannot create backup. Files size: {}",
@@ -266,7 +274,7 @@ impl BackupManager {
     }
 
     /// Remove a backup by its ID (used for cleanup when no changes are made)
-    #[allow(dead_code)] // Public API - kept for future use
+    #[allow(dead_code)] // Part of the public BackupManager API — lets library consumers remove backups programmatically.
     pub fn remove_backup_by_id(&self, backup_id: &str) -> Result<()> {
         let backup_dir = self.backups_dir.join(backup_id);
         fs::remove_dir_all(&backup_dir)
@@ -275,7 +283,7 @@ impl BackupManager {
     }
 
     /// Parse backup metadata from JSON string
-    #[allow(dead_code)] // Public API - kept for future use
+    #[allow(dead_code)] // Part of the public BackupManager API — lets library consumers deserialize stored metadata.
     pub fn parse_backup_metadata(json: &str) -> Result<BackupMetadata> {
         let metadata: BackupMetadata =
             serde_json::from_str(json).context("Failed to parse backup metadata")?;
@@ -283,7 +291,7 @@ impl BackupManager {
     }
 
     /// Prune backups keeping only the N most recent ones
-    #[allow(dead_code)] // Public API - kept for future use
+    #[allow(dead_code)] // Part of the public BackupManager API — lets library consumers enforce count-based retention.
     pub fn prune_backups(&self, keep_count: usize) -> Result<usize> {
         let mut backups = self.list_backups()?;
         backups.sort_by_key(|b| b.timestamp);
@@ -303,7 +311,7 @@ impl BackupManager {
     }
 
     /// Prune backups older than the specified number of days
-    #[allow(dead_code)] // Public API - kept for future use
+    #[allow(dead_code)] // Part of the public BackupManager API — lets library consumers enforce time-based retention.
     pub fn prune_backups_older_than(&self, days: i64) -> Result<usize> {
         let cutoff = Utc::now() - chrono::Duration::days(days);
         let mut removed = 0;

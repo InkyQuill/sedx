@@ -1,5 +1,7 @@
 use anyhow::{Result, anyhow, bail};
 
+use crate::command::{Address, Command, SubstitutionFlags};
+
 /// Maximum context characters to show around error position
 const ERROR_CONTEXT_SIZE: usize = 30;
 
@@ -43,130 +45,27 @@ fn format_parse_error(
     msg
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum SedCommand {
-    Substitution {
-        pattern: String,
-        replacement: String,
-        flags: Vec<char>,
-        range: Option<(Address, Address)>, // Line range for substitution
-    },
-    Delete {
-        range: (Address, Address), // What to delete
-    },
-    Insert {
-        text: String,
-        address: Address, // Where to insert (before)
-    },
-    Append {
-        text: String,
-        address: Address, // Where to append (after)
-    },
-    Change {
-        text: String,
-        address: Address, // Which line(s) to change
-    },
-    Print {
-        range: (Address, Address), // What to print
-    },
-    Quit {
-        address: Option<Address>, // q or 10q or /pattern/q
-    },
-    // Phase 4: Quit without printing
-    QuitWithoutPrint {
-        address: Option<Address>, // Q or 10Q or /pattern/Q
-    },
-    Group {
-        range: Option<(Address, Address)>, // Optional range for the group
-        commands: Vec<SedCommand>,         // Commands to execute
-    },
-    // Hold space operations
-    Hold {
-        range: Option<(Address, Address)>, // h command - copy to hold space
-    },
-    HoldAppend {
-        range: Option<(Address, Address)>, // H command - append to hold space
-    },
-    Get {
-        range: Option<(Address, Address)>, // g command - get from hold space
-    },
-    GetAppend {
-        range: Option<(Address, Address)>, // G command - append from hold space
-    },
-    Exchange {
-        range: Option<(Address, Address)>, // x command - exchange buffers
-    },
-    // Phase 4: Multi-line pattern space commands
-    Next {
-        range: Option<(Address, Address)>, // n command - next line
-    },
-    NextAppend {
-        range: Option<(Address, Address)>, // N command - append next line
-    },
-    PrintFirstLine {
-        range: Option<(Address, Address)>, // P command - print first line
-    },
-    DeleteFirstLine {
-        range: Option<(Address, Address)>, // D command - delete first line
-    },
-    // Phase 5: Flow control commands
-    Label {
-        name: String, // :label - defines a branch target
-    },
-    Branch {
-        label: Option<String>, // b [label] - branch to label (end of script if None)
-        range: Option<(Address, Address)>, // Optional address/range for branch
-    },
-    Test {
-        label: Option<String>,             // t [label] - branch if substitution made
-        range: Option<(Address, Address)>, // Optional address/range for test
-    },
-    TestFalse {
-        label: Option<String>,             // T [label] - branch if NO substitution made
-        range: Option<(Address, Address)>, // Optional address/range for test false
-    },
-    // Phase 5: File I/O commands
-    ReadFile {
-        filename: String,       // r filename - read file and append contents
-        range: Option<Address>, // Optional address for read
-    },
-    WriteFile {
-        filename: String,       // w filename - write pattern space to file
-        range: Option<Address>, // Optional address for write
-    },
-    ReadLine {
-        filename: String,       // R filename - read one line from file
-        range: Option<Address>, // Optional address for read
-    },
-    WriteFirstLine {
-        filename: String,       // W filename - write first line to file
-        range: Option<Address>, // Optional address for write
-    },
-    // Phase 5: Additional commands
-    PrintLineNumber {
-        range: Option<Address>, // = - print line number (optional address)
-    },
-    PrintFilename {
-        range: Option<Address>, // F - print filename (optional address)
-    },
-    ClearPatternSpace {
-        range: Option<Address>, // z - clear pattern space (optional address)
-    },
+/// Fold a raw sed-flag character sequence into a SubstitutionFlags value.
+/// Numeric flags set `nth`; recognised letters flip their corresponding bool.
+/// Unknown characters are ignored (matches GNU sed's lenience).
+fn fold_substitution_flags(flags: &[char]) -> SubstitutionFlags {
+    let mut out = SubstitutionFlags::default();
+    for flag in flags {
+        match flag {
+            'g' => out.global = true,
+            'p' => out.print = true,
+            'i' | 'I' => out.case_insensitive = true,
+            '0'..='9' => {
+                // ASCII digit guaranteed by the arm's pattern; to_digit can't fail.
+                out.nth = Some(flag.to_digit(10).unwrap() as usize);
+            }
+            _ => {} // Ignore unknown flags
+        }
+    }
+    out
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Address {
-    LineNumber(usize),
-    Pattern(String),
-    FirstLine,             // Special address "0" for first-match substitution
-    LastLine,              // Special address "$" for last line
-    Negated(Box<Address>), // Negation: !/pattern/ or !10
-    // Chunk 8: New address types
-    Relative { base: Box<Address>, offset: isize }, // /pattern/,+5 or 10,+3
-    Step { start: usize, step: usize },             // 1~2 (every 2nd line from line 1)
-}
-
-pub fn parse_sed_expression(expr: &str) -> Result<Vec<SedCommand>> {
+pub fn parse_sed_expression(expr: &str) -> Result<Vec<Command>> {
     let mut commands = Vec::new();
 
     // Handle multiple expressions separated by ;
@@ -213,45 +112,161 @@ pub fn parse_sed_expression(expr: &str) -> Result<Vec<SedCommand>> {
 /// Returns true if the position is inside the delimiters (not at the delimiters themselves)
 fn is_inside_pattern_address(cmd: &str, pos: usize) -> bool {
     let bytes = cmd.as_bytes();
-    let n = bytes.len();
+    let limit = pos.min(bytes.len());
 
-    // We need to count delimiter pairs before the position
-    // Each pair consists of an opening delimiter and its matching closing delimiter
-    // We're "inside" if we've seen an odd number of opening delimiters before this position
+    // Phase 1: left-to-right open/close scan up to `pos`.
+    // A pattern address opens with `/` (or `\X` backslash-custom-delim).
+    // Once open, `\X` escapes the next char; the matching opener char closes.
+    let mut i = 0;
+    let mut current_opener: Option<u8> = None;
+    while i < limit {
+        let byte = bytes[i];
+        match current_opener {
+            None => {
+                if byte == b'/' || byte == b'\\' {
+                    current_opener = Some(byte);
+                }
+            }
+            Some(opener) => {
+                if byte == b'\\' && i + 1 < limit {
+                    i += 2;
+                    continue;
+                }
+                if byte == opener {
+                    current_opener = None;
+                }
+            }
+        }
+        i += 1;
+    }
 
-    // For simplicity, let's just look for the pattern: /.../ where pos is between the slashes
-    // We need to find the LAST '/' BEFORE pos and check if it has a matching '/' AFTER pos
+    // If we are still waiting for a closer, we are inside a pattern address.
+    if current_opener.is_some() {
+        return true;
+    }
 
-    // Find the last '/' or '\' before pos
-    let mut last_delim_before = None;
-    for i in (0..pos).rev() {
-        if bytes[i] == b'/' || bytes[i] == b'\\' {
-            last_delim_before = Some(i);
+    // Phase 2 covers the substitution replacement region (e.g. the `r` in
+    // `s/foo/bar/`), where Phase 1 exits in the `None` state because the
+    // pattern sub-region already closed. Discriminator: whitespace before the
+    // next slash indicates a filename argument, not a paired closing delimiter.
+    let has_slash_before = (0..pos)
+        .rev()
+        .any(|j| bytes[j] == b'/' && (j == 0 || bytes[j - 1] != b'\\'));
+    if !has_slash_before {
+        return false;
+    }
+    for &byte in bytes.iter().skip(pos + 1) {
+        if byte.is_ascii_whitespace() {
             break;
         }
-    }
-
-    let start_pos = match last_delim_before {
-        Some(sp) => sp,
-        None => return false, // No delimiter before pos, so we're not inside
-    };
-
-    // Look for the NEXT '/' or '\' after start_pos
-    for i in (start_pos + 1)..n {
-        if bytes[i] == bytes[start_pos] {
-            // Same delimiter character
-            // Found matching closing delimiter
-            // Check if pos is between the delimiters
-            return pos > start_pos && pos < i;
+        if byte == b'/' {
+            return true;
         }
     }
 
-    // No matching closing delimiter found
-    // Assume we're NOT inside (unclosed pattern)
     false
 }
 
-fn parse_single_command(cmd: &str) -> Result<SedCommand> {
+/// Attempt to dispatch a file-I/O command (`r` / `R` / `w` / `W`). Returns
+/// `Ok(Some(_))` on a successful dispatch, `Ok(None)` if the command does
+/// not look like a file-I/O command (so callers fall through to other
+/// dispatchers), or `Err(_)` if a file-I/O dispatch fired but the sub-parser
+/// itself failed.
+///
+/// This helper exists so file-I/O dispatch can run BEFORE the marker-based
+/// (`s/`, `i\`, `a\`, `c\`) dispatch. A filename payload like
+/// `/var/folders/xx/yy/T/.tmpZZ/data.txt` legitimately contains `s/` (inside
+/// the `folders/` segment), and without this ordering the whole command
+/// `R /var/folders/...` gets misrouted to `parse_substitution`.
+fn try_parse_file_io(cmd: &str) -> Result<Option<Command>> {
+    let trimmed = cmd.trim();
+    if !(trimmed.contains('r')
+        || trimmed.contains('R')
+        || trimmed.contains('w')
+        || trimmed.contains('W'))
+    {
+        return Ok(None);
+    }
+
+    // Positions of each command character. Pattern-address `/.../` content
+    // is filtered out because that's where `r`/`R` etc. commonly appear as
+    // incidental letters rather than as command chars.
+    let mut r_positions: Vec<usize> = trimmed.match_indices('r').map(|(i, _)| i).collect();
+    let mut r_upper_positions: Vec<usize> = trimmed.match_indices('R').map(|(i, _)| i).collect();
+    let mut w_positions: Vec<usize> = trimmed.match_indices('w').map(|(i, _)| i).collect();
+    let mut w_upper_positions: Vec<usize> = trimmed.match_indices('W').map(|(i, _)| i).collect();
+
+    r_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
+    r_upper_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
+    w_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
+    w_upper_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
+
+    // If an insert / append / change marker (`i\`, `a\`, `c\`) appears in
+    // the command, its text payload follows the backslash and may contain
+    // any characters — including `r`, `R`, `w`, `W`. Positions past the
+    // earliest i/a/c marker are therefore part of the text payload, not
+    // file-I/O command characters.
+    let iac_pos = [
+        trimmed.find("i\\"),
+        trimmed.find("a\\"),
+        trimmed.find("c\\"),
+    ]
+    .into_iter()
+    .flatten()
+    .min();
+
+    let keep = |&pos: &usize| -> bool {
+        match iac_pos {
+            Some(iac) => pos < iac,
+            None => true,
+        }
+    };
+    let all_positions: Vec<(usize, char)> = r_positions
+        .iter()
+        .copied()
+        .filter(keep)
+        .map(|p| (p, 'r'))
+        .chain(
+            r_upper_positions
+                .iter()
+                .copied()
+                .filter(keep)
+                .map(|p| (p, 'R')),
+        )
+        .chain(w_positions.iter().copied().filter(keep).map(|p| (p, 'w')))
+        .chain(
+            w_upper_positions
+                .iter()
+                .copied()
+                .filter(keep)
+                .map(|p| (p, 'W')),
+        )
+        .collect();
+
+    let Some(&(pos, char_at_pos)) = all_positions.iter().min_by_key(|(p, _)| p) else {
+        return Ok(None);
+    };
+
+    // After the command char there must be a filename (possibly with
+    // leading whitespace). An empty tail means this is just a suffix
+    // character of a different command (e.g. `/pat/w` with the `w` closing
+    // the pattern? — doesn't happen in practice, but be conservative).
+    let rest = &trimmed[pos + 1..];
+    if rest.trim().is_empty() {
+        return Ok(None);
+    }
+
+    let parsed = match char_at_pos {
+        'r' => parse_read_file(cmd)?,
+        'R' => parse_read_line(cmd)?,
+        'w' => parse_write_file(cmd)?,
+        'W' => parse_write_first_line(cmd)?,
+        _ => unreachable!(),
+    };
+    Ok(Some(parsed))
+}
+
+fn parse_single_command(cmd: &str) -> Result<Command> {
     let cmd = cmd.trim();
 
     // Check for command grouping with braces
@@ -259,11 +274,39 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
         return parse_group(cmd);
     }
 
-    // IMPORTANT: Check for substitution commands FIRST
-    // because substitution commands can end with 'g' (global flag), 'p' (print flag), etc.
-    // which would otherwise be misidentified as get/print/hold commands
-    if cmd.contains("s/") || cmd.contains("s#") || cmd.contains("s:") || cmd.contains("s|") {
-        return parse_substitution(cmd);
+    // Check for r/R/w/W (file I/O) commands FIRST, before the marker-based
+    // dispatch below. File I/O commands carry a filename payload that may
+    // legitimately contain any of the marker substrings — e.g. a path
+    // segment like `/folders/` trips the "s/" marker and misroutes the
+    // whole command to `parse_substitution`. See `try_parse_file_io` for
+    // the details of how pattern-address delimiters are filtered out so
+    // this does not misfire on real substitutions.
+    if let Some(cmd_out) = try_parse_file_io(cmd)? {
+        return Ok(cmd_out);
+    }
+
+    // Dispatch based on the EARLIEST occurrence of a command marker in the command string.
+    // This correctly handles cases where a marker appears inside the text/pattern of
+    // another command (e.g., `2i\s/foo/bar/g` — insert literal "s/foo/bar/g"; or
+    // `s/i\foo/bar/` — substitution whose pattern contains "i\").
+    type Handler = fn(&str) -> Result<Command>;
+    const CANDIDATES: &[(&str, Handler)] = &[
+        ("i\\", parse_insert),
+        ("a\\", parse_append),
+        ("c\\", parse_change),
+        ("s/", parse_substitution),
+        ("s#", parse_substitution),
+        ("s:", parse_substitution),
+        ("s|", parse_substitution),
+    ];
+
+    let earliest = CANDIDATES
+        .iter()
+        .filter_map(|(marker, handler)| cmd.find(marker).map(|pos| (pos, *handler)))
+        .min_by_key(|(pos, _)| *pos);
+
+    if let Some((_, handler)) = earliest {
+        return handler(cmd);
     }
 
     // Check for hold space commands
@@ -413,73 +456,8 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
         }
     }
 
-    // IMPORTANT: Check for insert/append/change commands BEFORE file I/O
-    // because i\a\c commands use backslash followed by text, and the text may
-    // contain letters like 'r', 'R', 'w', 'W' that would be misidentified as file I/O
-    if cmd.contains("i\\") {
-        // Insert command: addr i\text
-        return parse_insert(cmd);
-    }
-    if cmd.contains("a\\") {
-        // Append command: addr a\text
-        return parse_append(cmd);
-    }
-    if cmd.contains("c\\") {
-        // Change command: addr c\text
-        return parse_change(cmd);
-    }
-
-    // Check for r/R/w/W commands (file I/O) - AFTER i/a/c checks
-    // Examples: "r /path/file", "5r file.txt", "/pat/r file"
-    // These commands have filenames after them, so they don't "end with" the command char
-    // IMPORTANT: Must check that the command char is NOT part of a pattern address like /pat/
-    // Pattern addresses are delimited by forward slashes, so we skip r/R/w/W inside /.../
-    if trimmed.contains('r')
-        || trimmed.contains('R')
-        || trimmed.contains('w')
-        || trimmed.contains('W')
-    {
-        // Find all positions of each command character
-        let mut r_positions: Vec<usize> = trimmed.match_indices('r').map(|(i, _)| i).collect();
-        let mut r_upper_positions: Vec<usize> =
-            trimmed.match_indices('R').map(|(i, _)| i).collect();
-        let mut w_positions: Vec<usize> = trimmed.match_indices('w').map(|(i, _)| i).collect();
-        let mut w_upper_positions: Vec<usize> =
-            trimmed.match_indices('W').map(|(i, _)| i).collect();
-
-        // Filter out positions that are inside pattern addresses (between '/' characters)
-        // Pattern addresses have the form /pattern/ or \pattern\
-        r_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
-        r_upper_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
-        w_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
-        w_upper_positions.retain(|&pos| !is_inside_pattern_address(trimmed, pos));
-
-        // Find which position comes first among the remaining (non-pattern) positions
-        let all_positions: Vec<(usize, char)> = r_positions
-            .into_iter()
-            .map(|p| (p, 'r'))
-            .chain(r_upper_positions.into_iter().map(|p| (p, 'R')))
-            .chain(w_positions.into_iter().map(|p| (p, 'w')))
-            .chain(w_upper_positions.into_iter().map(|p| (p, 'W')))
-            .collect();
-
-        if let Some(&(pos, char_at_pos)) = all_positions.iter().min_by_key(|(p, _)| p) {
-            let rest = &trimmed[pos + 1..];
-
-            // After the command char, there should be a filename (possibly with spaces)
-            // The filename can be anything, so if there's content after, it's likely a file I/O command
-            if !rest.trim().is_empty() {
-                // Has content after command char - likely filename
-                return match char_at_pos {
-                    'r' => parse_read_file(cmd),
-                    'R' => parse_read_line(cmd),
-                    'w' => parse_write_file(cmd),
-                    'W' => parse_write_first_line(cmd),
-                    _ => unreachable!(),
-                };
-            }
-        }
-    }
+    // File-I/O dispatch has moved to the top of parse_single_command via
+    // try_parse_file_io(). See the comment there.
 
     // Determine command type by looking at the last character or special patterns
     if cmd.ends_with('Q') && !cmd.starts_with('s') {
@@ -561,7 +539,7 @@ fn parse_single_command(cmd: &str) -> Result<SedCommand> {
     }
 }
 
-fn parse_substitution(cmd: &str) -> Result<SedCommand> {
+fn parse_substitution(cmd: &str) -> Result<Command> {
     // Find the 's' that starts the substitution command
     // It's the first 's' followed by a delimiter (/, #, :, etc.)
     let bytes = cmd.as_bytes();
@@ -649,9 +627,13 @@ fn parse_substitution(cmd: &str) -> Result<SedCommand> {
     }
 
     let pattern = &rest[delimiter_positions[0] + 1..delimiter_positions[1]];
-    let replacement_raw = &rest[delimiter_positions[1] + 1..delimiter_positions[2]];
-    let replacement = convert_sed_backreferences(replacement_raw);
-    let flags: Vec<char> = if delimiter_positions[2] + 1 < rest.len() {
+    // Keep the replacement raw at this layer — backreference conversion
+    // (\1 → $1 etc.) is flavor-specific and happens in
+    // `parser::Parser::convert_replacement` after the parse finishes. The
+    // old code path converted here too, which was a layering violation:
+    // sed_parser shouldn't know about regex-engine replacement syntax.
+    let replacement = rest[delimiter_positions[1] + 1..delimiter_positions[2]].to_string();
+    let raw_flags: Vec<char> = if delimiter_positions[2] + 1 < rest.len() {
         rest[delimiter_positions[2] + 1..].chars().collect()
     } else {
         Vec::new()
@@ -698,22 +680,22 @@ fn parse_substitution(cmd: &str) -> Result<SedCommand> {
         None
     };
 
-    Ok(SedCommand::Substitution {
+    Ok(Command::Substitution {
         pattern: pattern.to_string(),
         replacement: replacement.to_string(),
-        flags,
+        flags: fold_substitution_flags(&raw_flags),
         range,
     })
 }
 
-fn parse_delete(cmd: &str) -> Result<SedCommand> {
+fn parse_delete(cmd: &str) -> Result<Command> {
     let cmd = cmd.trim();
 
     let addr_part = &cmd[..cmd.len() - 1]; // Remove 'd'
 
     // Empty address means delete all lines (1 to $)
     if addr_part.trim().is_empty() {
-        return Ok(SedCommand::Delete {
+        return Ok(Command::Delete {
             range: (Address::LineNumber(1), Address::LastLine),
         });
     }
@@ -723,26 +705,26 @@ fn parse_delete(cmd: &str) -> Result<SedCommand> {
         let start = &addr_part[..comma_pos];
         let end = &addr_part[comma_pos + 1..];
 
-        return Ok(SedCommand::Delete {
+        return Ok(Command::Delete {
             range: (parse_address(start)?, parse_address(end)?),
         });
     }
 
     // For simple addresses, use parse_address directly
     let addr = parse_address(addr_part)?;
-    Ok(SedCommand::Delete {
+    Ok(Command::Delete {
         range: (addr.clone(), addr),
     })
 }
 
-fn parse_print(cmd: &str) -> Result<SedCommand> {
+fn parse_print(cmd: &str) -> Result<Command> {
     let cmd = cmd.trim();
 
     let addr_part = &cmd[..cmd.len() - 1]; // Remove 'p'
 
     // Empty address means print all lines (1 to $)
     if addr_part.trim().is_empty() {
-        return Ok(SedCommand::Print {
+        return Ok(Command::Print {
             range: (Address::LineNumber(1), Address::LastLine),
         });
     }
@@ -752,54 +734,54 @@ fn parse_print(cmd: &str) -> Result<SedCommand> {
         let start = &addr_part[..comma_pos];
         let end = &addr_part[comma_pos + 1..];
 
-        return Ok(SedCommand::Print {
+        return Ok(Command::Print {
             range: (parse_address(start)?, parse_address(end)?),
         });
     }
 
     // For simple addresses, use parse_address directly
     let addr = parse_address(addr_part)?;
-    Ok(SedCommand::Print {
+    Ok(Command::Print {
         range: (addr.clone(), addr),
     })
 }
 
-fn parse_quit(cmd: &str) -> Result<SedCommand> {
+fn parse_quit(cmd: &str) -> Result<Command> {
     let cmd = cmd.trim();
     let addr_part = &cmd[..cmd.len() - 1]; // Remove 'q'
 
     // Check if there's an address
     if addr_part.trim().is_empty() {
         // Just 'q' - quit immediately
-        return Ok(SedCommand::Quit { address: None });
+        return Ok(Command::Quit { address: None });
     }
 
     // '10q' or '/pattern/q' - quit at that address
     let addr = parse_address(addr_part)?;
-    Ok(SedCommand::Quit {
+    Ok(Command::Quit {
         address: Some(addr),
     })
 }
 
 // Phase 4: Parse Q command (quit without printing)
-fn parse_quit_without_print(cmd: &str) -> Result<SedCommand> {
+fn parse_quit_without_print(cmd: &str) -> Result<Command> {
     let cmd = cmd.trim();
     let addr_part = &cmd[..cmd.len() - 1]; // Remove 'Q'
 
     // Check if there's an address
     if addr_part.trim().is_empty() {
         // Just 'Q' - quit immediately without printing
-        return Ok(SedCommand::QuitWithoutPrint { address: None });
+        return Ok(Command::QuitWithoutPrint { address: None });
     }
 
     // '10Q' or '/pattern/Q' - quit at that address without printing
     let addr = parse_address(addr_part)?;
-    Ok(SedCommand::QuitWithoutPrint {
+    Ok(Command::QuitWithoutPrint {
         address: Some(addr),
     })
 }
 
-fn parse_group(cmd: &str) -> Result<SedCommand> {
+fn parse_group(cmd: &str) -> Result<Command> {
     let cmd = cmd.trim();
 
     // Find the opening brace
@@ -885,10 +867,10 @@ fn parse_group(cmd: &str) -> Result<SedCommand> {
         ));
     }
 
-    Ok(SedCommand::Group { range, commands })
+    Ok(Command::Group { range, commands })
 }
 
-fn parse_insert(cmd: &str) -> Result<SedCommand> {
+fn parse_insert(cmd: &str) -> Result<Command> {
     // Insert: i\text or addr i\text
     let parts: Vec<&str> = cmd.splitn(2, "i\\").collect();
     if parts.len() != 2 {
@@ -922,13 +904,13 @@ fn parse_insert(cmd: &str) -> Result<SedCommand> {
         ));
     };
 
-    Ok(SedCommand::Insert {
-        text: parts[1].to_string(),
+    Ok(Command::Insert {
+        text: parts[1].strip_prefix('\n').unwrap_or(parts[1]).to_string(),
         address,
     })
 }
 
-fn parse_append(cmd: &str) -> Result<SedCommand> {
+fn parse_append(cmd: &str) -> Result<Command> {
     // Append: a\text or addr a\text
     let parts: Vec<&str> = cmd.splitn(2, "a\\").collect();
     if parts.len() != 2 {
@@ -961,22 +943,21 @@ fn parse_append(cmd: &str) -> Result<SedCommand> {
         ));
     };
 
-    Ok(SedCommand::Append {
-        text: parts[1].to_string(),
+    Ok(Command::Append {
+        text: parts[1].strip_prefix('\n').unwrap_or(parts[1]).to_string(),
         address,
     })
 }
 
-fn parse_change(cmd: &str) -> Result<SedCommand> {
-    // Change: c\text or addr c\text
+fn parse_change(cmd: &str) -> Result<Command> {
     let parts: Vec<&str> = cmd.splitn(2, "c\\").collect();
     if parts.len() != 2 {
         let suggestion = if cmd.contains('c') && !cmd.contains("c\\") {
             Some(
-                "Change command requires a backslash after 'c':\n  Format: [address]c\\text\n  Example: 5c\\NEW LINE\n  Example: /pattern/c\\REPLACED TEXT",
+                "Change command requires a backslash after 'c':\n  Format: [address]c\\text\n  Example: 5c\\REPLACED LINE\n  Example: /pattern/c\\Replacement",
             )
         } else {
-            Some("Valid change format: [address]c\\text\nExample: 5c\\NEW LINE")
+            Some("Valid change format: [address]c\\text\nExample: 5c\\REPLACED LINE")
         };
         return Err(anyhow!(
             "{}",
@@ -984,9 +965,8 @@ fn parse_change(cmd: &str) -> Result<SedCommand> {
         ));
     }
 
-    let address = if !parts[0].trim().is_empty() {
-        parse_address(parts[0].trim())?
-    } else {
+    let addr_part = parts[0].trim();
+    if addr_part.is_empty() {
         return Err(anyhow!(
             "{}",
             format_parse_error(
@@ -994,110 +974,124 @@ fn parse_change(cmd: &str) -> Result<SedCommand> {
                 None,
                 "change command requires an address",
                 Some(
-                    "Specify which line(s) to change:\n  5c\\text        - change line 5\n  /pat/c\\text     - change lines matching 'pat'\n  1,10c\\text     - change lines 1-10 to 'text'"
+                    "Specify which line(s) to change:\n  5c\\text          - change line 5\n  2,3c\\text         - change lines 2-3 (collapsed)\n  /pat/c\\text       - change lines matching 'pat'\n  $c\\text          - change last line"
                 ),
             )
         ));
-    };
+    }
 
-    Ok(SedCommand::Change {
-        text: parts[1].to_string(),
-        address,
+    let text = parts[1].strip_prefix('\n').unwrap_or(parts[1]).to_string();
+
+    // Range form: start,end
+    if let Some(comma_pos) = addr_part.find(',') {
+        let start = parse_address(addr_part[..comma_pos].trim())?;
+        let end = parse_address(addr_part[comma_pos + 1..].trim())?;
+        return Ok(Command::Change {
+            text,
+            range: (start, end),
+        });
+    }
+
+    // Single address: collapse to (addr, addr)
+    let addr = parse_address(addr_part)?;
+    Ok(Command::Change {
+        text,
+        range: (addr.clone(), addr),
     })
 }
 
 // Hold space command parsing functions
 
-fn parse_hold(cmd: &str) -> Result<SedCommand> {
+fn parse_hold(cmd: &str) -> Result<Command> {
     // h or addr h or addr1,addr2 h
     let cmd = cmd.trim();
     let addr_part = &cmd[..cmd.len() - 1]; // Remove 'h'
 
     let range = parse_optional_range(addr_part)?;
 
-    Ok(SedCommand::Hold { range })
+    Ok(Command::Hold { range })
 }
 
-fn parse_hold_append(cmd: &str) -> Result<SedCommand> {
+fn parse_hold_append(cmd: &str) -> Result<Command> {
     // H or addr H
     let cmd = cmd.trim();
     let addr_part = &cmd[..cmd.len() - 1]; // Remove 'H'
 
     let range = parse_optional_range(addr_part)?;
 
-    Ok(SedCommand::HoldAppend { range })
+    Ok(Command::HoldAppend { range })
 }
 
-fn parse_get(cmd: &str) -> Result<SedCommand> {
+fn parse_get(cmd: &str) -> Result<Command> {
     // g or addr g
     let cmd = cmd.trim();
     let addr_part = &cmd[..cmd.len() - 1]; // Remove 'g'
 
     let range = parse_optional_range(addr_part)?;
 
-    Ok(SedCommand::Get { range })
+    Ok(Command::Get { range })
 }
 
-fn parse_get_append(cmd: &str) -> Result<SedCommand> {
+fn parse_get_append(cmd: &str) -> Result<Command> {
     // G or addr G
     let cmd = cmd.trim();
     let addr_part = &cmd[..cmd.len() - 1]; // Remove 'G'
 
     let range = parse_optional_range(addr_part)?;
 
-    Ok(SedCommand::GetAppend { range })
+    Ok(Command::GetAppend { range })
 }
 
-fn parse_exchange(cmd: &str) -> Result<SedCommand> {
+fn parse_exchange(cmd: &str) -> Result<Command> {
     // x or addr x
     let cmd = cmd.trim();
     let addr_part = &cmd[..cmd.len() - 1]; // Remove 'x'
 
     let range = parse_optional_range(addr_part)?;
 
-    Ok(SedCommand::Exchange { range })
+    Ok(Command::Exchange { range })
 }
 
 // Phase 4: Multi-line pattern space command parsing functions
 
-fn parse_next(cmd: &str) -> Result<SedCommand> {
+fn parse_next(cmd: &str) -> Result<Command> {
     // n or addr n
     let cmd = cmd.trim();
     let addr_part = &cmd[..cmd.len() - 1]; // Remove 'n'
 
     let range = parse_optional_range(addr_part)?;
 
-    Ok(SedCommand::Next { range })
+    Ok(Command::Next { range })
 }
 
-fn parse_next_append(cmd: &str) -> Result<SedCommand> {
+fn parse_next_append(cmd: &str) -> Result<Command> {
     // N or addr N
     let cmd = cmd.trim();
     let addr_part = &cmd[..cmd.len() - 1]; // Remove 'N'
 
     let range = parse_optional_range(addr_part)?;
 
-    Ok(SedCommand::NextAppend { range })
+    Ok(Command::NextAppend { range })
 }
 
-fn parse_print_first_line(cmd: &str) -> Result<SedCommand> {
+fn parse_print_first_line(cmd: &str) -> Result<Command> {
     // P or addr P
     let cmd = cmd.trim();
     let addr_part = &cmd[..cmd.len() - 1]; // Remove 'P'
 
     let range = parse_optional_range(addr_part)?;
 
-    Ok(SedCommand::PrintFirstLine { range })
+    Ok(Command::PrintFirstLine { range })
 }
 
-fn parse_delete_first_line(cmd: &str) -> Result<SedCommand> {
+fn parse_delete_first_line(cmd: &str) -> Result<Command> {
     // D or addr D
     let cmd = cmd.trim();
     let addr_part = &cmd[..cmd.len() - 1]; // Remove 'D'
 
     let range = parse_optional_range(addr_part)?;
 
-    Ok(SedCommand::DeleteFirstLine { range })
+    Ok(Command::DeleteFirstLine { range })
 }
 
 /// Helper function to parse optional ranges for hold space commands
@@ -1264,60 +1258,8 @@ fn parse_address(addr: &str) -> Result<Address> {
     ))
 }
 
-/// Convert sed-style backreferences (\1, \2, etc.) to regex crate style ($1, $2, etc.)
-///
-/// GNU sed uses `\1`, `\2` for backreferences in replacement strings.
-/// Rust's `regex` crate uses `$1`, `$2`. This function converts between the two.
-///
-/// Handles:
-/// - `\1`, `\2`, etc. → `$1`, `$2`, etc. (numbered backreferences)
-/// - `\\` → `\` (escaped backslash)
-/// - `\&` → `$&` (entire match)
-fn convert_sed_backreferences(replacement: &str) -> String {
-    let mut result = String::with_capacity(replacement.len());
-    let mut chars = replacement.chars().peekable();
-
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            if let Some(&next_char) = chars.peek() {
-                if next_char.is_ascii_digit() {
-                    // Convert \1, \2, etc. to $1, $2, etc.
-                    result.push('$');
-                    chars.next(); // consume the digit
-                    result.push(next_char);
-                } else if next_char == '\\' {
-                    // Escaped backslash - keep one
-                    result.push('\\');
-                    chars.next(); // consume second backslash
-                    if let Some(&third) = chars.peek() {
-                        chars.next();
-                        result.push(third);
-                    }
-                } else if next_char == '&' {
-                    // Matched string
-                    result.push('$');
-                    result.push('&');
-                    chars.next();
-                } else {
-                    // Other escape sequence - keep both
-                    result.push(c);
-                    if let Some(next) = chars.next() {
-                        result.push(next);
-                    }
-                }
-            } else {
-                result.push(c);
-            }
-        } else {
-            result.push(c);
-        }
-    }
-
-    result
-}
-
 // Phase 5: Parse label definition (:label)
-fn parse_label(cmd: &str) -> Result<SedCommand> {
+fn parse_label(cmd: &str) -> Result<Command> {
     let cmd = cmd.trim();
 
     // Remove the leading ':'
@@ -1353,13 +1295,13 @@ fn parse_label(cmd: &str) -> Result<SedCommand> {
         ));
     }
 
-    Ok(SedCommand::Label {
+    Ok(Command::Label {
         name: label_name.to_string(),
     })
 }
 
 // Phase 5: Parse branch command (b [label])
-fn parse_branch(cmd: &str) -> Result<SedCommand> {
+fn parse_branch(cmd: &str) -> Result<Command> {
     let cmd = cmd.trim();
 
     // Find the 'b' command character
@@ -1389,11 +1331,11 @@ fn parse_branch(cmd: &str) -> Result<SedCommand> {
         }
     };
 
-    Ok(SedCommand::Branch { label, range })
+    Ok(Command::Branch { label, range })
 }
 
 // Phase 5: Parse test branch command (t [label])
-fn parse_test(cmd: &str) -> Result<SedCommand> {
+fn parse_test(cmd: &str) -> Result<Command> {
     let cmd = cmd.trim();
 
     // Find the 't' command character
@@ -1421,11 +1363,11 @@ fn parse_test(cmd: &str) -> Result<SedCommand> {
         }
     };
 
-    Ok(SedCommand::Test { label, range })
+    Ok(Command::Test { label, range })
 }
 
 // Phase 5: Parse test false branch command (T [label])
-fn parse_test_false(cmd: &str) -> Result<SedCommand> {
+fn parse_test_false(cmd: &str) -> Result<Command> {
     let cmd = cmd.trim();
 
     // Find the 'T' command character
@@ -1453,16 +1395,19 @@ fn parse_test_false(cmd: &str) -> Result<SedCommand> {
         }
     };
 
-    Ok(SedCommand::TestFalse { label, range })
+    Ok(Command::TestFalse { label, range })
 }
 
 // Phase 5: Parse read file command (r filename)
-fn parse_read_file(cmd: &str) -> Result<SedCommand> {
+fn parse_read_file(cmd: &str) -> Result<Command> {
     let cmd = cmd.trim();
 
-    // Find the 'r' command character
+    // Find the 'r' command character — skip any 'r' that is inside a pattern
+    // address (e.g. `/err/r filename` must not match the 'r' in "err").
     let r_pos = cmd
-        .find('r')
+        .char_indices()
+        .find(|&(pos, ch)| ch == 'r' && !is_inside_pattern_address(cmd, pos))
+        .map(|(pos, _)| pos)
         .ok_or_else(|| anyhow!("Read file command missing 'r'"))?;
 
     // Split into: address_part (before 'r') and rest_part (after 'r' including 'r')
@@ -1493,19 +1438,22 @@ fn parse_read_file(cmd: &str) -> Result<SedCommand> {
         );
     }
 
-    Ok(SedCommand::ReadFile {
+    Ok(Command::ReadFile {
         filename: filename.to_string(),
         range,
     })
 }
 
 // Phase 5: Parse write file command (w filename)
-fn parse_write_file(cmd: &str) -> Result<SedCommand> {
+fn parse_write_file(cmd: &str) -> Result<Command> {
     let cmd = cmd.trim();
 
-    // Find the 'w' command character
+    // Find the 'w' command character — skip any 'w' that is inside a pattern
+    // address (e.g. `/wrong/w filename` must not match the 'w' in "wrong").
     let w_pos = cmd
-        .find('w')
+        .char_indices()
+        .find(|&(pos, ch)| ch == 'w' && !is_inside_pattern_address(cmd, pos))
+        .map(|(pos, _)| pos)
         .ok_or_else(|| anyhow!("Write file command missing 'w'"))?;
 
     // Split into: address_part (before 'w') and rest_part (after 'w' including 'w')
@@ -1536,19 +1484,22 @@ fn parse_write_file(cmd: &str) -> Result<SedCommand> {
         );
     }
 
-    Ok(SedCommand::WriteFile {
+    Ok(Command::WriteFile {
         filename: filename.to_string(),
         range,
     })
 }
 
 // Phase 5: Parse read line command (R filename)
-fn parse_read_line(cmd: &str) -> Result<SedCommand> {
+fn parse_read_line(cmd: &str) -> Result<Command> {
     let cmd = cmd.trim();
 
-    // Find the 'R' command character
+    // Find the 'R' command character — skip any 'R' that is inside a pattern
+    // address (e.g. `/wRong/R filename` must not match the 'R' in "wRong").
     let r_pos = cmd
-        .find('R')
+        .char_indices()
+        .find(|&(pos, ch)| ch == 'R' && !is_inside_pattern_address(cmd, pos))
+        .map(|(pos, _)| pos)
         .ok_or_else(|| anyhow!("Read line command missing 'R'"))?;
 
     // Split into: address_part (before 'R') and rest_part (after 'R' including 'R')
@@ -1579,19 +1530,22 @@ fn parse_read_line(cmd: &str) -> Result<SedCommand> {
         );
     }
 
-    Ok(SedCommand::ReadLine {
+    Ok(Command::ReadLine {
         filename: filename.to_string(),
         range,
     })
 }
 
 // Phase 5: Parse write first line command (W filename)
-fn parse_write_first_line(cmd: &str) -> Result<SedCommand> {
+fn parse_write_first_line(cmd: &str) -> Result<Command> {
     let cmd = cmd.trim();
 
-    // Find the 'W' command character
+    // Find the 'W' command character — skip any 'W' that is inside a pattern
+    // address (e.g. `/Wrong/W filename` must not match the 'W' in "Wrong").
     let w_pos = cmd
-        .find('W')
+        .char_indices()
+        .find(|&(pos, ch)| ch == 'W' && !is_inside_pattern_address(cmd, pos))
+        .map(|(pos, _)| pos)
         .ok_or_else(|| anyhow!("Write first line command missing 'W'"))?;
 
     // Split into: address_part (before 'W') and rest_part (after 'W' including 'W')
@@ -1622,14 +1576,14 @@ fn parse_write_first_line(cmd: &str) -> Result<SedCommand> {
         );
     }
 
-    Ok(SedCommand::WriteFirstLine {
+    Ok(Command::WriteFirstLine {
         filename: filename.to_string(),
         range,
     })
 }
 
 // Phase 5: Parse print line number command (=)
-fn parse_print_line_number(cmd: &str) -> Result<SedCommand> {
+fn parse_print_line_number(cmd: &str) -> Result<Command> {
     let cmd = cmd.trim();
 
     // Find the '=' command character
@@ -1647,11 +1601,11 @@ fn parse_print_line_number(cmd: &str) -> Result<SedCommand> {
         Some(parse_address(address_part.trim())?)
     };
 
-    Ok(SedCommand::PrintLineNumber { range })
+    Ok(Command::PrintLineNumber { range })
 }
 
 // Phase 5: Parse print filename command (F)
-fn parse_print_filename(cmd: &str) -> Result<SedCommand> {
+fn parse_print_filename(cmd: &str) -> Result<Command> {
     let cmd = cmd.trim();
 
     // Find the 'F' command character
@@ -1669,11 +1623,11 @@ fn parse_print_filename(cmd: &str) -> Result<SedCommand> {
         Some(parse_address(address_part.trim())?)
     };
 
-    Ok(SedCommand::PrintFilename { range })
+    Ok(Command::PrintFilename { range })
 }
 
 // Phase 5: Parse clear pattern space command (z)
-fn parse_clear_pattern_space(cmd: &str) -> Result<SedCommand> {
+fn parse_clear_pattern_space(cmd: &str) -> Result<Command> {
     let cmd = cmd.trim();
 
     // Find the 'z' command character
@@ -1691,53 +1645,75 @@ fn parse_clear_pattern_space(cmd: &str) -> Result<SedCommand> {
         Some(parse_address(address_part.trim())?)
     };
 
-    Ok(SedCommand::ClearPatternSpace { range })
+    Ok(Command::ClearPatternSpace { range })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command::{Address, Command};
 
     #[test]
     fn test_parse_simple_substitution() {
         let cmd = parse_single_command("s/foo/bar/g").unwrap();
-        assert_eq!(
-            cmd,
-            SedCommand::Substitution {
-                pattern: "foo".to_string(),
-                replacement: "bar".to_string(),
-                flags: vec!['g'],
-                range: None,
+        match cmd {
+            Command::Substitution {
+                pattern,
+                replacement,
+                flags,
+                range,
+            } => {
+                assert_eq!(pattern, "foo");
+                assert_eq!(replacement, "bar");
+                assert!(flags.global);
+                assert!(range.is_none());
             }
-        );
+            other => panic!("expected Substitution, got {:?}", other),
+        }
     }
 
     #[test]
     fn test_parse_line_substitution() {
         let cmd = parse_single_command("10s/foo/bar/").unwrap();
-        assert_eq!(
-            cmd,
-            SedCommand::Substitution {
-                pattern: "foo".to_string(),
-                replacement: "bar".to_string(),
-                flags: vec![],
-                range: Some((Address::LineNumber(10), Address::LineNumber(10))),
+        match cmd {
+            Command::Substitution {
+                pattern,
+                replacement,
+                flags,
+                range,
+            } => {
+                assert_eq!(pattern, "foo");
+                assert_eq!(replacement, "bar");
+                assert!(!flags.global);
+                assert_eq!(
+                    range,
+                    Some((Address::LineNumber(10), Address::LineNumber(10)))
+                );
             }
-        );
+            other => panic!("expected Substitution, got {:?}", other),
+        }
     }
 
     #[test]
     fn test_parse_range_substitution() {
         let cmd = parse_single_command("1,10s/foo/bar/").unwrap();
-        assert_eq!(
-            cmd,
-            SedCommand::Substitution {
-                pattern: "foo".to_string(),
-                replacement: "bar".to_string(),
-                flags: vec![],
-                range: Some((Address::LineNumber(1), Address::LineNumber(10))),
+        match cmd {
+            Command::Substitution {
+                pattern,
+                replacement,
+                flags,
+                range,
+            } => {
+                assert_eq!(pattern, "foo");
+                assert_eq!(replacement, "bar");
+                assert!(!flags.global);
+                assert_eq!(
+                    range,
+                    Some((Address::LineNumber(1), Address::LineNumber(10)))
+                );
             }
-        );
+            other => panic!("expected Substitution, got {:?}", other),
+        }
     }
 
     #[test]
@@ -1745,7 +1721,7 @@ mod tests {
         let cmd = parse_single_command("10d").unwrap();
         assert_eq!(
             cmd,
-            SedCommand::Delete {
+            Command::Delete {
                 range: (Address::LineNumber(10), Address::LineNumber(10)),
             }
         );
@@ -1756,7 +1732,7 @@ mod tests {
         let cmd = parse_single_command("1,10d").unwrap();
         assert_eq!(
             cmd,
-            SedCommand::Delete {
+            Command::Delete {
                 range: (Address::LineNumber(1), Address::LineNumber(10)),
             }
         );
@@ -1767,7 +1743,7 @@ mod tests {
         let cmd = parse_single_command("/foo/d").unwrap();
         assert_eq!(
             cmd,
-            SedCommand::Delete {
+            Command::Delete {
                 range: (
                     Address::Pattern("foo".to_string()),
                     Address::Pattern("foo".to_string())
@@ -1781,7 +1757,7 @@ mod tests {
         let cmd = parse_single_command("10p").unwrap();
         assert_eq!(
             cmd,
-            SedCommand::Print {
+            Command::Print {
                 range: (Address::LineNumber(10), Address::LineNumber(10)),
             }
         );
@@ -1792,55 +1768,22 @@ mod tests {
         let cmd = parse_single_command("1,10p").unwrap();
         assert_eq!(
             cmd,
-            SedCommand::Print {
+            Command::Print {
                 range: (Address::LineNumber(1), Address::LineNumber(10)),
             }
         );
     }
 
-    // Bug 3: Backreference conversion tests
-    #[test]
-    fn test_backreference_conversion_single() {
-        let result = convert_sed_backreferences(r"\1");
-        assert_eq!(result, "$1");
-    }
-
-    #[test]
-    fn test_backreference_conversion_multiple() {
-        let result = convert_sed_backreferences(r"\1 \2 \3");
-        assert_eq!(result, "$1 $2 $3");
-    }
-
-    #[test]
-    fn test_backreference_conversion_mixed() {
-        let result = convert_sed_backreferences(r"foo \1 bar \2 baz");
-        assert_eq!(result, "foo $1 bar $2 baz");
-    }
-
-    #[test]
-    fn test_backreference_conversion_escaped_backslash() {
-        let result = convert_sed_backreferences(r"\\");
-        assert_eq!(result, r"\");
-    }
-
-    #[test]
-    fn test_backreference_conversion_ampersand() {
-        let result = convert_sed_backreferences(r"\&");
-        assert_eq!(result, "$&");
-    }
-
-    #[test]
-    fn test_backreference_conversion_complex() {
-        let result = convert_sed_backreferences(r"\1: \2 \\ \1");
-        assert_eq!(result, r"$1: $2 \ $1");
-    }
+    // Backreference conversion tests were moved to `bre_converter::tests`
+    // (the canonical home of the \N → $N conversion logic). See also
+    // `parser::tests` for end-to-end coverage via `Parser::convert_replacement`.
 
     // Bug 2: Command grouping tests
     #[test]
     fn test_parse_simple_group() {
         let cmd = parse_single_command("{s/foo/bar/}").unwrap();
         match cmd {
-            SedCommand::Group { range, commands } => {
+            Command::Group { range, commands } => {
                 assert_eq!(range, None);
                 assert_eq!(commands.len(), 1);
             }
@@ -1852,7 +1795,7 @@ mod tests {
     fn test_parse_group_with_semicolons() {
         let cmd = parse_single_command("{s/foo/bar/; s/baz/qux/}").unwrap();
         match cmd {
-            SedCommand::Group { range, commands } => {
+            Command::Group { range, commands } => {
                 assert_eq!(range, None);
                 assert_eq!(commands.len(), 2);
             }
@@ -1864,7 +1807,7 @@ mod tests {
     #[test]
     fn test_parse_hold_simple() {
         let cmd = parse_single_command("h").unwrap();
-        assert_eq!(cmd, SedCommand::Hold { range: None });
+        assert_eq!(cmd, Command::Hold { range: None });
     }
 
     #[test]
@@ -1872,7 +1815,7 @@ mod tests {
         let cmd = parse_single_command("5h").unwrap();
         assert_eq!(
             cmd,
-            SedCommand::Hold {
+            Command::Hold {
                 range: Some((Address::LineNumber(5), Address::LineNumber(5)))
             }
         );
@@ -1883,7 +1826,7 @@ mod tests {
         let cmd = parse_single_command("1,5H").unwrap();
         assert_eq!(
             cmd,
-            SedCommand::HoldAppend {
+            Command::HoldAppend {
                 range: Some((Address::LineNumber(1), Address::LineNumber(5)))
             }
         );
@@ -1894,7 +1837,7 @@ mod tests {
         let cmd = parse_single_command("$G").unwrap();
         assert_eq!(
             cmd,
-            SedCommand::GetAppend {
+            Command::GetAppend {
                 range: Some((Address::LastLine, Address::LastLine))
             }
         );
@@ -1904,7 +1847,7 @@ mod tests {
     fn test_parse_exchange_with_pattern() {
         let cmd = parse_single_command("/pattern/x").unwrap();
         match cmd {
-            SedCommand::Exchange {
+            Command::Exchange {
                 range: Some((Address::Pattern(p), _)),
             } => {
                 assert_eq!(p, "pattern");
@@ -1917,7 +1860,7 @@ mod tests {
     fn test_parse_get_with_negation() {
         let cmd = parse_single_command("/foo/!g").unwrap();
         match cmd {
-            SedCommand::Get {
+            Command::Get {
                 range: Some((Address::Negated(_), _)),
             } => {
                 // Success
@@ -1930,7 +1873,7 @@ mod tests {
     fn test_parse_hold_range_with_patterns() {
         let cmd = parse_single_command("/start/,/end/H").unwrap();
         match cmd {
-            SedCommand::HoldAppend {
+            Command::HoldAppend {
                 range: Some((Address::Pattern(s), Address::Pattern(e))),
             } => {
                 assert_eq!(s, "start");
@@ -1943,12 +1886,329 @@ mod tests {
     #[test]
     fn test_parse_get_simple() {
         let cmd = parse_single_command("g").unwrap();
-        assert_eq!(cmd, SedCommand::Get { range: None });
+        assert_eq!(cmd, Command::Get { range: None });
     }
 
     #[test]
     fn test_parse_exchange_simple() {
         let cmd = parse_single_command("x").unwrap();
-        assert_eq!(cmd, SedCommand::Exchange { range: None });
+        assert_eq!(cmd, Command::Exchange { range: None });
+    }
+
+    #[test]
+    fn test_parse_insert_with_text_ending_in_command_char() {
+        // Regression: text ending in 'D' must not be dispatched as DeleteFirstLine
+        let result = parse_sed_expression("2i\\INSERTED").expect("should parse");
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            Command::Insert { text, address } => {
+                assert_eq!(text, "INSERTED");
+                assert!(matches!(address, Address::LineNumber(2)));
+            }
+            other => panic!("expected Insert, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_append_with_text_ending_in_command_char() {
+        let result = parse_sed_expression("5a\\PATCHED").expect("should parse");
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            Command::Append { text, address } => {
+                assert_eq!(text, "PATCHED");
+                assert!(matches!(address, Address::LineNumber(5)));
+            }
+            other => panic!("expected Append, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_change_pattern_addr_text_ending_h() {
+        // 'H' would otherwise trigger HoldAppend dispatch
+        let result = parse_sed_expression("/foo/c\\BAH").expect("should parse");
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            Command::Change { text, .. } => assert_eq!(text, "BAH"),
+            other => panic!("expected Change, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_insert_with_text_containing_substitution_lookalike() {
+        // Regression: text "s/foo/bar/g" must produce Insert, not route to parse_substitution
+        let result = parse_sed_expression("2i\\s/foo/bar/g").expect("should parse");
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            Command::Insert { text, address } => {
+                assert_eq!(text, "s/foo/bar/g");
+                assert!(matches!(address, Address::LineNumber(2)));
+            }
+            other => panic!("expected Insert, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_read_file_with_path_containing_s_slash_segment() {
+        // Regression: a path like /var/folders/.../data.txt contains the
+        // substring "s/" inside "folders/". The marker-based dispatch used
+        // to pick that up as a substitution command and misroute the whole
+        // invocation. File-I/O must be dispatched first.
+        let result =
+            parse_sed_expression("R /var/folders/tb/abc/T/.tmpXYZ/data.txt").expect("should parse");
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            Command::ReadLine { filename, range } => {
+                assert_eq!(filename, "/var/folders/tb/abc/T/.tmpXYZ/data.txt");
+                assert!(range.is_none());
+            }
+            other => panic!("expected ReadLine, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_read_file_with_line_address_and_s_slash_in_path() {
+        let result = parse_sed_expression("2r /var/folders/xx/yy/extra.txt").expect("should parse");
+        match &result[0] {
+            Command::ReadFile { filename, range } => {
+                assert_eq!(filename, "/var/folders/xx/yy/extra.txt");
+                assert!(matches!(range, Some(Address::LineNumber(2))));
+            }
+            other => panic!("expected ReadFile, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_write_file_with_s_slash_in_path_no_address() {
+        // Same fix as read_file: W with a path that contains `folders/`
+        // must not be misrouted through the substitution marker dispatch.
+        let result = parse_sed_expression("W /var/folders/xx/yy/out.txt").expect("should parse");
+        match &result[0] {
+            Command::WriteFirstLine { filename, range } => {
+                assert_eq!(filename, "/var/folders/xx/yy/out.txt");
+                assert!(range.is_none());
+            }
+            other => panic!("expected WriteFirstLine, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_change_with_text_containing_substitution_lookalike() {
+        let result = parse_sed_expression("2c\\s/foo/bar/g").expect("should parse");
+        match &result[0] {
+            Command::Change { text, .. } => assert_eq!(text, "s/foo/bar/g"),
+            other => panic!("expected Change, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_substitution_with_pattern_containing_iac_marker() {
+        // Substitution pattern contains "i\" — must route to substitution, not insert
+        let result = parse_sed_expression("s/i\\foo/bar/").expect("should parse");
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            Command::Substitution {
+                pattern,
+                replacement,
+                ..
+            } => {
+                assert_eq!(pattern, "i\\foo");
+                assert_eq!(replacement, "bar");
+            }
+            other => panic!("expected Substitution, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_substitution_with_pattern_containing_c_marker() {
+        let result = parse_sed_expression("s/c\\d+/NUM/").expect("should parse");
+        match &result[0] {
+            Command::Substitution { pattern, .. } => {
+                assert_eq!(pattern, "c\\d+");
+            }
+            other => panic!("expected Substitution, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_substitution_with_address_and_iac_in_pattern() {
+        let result = parse_sed_expression("5s/a\\b/X/").expect("should parse");
+        match &result[0] {
+            Command::Substitution { pattern, range, .. } => {
+                assert_eq!(pattern, "a\\b");
+                assert!(matches!(range, Some((Address::LineNumber(5), _))));
+            }
+            other => panic!("expected Substitution, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_insert_strips_leading_newline() {
+        // Multi-line form: i\<NL>TEXT — the newline is syntax, not part of the text
+        let result = parse_sed_expression("2i\\\nINSERTED").expect("should parse");
+        match &result[0] {
+            Command::Insert { text, .. } => assert_eq!(text, "INSERTED"),
+            other => panic!("expected Insert, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_append_strips_leading_newline() {
+        let result = parse_sed_expression("3a\\\nPATCHED").expect("should parse");
+        match &result[0] {
+            Command::Append { text, .. } => assert_eq!(text, "PATCHED"),
+            other => panic!("expected Append, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_change_strips_leading_newline() {
+        let result = parse_sed_expression("4c\\\nREPLACED").expect("should parse");
+        match &result[0] {
+            Command::Change { text, .. } => assert_eq!(text, "REPLACED"),
+            other => panic!("expected Change, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_insert_inline_form_unchanged() {
+        // Inline form (no newline) — text must not be mangled
+        let result = parse_sed_expression("2i\\INSERTED").expect("should parse");
+        match &result[0] {
+            Command::Insert { text, .. } => assert_eq!(text, "INSERTED"),
+            other => panic!("expected Insert, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_insert_empty_text_after_multiline_separator() {
+        // i\<NL> with no text inserts a blank line (empty string text)
+        let result = parse_sed_expression("2i\\\n").expect("should parse");
+        match &result[0] {
+            Command::Insert { text, .. } => assert_eq!(text, ""),
+            other => panic!("expected Insert, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_change_with_range() {
+        let result = parse_sed_expression("2,3c\\REPLACED").expect("should parse");
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            Command::Change { text, range } => {
+                assert_eq!(text, "REPLACED");
+                assert!(matches!(range.0, Address::LineNumber(2)));
+                assert!(matches!(range.1, Address::LineNumber(3)));
+            }
+            other => panic!("expected Change with range, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_change_single_address_uses_same_addr_for_both() {
+        let result = parse_sed_expression("5c\\REPLACED").expect("should parse");
+        match &result[0] {
+            Command::Change { range, .. } => {
+                assert!(matches!(range.0, Address::LineNumber(5)));
+                assert!(matches!(range.1, Address::LineNumber(5)));
+            }
+            other => panic!("expected Change, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_pattern_addr_r_with_absolute_path() {
+        // /err/r /etc/hosts — the `/etc/hosts` argument must not be re-interpreted
+        // as a new pattern delimiter. The r command's filename should be `/etc/hosts`.
+        let commands = parse_sed_expression("/err/r /etc/hosts").unwrap();
+        assert_eq!(commands.len(), 1);
+        match &commands[0] {
+            Command::ReadFile { filename, range } => {
+                assert_eq!(filename, "/etc/hosts");
+                assert!(range.is_some());
+            }
+            other => panic!("expected ReadFile, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_pattern_addr_w_with_absolute_path() {
+        let commands = parse_sed_expression("/err/w /tmp/out.log").unwrap();
+        assert_eq!(commands.len(), 1);
+        match &commands[0] {
+            Command::WriteFile { filename, range } => {
+                assert_eq!(filename, "/tmp/out.log");
+                assert!(range.is_some());
+            }
+            other => panic!("expected WriteFile, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_pattern_addr_capital_w_with_absolute_path() {
+        let commands = parse_sed_expression("/err/W /var/log/first.log").unwrap();
+        assert_eq!(commands.len(), 1);
+        match &commands[0] {
+            Command::WriteFirstLine { filename, range } => {
+                assert_eq!(filename, "/var/log/first.log");
+                assert!(range.is_some());
+            }
+            other => panic!("expected WriteFirstLine, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_pattern_addr_with_w_in_pattern() {
+        // `/wrong/w /tmp/out` — the `w` inside `/wrong/` must be skipped.
+        let commands = parse_sed_expression("/wrong/w /tmp/out.log").unwrap();
+        assert_eq!(commands.len(), 1);
+        match &commands[0] {
+            Command::WriteFile { filename, range } => {
+                assert_eq!(filename, "/tmp/out.log");
+                assert!(range.is_some());
+            }
+            other => panic!("expected WriteFile, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_pattern_addr_with_capital_r_in_pattern() {
+        // `/wRong/R data.txt` — the `R` inside `/wRong/` must be skipped.
+        let commands = parse_sed_expression("/wRong/R data.txt").unwrap();
+        assert_eq!(commands.len(), 1);
+        match &commands[0] {
+            Command::ReadLine { filename, range } => {
+                assert_eq!(filename, "data.txt");
+                assert!(range.is_some());
+            }
+            other => panic!("expected ReadLine, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_pattern_addr_with_capital_w_in_pattern() {
+        // `/Wrong/W /var/log/first.log` — the `W` inside `/Wrong/` must be skipped.
+        let commands = parse_sed_expression("/Wrong/W /var/log/first.log").unwrap();
+        assert_eq!(commands.len(), 1);
+        match &commands[0] {
+            Command::WriteFirstLine { filename, range } => {
+                assert_eq!(filename, "/var/log/first.log");
+                assert!(range.is_some());
+            }
+            other => panic!("expected WriteFirstLine, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_pattern_addr_with_escaped_slash_in_pattern() {
+        // Escaped `/` inside the pattern must not close the pattern address.
+        let commands = parse_sed_expression("/foo\\/bar/r /tmp/out.txt").unwrap();
+        assert_eq!(commands.len(), 1);
+        match &commands[0] {
+            Command::ReadFile { filename, range } => {
+                assert_eq!(filename, "/tmp/out.txt");
+                assert!(range.is_some());
+            }
+            other => panic!("expected ReadFile, got {:?}", other),
+        }
     }
 }

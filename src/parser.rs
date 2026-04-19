@@ -1,237 +1,83 @@
 //! Unified Parser for Sed Commands
 //!
-//! This module provides parsing for traditional sed expressions with
-//! configurable regex flavor support (PCRE, ERE, BRE).
+//! Thin wrapper around `sed_parser::parse_sed_expression` that applies
+//! a regex-flavor post-pass over the parsed Commands. The post-pass
+//! affects only Substitution variants (pattern + replacement); other
+//! variants pass through untouched. Group commands are recursed into
+//! so nested substitutions inside `{ … }` are also converted.
 
 use crate::cli::RegexFlavor;
-use crate::command::{Address, Command, SubstitutionFlags};
-use crate::sed_parser::{Address as LegacyAddress, SedCommand as LegacySedCommand};
+use crate::command::Command;
 use anyhow::Result;
 
-/// Unified parser that supports sed syntax with configurable regex flavor
+/// Unified parser that supports sed syntax with configurable regex flavor.
 pub struct Parser {
-    /// Regex flavor to use for parsing
     regex_flavor: RegexFlavor,
 }
 
 impl Parser {
-    /// Create a new parser with the specified regex flavor
+    /// Create a parser that interprets substitution patterns and
+    /// replacements in the given regex flavor.
     pub fn new(regex_flavor: RegexFlavor) -> Self {
         Self { regex_flavor }
     }
 
-    /// Parse a sed expression into unified Command list
+    /// Parse a sed-style expression into a flat list of commands.
+    ///
+    /// `sed_parser::parse_sed_expression` does the structural parse and
+    /// emits `Command` values directly; this wrapper then walks each
+    /// command and, for Substitution variants (including those nested
+    /// inside `Group` commands), rewrites pattern and replacement into
+    /// the canonical PCRE form the runtime regex engine expects. Errors
+    /// come from the underlying parser (malformed expressions); the
+    /// flavor-conversion pass is infallible.
     pub fn parse(&self, expression: &str) -> Result<Vec<Command>> {
-        // Use existing sed_parser to parse the expression
-        let legacy_commands = crate::sed_parser::parse_sed_expression(expression)?;
-
-        // Convert LegacySedCommand to Command
-        let commands = legacy_commands
-            .into_iter()
-            .map(|cmd| self.convert_legacy_command(cmd))
-            .collect::<Result<Vec<_>>>()?;
-
+        let mut commands = crate::sed_parser::parse_sed_expression(expression)?;
+        for cmd in &mut commands {
+            self.apply_flavor_to_substitutions(cmd);
+        }
         Ok(commands)
     }
 
-    /// Convert legacy SedCommand to unified Command
-    fn convert_legacy_command(&self, legacy: LegacySedCommand) -> Result<Command> {
-        match legacy {
-            LegacySedCommand::Substitution {
+    /// Recursively walks a Command tree and, for every Substitution
+    /// variant, rewrites its pattern and replacement into the canonical
+    /// PCRE form understood by the downstream regex engine.
+    fn apply_flavor_to_substitutions(&self, cmd: &mut Command) {
+        match cmd {
+            Command::Substitution {
                 pattern,
                 replacement,
-                flags,
-                range,
+                ..
             } => {
-                // Convert pattern based on regex flavor
-                let pattern = self.convert_pattern(&pattern);
-                let replacement = self.convert_replacement(&replacement);
-
-                // Convert Vec<char> flags to SubstitutionFlags
-                let substitution_flags = self.convert_flags(&flags);
-
-                Ok(Command::Substitution {
-                    pattern,
-                    replacement,
-                    flags: substitution_flags,
-                    range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
-                })
+                *pattern = self.convert_pattern(pattern);
+                *replacement = self.convert_replacement(replacement);
             }
-            LegacySedCommand::Delete { range } => Ok(Command::Delete {
-                range: (self.convert_address(range.0), self.convert_address(range.1)),
-            }),
-            LegacySedCommand::Print { range } => Ok(Command::Print {
-                range: (self.convert_address(range.0), self.convert_address(range.1)),
-            }),
-            LegacySedCommand::Quit { address } => Ok(Command::Quit {
-                address: address.map(|a| self.convert_address(a)),
-            }),
-            LegacySedCommand::QuitWithoutPrint { address } => Ok(Command::QuitWithoutPrint {
-                address: address.map(|a| self.convert_address(a)),
-            }),
-            LegacySedCommand::Insert { text, address } => Ok(Command::Insert {
-                text,
-                address: self.convert_address(address),
-            }),
-            LegacySedCommand::Append { text, address } => Ok(Command::Append {
-                text,
-                address: self.convert_address(address),
-            }),
-            LegacySedCommand::Change { text, address } => Ok(Command::Change {
-                text,
-                address: self.convert_address(address),
-            }),
-            LegacySedCommand::Group { range, commands } => {
-                let converted_commands = commands
-                    .into_iter()
-                    .map(|cmd| self.convert_legacy_command(cmd))
-                    .collect::<Result<Vec<_>>>()?;
-
-                Ok(Command::Group {
-                    commands: converted_commands,
-                    range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
-                })
-            }
-            LegacySedCommand::Hold { range } => Ok(Command::Hold {
-                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
-            }),
-            LegacySedCommand::HoldAppend { range } => Ok(Command::HoldAppend {
-                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
-            }),
-            LegacySedCommand::Get { range } => Ok(Command::Get {
-                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
-            }),
-            LegacySedCommand::GetAppend { range } => Ok(Command::GetAppend {
-                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
-            }),
-            LegacySedCommand::Exchange { range } => Ok(Command::Exchange {
-                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
-            }),
-            LegacySedCommand::Next { range } => Ok(Command::Next {
-                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
-            }),
-            LegacySedCommand::NextAppend { range } => Ok(Command::NextAppend {
-                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
-            }),
-            LegacySedCommand::PrintFirstLine { range } => Ok(Command::PrintFirstLine {
-                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
-            }),
-            LegacySedCommand::DeleteFirstLine { range } => Ok(Command::DeleteFirstLine {
-                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
-            }),
-            // Phase 5: Flow control commands
-            LegacySedCommand::Label { name } => Ok(Command::Label { name }),
-            LegacySedCommand::Branch { label, range } => Ok(Command::Branch {
-                label,
-                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
-            }),
-            LegacySedCommand::Test { label, range } => Ok(Command::Test {
-                label,
-                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
-            }),
-            LegacySedCommand::TestFalse { label, range } => Ok(Command::TestFalse {
-                label,
-                range: range.map(|(a, b)| (self.convert_address(a), self.convert_address(b))),
-            }),
-            LegacySedCommand::ReadFile { filename, range } => Ok(Command::ReadFile {
-                filename,
-                range: range.map(|a| self.convert_address(a)),
-            }),
-            LegacySedCommand::WriteFile { filename, range } => Ok(Command::WriteFile {
-                filename,
-                range: range.map(|a| self.convert_address(a)),
-            }),
-            LegacySedCommand::ReadLine { filename, range } => Ok(Command::ReadLine {
-                filename,
-                range: range.map(|a| self.convert_address(a)),
-            }),
-            LegacySedCommand::WriteFirstLine { filename, range } => Ok(Command::WriteFirstLine {
-                filename,
-                range: range.map(|a| self.convert_address(a)),
-            }),
-            LegacySedCommand::PrintLineNumber { range } => Ok(Command::PrintLineNumber {
-                range: range.map(|a| self.convert_address(a)),
-            }),
-            LegacySedCommand::PrintFilename { range } => Ok(Command::PrintFilename {
-                range: range.map(|a| self.convert_address(a)),
-            }),
-            LegacySedCommand::ClearPatternSpace { range } => Ok(Command::ClearPatternSpace {
-                range: range.map(|a| self.convert_address(a)),
-            }),
-        }
-    }
-
-    /// Convert legacy Address to unified Address
-    fn convert_address(&self, legacy: LegacyAddress) -> Address {
-        match legacy {
-            LegacyAddress::LineNumber(n) => Address::LineNumber(n),
-            LegacyAddress::Pattern(s) => Address::Pattern(s),
-            LegacyAddress::FirstLine => Address::FirstLine,
-            LegacyAddress::LastLine => Address::LastLine,
-            LegacyAddress::Negated(a) => Address::Negated(Box::new(self.convert_address(*a))),
-            LegacyAddress::Relative { base, offset } => Address::Relative {
-                base: Box::new(self.convert_address(*base)),
-                offset,
-            },
-            LegacyAddress::Step { start, step } => Address::Step { start, step },
-        }
-    }
-
-    /// Convert Vec<char> flags to SubstitutionFlags
-    fn convert_flags(&self, flags: &[char]) -> SubstitutionFlags {
-        let mut result = SubstitutionFlags::default();
-
-        for flag in flags {
-            match flag {
-                'g' => result.global = true,
-                'p' => result.print = true,
-                'i' | 'I' => result.case_insensitive = true,
-                '0'..='9' => {
-                    // Nth occurrence flag (e.g., 2 for second occurrence)
-                    // SAFETY: The match pattern '0'..='9' guarantees flag is an ASCII digit,
-                    // so to_digit(10) will always return Some(digit_value).
-                    let n = flag.to_digit(10).unwrap() as usize;
-                    result.nth = Some(n);
+            Command::Group { commands, .. } => {
+                for inner in commands {
+                    self.apply_flavor_to_substitutions(inner);
                 }
-                _ => {} // Ignore unknown flags
             }
+            _ => {}
         }
-
-        result
     }
 
-    /// Convert pattern based on regex flavor to PCRE
     fn convert_pattern(&self, pattern: &str) -> String {
         match self.regex_flavor {
-            RegexFlavor::BRE => {
-                // BRE needs to be converted to PCRE
-                crate::bre_converter::convert_bre_to_pcre(pattern)
-            }
-            RegexFlavor::ERE => {
-                // ERE needs to be converted to PCRE (mostly pass-through)
-                crate::ere_converter::convert_ere_to_pcre_pattern(pattern)
-            }
-            RegexFlavor::PCRE => {
-                // Already PCRE, no conversion needed
-                pattern.to_string()
-            }
+            RegexFlavor::BRE => crate::bre_converter::convert_bre_to_pcre(pattern),
+            RegexFlavor::ERE => crate::ere_converter::convert_ere_to_pcre_pattern(pattern),
+            RegexFlavor::PCRE => pattern.to_string(),
         }
     }
 
-    /// Convert replacement based on regex flavor to PCRE format
     fn convert_replacement(&self, replacement: &str) -> String {
         match self.regex_flavor {
-            RegexFlavor::BRE => {
-                // BRE uses \1, \2 for backreferences → convert to $1, $2
+            RegexFlavor::ERE => crate::ere_converter::convert_ere_backreferences(replacement),
+            // BRE and PCRE both accept GNU-sed-style replacements (\1, \&,
+            // \\) and convert them to the regex crate's form ($1, $&, \).
+            // PCRE keeps this convenience so existing sed scripts work
+            // unchanged when upgrading from `sed` to `sedx`.
+            RegexFlavor::BRE | RegexFlavor::PCRE => {
                 crate::bre_converter::convert_sed_backreferences(replacement)
-            }
-            RegexFlavor::ERE => {
-                // ERE uses \1, \2 for backreferences → convert to $1, $2
-                crate::ere_converter::convert_ere_backreferences(replacement)
-            }
-            RegexFlavor::PCRE => {
-                // Already PCRE format with $1, $2
-                replacement.to_string()
             }
         }
     }
@@ -240,6 +86,7 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command::{Address, Command, SubstitutionFlags};
 
     #[test]
     fn test_parser_creates_with_flavor() {
@@ -376,23 +223,119 @@ mod tests {
     fn test_convert_replacement_pcre() {
         let parser = Parser::new(RegexFlavor::PCRE);
 
-        // PCRE replacements should pass through unchanged
+        // Canonical PCRE replacements (already $N form) pass through.
         assert_eq!(parser.convert_replacement(r#"$1"#), "$1");
         assert_eq!(parser.convert_replacement(r#"$2$1"#), "$2$1");
         assert_eq!(parser.convert_replacement(r#"$&"#), "$&");
+
+        // GNU-sed-style \N backreferences also get converted under PCRE
+        // — a convenience feature so existing sed scripts work unchanged
+        // in the default flavor. See convert_replacement's doc-comment.
+        assert_eq!(parser.convert_replacement(r#"\1"#), "$1");
+        assert_eq!(parser.convert_replacement(r#"\2\1"#), "$2$1");
+        assert_eq!(parser.convert_replacement(r#"\&"#), "$&");
+    }
+
+    fn substitution(pattern: &str, replacement: &str) -> Command {
+        Command::Substitution {
+            pattern: pattern.to_string(),
+            replacement: replacement.to_string(),
+            flags: SubstitutionFlags::default(),
+            range: None,
+        }
     }
 
     #[test]
-    fn test_convert_flags() {
+    fn pcre_flavor_is_pass_through() {
         let parser = Parser::new(RegexFlavor::PCRE);
+        let mut cmd = substitution(r"(foo)(bar)", "$2$1");
+        parser.apply_flavor_to_substitutions(&mut cmd);
+        match cmd {
+            Command::Substitution {
+                pattern,
+                replacement,
+                ..
+            } => {
+                assert_eq!(pattern, "(foo)(bar)");
+                assert_eq!(replacement, "$2$1");
+            }
+            _ => unreachable!(),
+        }
+    }
 
-        let flags = parser.convert_flags(&['g', 'p', 'i']);
-        assert!(flags.global);
-        assert!(flags.print);
-        assert!(flags.case_insensitive);
+    #[test]
+    fn ere_flavor_converts_backslash_backrefs() {
+        let parser = Parser::new(RegexFlavor::ERE);
+        // ERE pattern passes through (it's already PCRE-compatible);
+        // only the replacement's \1/\2 gets rewritten to $1/$2.
+        let mut cmd = substitution("(foo)(bar)", r"\2\1");
+        parser.apply_flavor_to_substitutions(&mut cmd);
+        match cmd {
+            Command::Substitution {
+                pattern,
+                replacement,
+                ..
+            } => {
+                assert_eq!(pattern, "(foo)(bar)");
+                assert_eq!(replacement, "$2$1");
+            }
+            _ => unreachable!(),
+        }
+    }
 
-        let flags_nth = parser.convert_flags(&['g', '2']);
-        assert!(flags_nth.global);
-        assert_eq!(flags_nth.nth, Some(2));
+    #[test]
+    fn bre_flavor_converts_pattern_and_backrefs() {
+        let parser = Parser::new(RegexFlavor::BRE);
+        // BRE pattern `\(foo\)` becomes `(foo)`; `\1` becomes `$1`.
+        let mut cmd = substitution(r"\(foo\)", r"\1");
+        parser.apply_flavor_to_substitutions(&mut cmd);
+        match cmd {
+            Command::Substitution {
+                pattern,
+                replacement,
+                ..
+            } => {
+                assert_eq!(pattern, "(foo)");
+                assert_eq!(replacement, "$1");
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn group_commands_recurse_into_nested_substitutions() {
+        let parser = Parser::new(RegexFlavor::BRE);
+        let mut group = Command::Group {
+            commands: vec![substitution(r"\(a\)", r"\1"), substitution(r"\(b\)", r"\1")],
+            range: None,
+        };
+        parser.apply_flavor_to_substitutions(&mut group);
+        match group {
+            Command::Group { commands, .. } => {
+                match &commands[0] {
+                    Command::Substitution {
+                        pattern,
+                        replacement,
+                        ..
+                    } => {
+                        assert_eq!(pattern, "(a)");
+                        assert_eq!(replacement, "$1");
+                    }
+                    _ => unreachable!(),
+                }
+                match &commands[1] {
+                    Command::Substitution {
+                        pattern,
+                        replacement,
+                        ..
+                    } => {
+                        assert_eq!(pattern, "(b)");
+                        assert_eq!(replacement, "$1");
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            _ => unreachable!(),
+        }
     }
 }

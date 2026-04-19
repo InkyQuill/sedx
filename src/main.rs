@@ -1,6 +1,5 @@
 mod backup_manager;
 mod bre_converter;
-mod capability;
 mod cli;
 mod command;
 mod config;
@@ -21,7 +20,7 @@ use logger::init_debug_logging;
 use parser::Parser;
 use std::fs;
 use std::io::{self, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use std::time::Instant;
 
@@ -225,8 +224,20 @@ fn can_use_streaming(commands: &[Command]) -> bool {
     true
 }
 
-/// Extract range from a command (if any)
+/// Extract range from a command (if any).
+///
+/// Returns `None` for commands that are unconditionally streamable (no range check needed).
+/// Returns `Some(range)` where the range will be validated by `is_range_supported_in_streaming`.
+/// Returns a sentinel non-streamable range for commands that cannot stream with the given address.
 fn get_command_range_option(cmd: &Command) -> Option<(Address, Address)> {
+    // Sentinel: a Negated address, which is_range_supported_in_streaming already rejects.
+    fn unsupported() -> (Address, Address) {
+        (
+            Address::Negated(Box::new(Address::LineNumber(0))),
+            Address::LineNumber(0),
+        )
+    }
+
     match cmd {
         Command::Substitution { range, .. } => range.as_ref().map(|r| (r.0.clone(), r.1.clone())),
         Command::Delete { range } => Some(range.clone()),
@@ -235,14 +246,20 @@ fn get_command_range_option(cmd: &Command) -> Option<(Address, Address)> {
             address: Address::LineNumber(_),
             ..
         } => Some((Address::LineNumber(0), Address::LineNumber(0))),
+        // Non-line-number address on Insert: not streamable
+        Command::Insert { .. } => Some(unsupported()),
         Command::Append {
             address: Address::LineNumber(_),
             ..
         } => Some((Address::LineNumber(0), Address::LineNumber(0))),
+        // Non-line-number address on Append: not streamable
+        Command::Append { .. } => Some(unsupported()),
         Command::Change {
-            address: Address::LineNumber(_),
+            range: (Address::LineNumber(s), Address::LineNumber(e)),
             ..
-        } => Some((Address::LineNumber(0), Address::LineNumber(0))),
+        } if s == e => Some((Address::LineNumber(0), Address::LineNumber(0))),
+        // Range change or non-line-number address on Change: not streamable
+        Command::Change { .. } => Some(unsupported()),
         Command::Quit {
             address: Some(Address::LineNumber(_)) | None,
             ..
@@ -342,7 +359,16 @@ fn execute_command(
     // Check if commands support streaming mode
     let supports_streaming = can_use_streaming(&commands);
 
-    let file_paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
+    // Follow symlinks: canonicalize each user-supplied path so all downstream steps
+    // (preview, backup, apply) operate on the real target file (GNU sed -i behavior).
+    let file_paths: Vec<PathBuf> = files
+        .iter()
+        .filter_map(|f| {
+            fs::canonicalize(Path::new(f))
+                .inspect_err(|e| eprintln!("Error resolving {}: {}", f, e))
+                .ok()
+        })
+        .collect();
 
     // Process all files and generate diffs (PREVIEW PHASE - always dry_run)
     // For each file, decide whether to use streaming or in-memory processing
@@ -530,62 +556,69 @@ fn execute_command(
         }
     };
 
-    // Apply changes
+    // Apply changes — skipped entirely for read-only expressions (q, Q, p, =, …)
+    // so that non-modifying commands never write, rename, or truncate files.
     let mut apply_errors = Vec::new();
-    for file_path in &file_paths {
-        if streaming_files.contains(file_path) {
-            // Streaming files: Re-process with dry_run=false to apply changes
-            let mut stream_processor =
-                file_processor::StreamProcessor::with_regex_flavor(commands.clone(), regex_flavor)
-                    .with_context_size(context)
-                    .with_dry_run(false); // Apply changes now
-            match stream_processor.process_streaming_forced(file_path) {
-                Ok(_) => {
-                    if debug_enabled {
-                        tracing::debug!(
-                            file = %file_path.display(),
-                            mode = "streaming",
-                            "Changes applied successfully"
-                        );
+    if can_modify_files {
+        for file_path in &file_paths {
+            if streaming_files.contains(file_path) {
+                // Streaming files: Re-process with dry_run=false to apply changes
+                let mut stream_processor = file_processor::StreamProcessor::with_regex_flavor(
+                    commands.clone(),
+                    regex_flavor,
+                )
+                .with_context_size(context)
+                .with_dry_run(false); // Apply changes now
+                match stream_processor.process_streaming_forced(file_path) {
+                    Ok(_) => {
+                        if debug_enabled {
+                            tracing::debug!(
+                                file = %file_path.display(),
+                                mode = "streaming",
+                                "Changes applied successfully"
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        if debug_enabled {
+                            tracing::error!(
+                                file = %file_path.display(),
+                                error = %e,
+                                "Failed to apply changes"
+                            );
+                        }
+                        eprintln!("Error applying to {}: {}", file_path.display(), e);
+                        apply_errors.push((file_path.clone(), e));
                     }
                 }
-                Err(e) => {
-                    if debug_enabled {
-                        tracing::error!(
-                            file = %file_path.display(),
-                            error = %e,
-                            "Failed to apply changes"
-                        );
+            } else {
+                // In-memory files: Apply using apply_to_file()
+                let mut processor = file_processor::FileProcessor::with_regex_flavor(
+                    commands.clone(),
+                    regex_flavor,
+                );
+                processor.set_no_default_output(quiet); // Wire up -n flag
+                match processor.apply_to_file(file_path) {
+                    Ok(_) => {
+                        if debug_enabled {
+                            tracing::debug!(
+                                file = %file_path.display(),
+                                mode = "in-memory",
+                                "Changes applied successfully"
+                            );
+                        }
                     }
-                    eprintln!("Error applying to {}: {}", file_path.display(), e);
-                    apply_errors.push((file_path.clone(), e));
-                }
-            }
-        } else {
-            // In-memory files: Apply using apply_to_file()
-            let mut processor =
-                file_processor::FileProcessor::with_regex_flavor(commands.clone(), regex_flavor);
-            processor.set_no_default_output(quiet); // Wire up -n flag
-            match processor.apply_to_file(file_path) {
-                Ok(_) => {
-                    if debug_enabled {
-                        tracing::debug!(
-                            file = %file_path.display(),
-                            mode = "in-memory",
-                            "Changes applied successfully"
-                        );
+                    Err(e) => {
+                        if debug_enabled {
+                            tracing::error!(
+                                file = %file_path.display(),
+                                error = %e,
+                                "Failed to apply changes"
+                            );
+                        }
+                        eprintln!("Error applying to {}: {}", file_path.display(), e);
+                        apply_errors.push((file_path.clone(), e));
                     }
-                }
-                Err(e) => {
-                    if debug_enabled {
-                        tracing::error!(
-                            file = %file_path.display(),
-                            error = %e,
-                            "Failed to apply changes"
-                        );
-                    }
-                    eprintln!("Error applying to {}: {}", file_path.display(), e);
-                    apply_errors.push((file_path.clone(), e));
                 }
             }
         }
@@ -605,7 +638,9 @@ fn execute_command(
     if let Some(id) = backup_id {
         println!("\nBackup ID: {}", id);
         println!("Rollback with: sedx rollback {}", id);
-    } else {
+    } else if can_modify_files {
+        // Read-only expressions don't write to disk, so there's nothing to undo —
+        // only warn about the missing backup when a write actually occurred.
         println!("\nNo backup created - changes cannot be undone");
     }
 
@@ -653,12 +688,20 @@ fn commands_can_modify_files(commands: &[crate::command::Command]) -> bool {
             | Command::PrintLineNumber { .. } | Command::PrintFilename { .. }
             => continue,  // Skip read-only commands, keep checking
 
+            // Groups may be provably read-only (e.g. `{p; =}`) — recurse to
+            // avoid creating an unnecessary backup.
+            Command::Group { commands: inner, .. } => {
+                if commands_can_modify_files(inner) {
+                    return true;
+                }
+            }
+
             // Commands that MIGHT modify files
             Command::Substitution { .. } | Command::Delete { .. }
             | Command::Insert { .. } | Command::Append { .. } | Command::Change { .. }
             | Command::Hold { .. } | Command::HoldAppend { .. } | Command::Get { .. }
             | Command::GetAppend { .. } | Command::Exchange { .. }
-            | Command::Group { .. } | Command::DeleteFirstLine { .. }
+            | Command::DeleteFirstLine { .. }
             | Command::ReadFile { .. } | Command::WriteFile { .. } | Command::ReadLine { .. } | Command::WriteFirstLine { .. }
             | Command::ClearPatternSpace { .. }
             => return true,  // Found a modifying command
