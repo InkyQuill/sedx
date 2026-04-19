@@ -610,8 +610,12 @@ fn parse_substitution(cmd: &str) -> Result<Command> {
     }
 
     let pattern = &rest[delimiter_positions[0] + 1..delimiter_positions[1]];
-    let replacement_raw = &rest[delimiter_positions[1] + 1..delimiter_positions[2]];
-    let replacement = convert_sed_backreferences(replacement_raw);
+    // Keep the replacement raw at this layer — backreference conversion
+    // (\1 → $1 etc.) is flavor-specific and happens in
+    // `parser::Parser::convert_replacement` after the parse finishes. The
+    // old code path converted here too, which was a layering violation:
+    // sed_parser shouldn't know about regex-engine replacement syntax.
+    let replacement = rest[delimiter_positions[1] + 1..delimiter_positions[2]].to_string();
     let raw_flags: Vec<char> = if delimiter_positions[2] + 1 < rest.len() {
         rest[delimiter_positions[2] + 1..].chars().collect()
     } else {
@@ -1237,58 +1241,6 @@ fn parse_address(addr: &str) -> Result<Address> {
     ))
 }
 
-/// Convert sed-style backreferences (\1, \2, etc.) to regex crate style ($1, $2, etc.)
-///
-/// GNU sed uses `\1`, `\2` for backreferences in replacement strings.
-/// Rust's `regex` crate uses `$1`, `$2`. This function converts between the two.
-///
-/// Handles:
-/// - `\1`, `\2`, etc. → `$1`, `$2`, etc. (numbered backreferences)
-/// - `\\` → `\` (escaped backslash)
-/// - `\&` → `$&` (entire match)
-fn convert_sed_backreferences(replacement: &str) -> String {
-    let mut result = String::with_capacity(replacement.len());
-    let mut chars = replacement.chars().peekable();
-
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            if let Some(&next_char) = chars.peek() {
-                if next_char.is_ascii_digit() {
-                    // Convert \1, \2, etc. to $1, $2, etc.
-                    result.push('$');
-                    chars.next(); // consume the digit
-                    result.push(next_char);
-                } else if next_char == '\\' {
-                    // Escaped backslash - keep one
-                    result.push('\\');
-                    chars.next(); // consume second backslash
-                    if let Some(&third) = chars.peek() {
-                        chars.next();
-                        result.push(third);
-                    }
-                } else if next_char == '&' {
-                    // Matched string
-                    result.push('$');
-                    result.push('&');
-                    chars.next();
-                } else {
-                    // Other escape sequence - keep both
-                    result.push(c);
-                    if let Some(next) = chars.next() {
-                        result.push(next);
-                    }
-                }
-            } else {
-                result.push(c);
-            }
-        } else {
-            result.push(c);
-        }
-    }
-
-    result
-}
-
 // Phase 5: Parse label definition (:label)
 fn parse_label(cmd: &str) -> Result<Command> {
     let cmd = cmd.trim();
@@ -1793,42 +1745,9 @@ mod tests {
         );
     }
 
-    // Bug 3: Backreference conversion tests
-    #[test]
-    fn test_backreference_conversion_single() {
-        let result = convert_sed_backreferences(r"\1");
-        assert_eq!(result, "$1");
-    }
-
-    #[test]
-    fn test_backreference_conversion_multiple() {
-        let result = convert_sed_backreferences(r"\1 \2 \3");
-        assert_eq!(result, "$1 $2 $3");
-    }
-
-    #[test]
-    fn test_backreference_conversion_mixed() {
-        let result = convert_sed_backreferences(r"foo \1 bar \2 baz");
-        assert_eq!(result, "foo $1 bar $2 baz");
-    }
-
-    #[test]
-    fn test_backreference_conversion_escaped_backslash() {
-        let result = convert_sed_backreferences(r"\\");
-        assert_eq!(result, r"\");
-    }
-
-    #[test]
-    fn test_backreference_conversion_ampersand() {
-        let result = convert_sed_backreferences(r"\&");
-        assert_eq!(result, "$&");
-    }
-
-    #[test]
-    fn test_backreference_conversion_complex() {
-        let result = convert_sed_backreferences(r"\1: \2 \\ \1");
-        assert_eq!(result, r"$1: $2 \ $1");
-    }
+    // Backreference conversion tests were moved to `bre_converter::tests`
+    // (the canonical home of the \N → $N conversion logic). See also
+    // `parser::tests` for end-to-end coverage via `Parser::convert_replacement`.
 
     // Bug 2: Command grouping tests
     #[test]

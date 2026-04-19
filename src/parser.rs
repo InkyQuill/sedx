@@ -16,10 +16,21 @@ pub struct Parser {
 }
 
 impl Parser {
+    /// Create a parser that interprets substitution patterns and
+    /// replacements in the given regex flavor.
     pub fn new(regex_flavor: RegexFlavor) -> Self {
         Self { regex_flavor }
     }
 
+    /// Parse a sed-style expression into a flat list of commands.
+    ///
+    /// `sed_parser::parse_sed_expression` does the structural parse and
+    /// emits `Command` values directly; this wrapper then walks each
+    /// command and, for Substitution variants (including those nested
+    /// inside `Group` commands), rewrites pattern and replacement into
+    /// the canonical PCRE form the runtime regex engine expects. Errors
+    /// come from the underlying parser (malformed expressions); the
+    /// flavor-conversion pass is infallible.
     pub fn parse(&self, expression: &str) -> Result<Vec<Command>> {
         let mut commands = crate::sed_parser::parse_sed_expression(expression)?;
         for cmd in &mut commands {
@@ -60,9 +71,14 @@ impl Parser {
 
     fn convert_replacement(&self, replacement: &str) -> String {
         match self.regex_flavor {
-            RegexFlavor::BRE => crate::bre_converter::convert_sed_backreferences(replacement),
             RegexFlavor::ERE => crate::ere_converter::convert_ere_backreferences(replacement),
-            RegexFlavor::PCRE => replacement.to_string(),
+            // BRE and PCRE both accept GNU-sed-style replacements (\1, \&,
+            // \\) and convert them to the regex crate's form ($1, $&, \).
+            // PCRE keeps this convenience so existing sed scripts work
+            // unchanged when upgrading from `sed` to `sedx`.
+            RegexFlavor::BRE | RegexFlavor::PCRE => {
+                crate::bre_converter::convert_sed_backreferences(replacement)
+            }
         }
     }
 }
@@ -207,9 +223,16 @@ mod tests {
     fn test_convert_replacement_pcre() {
         let parser = Parser::new(RegexFlavor::PCRE);
 
-        // PCRE replacements should pass through unchanged
+        // Canonical PCRE replacements (already $N form) pass through.
         assert_eq!(parser.convert_replacement(r#"$1"#), "$1");
         assert_eq!(parser.convert_replacement(r#"$2$1"#), "$2$1");
         assert_eq!(parser.convert_replacement(r#"$&"#), "$&");
+
+        // GNU-sed-style \N backreferences also get converted under PCRE
+        // — a convenience feature so existing sed scripts work unchanged
+        // in the default flavor. See convert_replacement's doc-comment.
+        assert_eq!(parser.convert_replacement(r#"\1"#), "$1");
+        assert_eq!(parser.convert_replacement(r#"\2\1"#), "$2$1");
+        assert_eq!(parser.convert_replacement(r#"\&"#), "$&");
     }
 }
