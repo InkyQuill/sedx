@@ -2182,9 +2182,14 @@ impl FileProcessor {
             state.line_num += 1;
             Ok(CycleResult::Continue)
         } else {
-            // At EOF: don't modify pattern space, just continue
-            // GNU sed doesn't add a newline at EOF
-            Ok(CycleResult::Continue)
+            // At EOF: GNU sed prints the current pattern space and terminates.
+            // Push to side_effects so it is flushed before the cycle ends, then
+            // signal DeleteLine to break the command loop without the normal
+            // default-output path (which would double-print if not quiet).
+            if !self.no_default_output {
+                state.side_effects.push(state.pattern_space.clone());
+            }
+            Ok(CycleResult::DeleteLine)
         }
     }
 

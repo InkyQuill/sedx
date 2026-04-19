@@ -258,17 +258,15 @@ fn print_first_line_of_pattern_space() {
 
 #[test]
 fn delete_first_line_of_pattern_space_consumes_pairs() {
-    // N;D on a 4-line file consumes lines in pairs and sedx ends the script
-    // without emitting the remaining pattern space on final EOF. This asserts
-    // sedx's current behavior (no GNU-sed parity claim). The point of the
-    // test is just to prove D executes without panicking and produces a
-    // deterministic output.
+    // GNU sed: N at EOF must print pattern space, not drop it.
+    // N;D on a 4-line file: pairs (a,b)→D keeps b, (b→c)… until pattern_space="d".
+    // When N hits EOF on the last unpaired line, pattern space is flushed and script ends.
     common::sedx()
         .arg("N; D")
         .write_stdin("a\nb\nc\nd\n")
         .assert()
         .success()
-        .stdout("");
+        .stdout("d\n");
 }
 
 #[test]
