@@ -86,7 +86,7 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command::{Address, Command};
+    use crate::command::{Address, Command, SubstitutionFlags};
 
     #[test]
     fn test_parser_creates_with_flavor() {
@@ -234,5 +234,108 @@ mod tests {
         assert_eq!(parser.convert_replacement(r#"\1"#), "$1");
         assert_eq!(parser.convert_replacement(r#"\2\1"#), "$2$1");
         assert_eq!(parser.convert_replacement(r#"\&"#), "$&");
+    }
+
+    fn substitution(pattern: &str, replacement: &str) -> Command {
+        Command::Substitution {
+            pattern: pattern.to_string(),
+            replacement: replacement.to_string(),
+            flags: SubstitutionFlags::default(),
+            range: None,
+        }
+    }
+
+    #[test]
+    fn pcre_flavor_is_pass_through() {
+        let parser = Parser::new(RegexFlavor::PCRE);
+        let mut cmd = substitution(r"(foo)(bar)", "$2$1");
+        parser.apply_flavor_to_substitutions(&mut cmd);
+        match cmd {
+            Command::Substitution {
+                pattern,
+                replacement,
+                ..
+            } => {
+                assert_eq!(pattern, "(foo)(bar)");
+                assert_eq!(replacement, "$2$1");
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn ere_flavor_converts_backslash_backrefs() {
+        let parser = Parser::new(RegexFlavor::ERE);
+        // ERE pattern passes through (it's already PCRE-compatible);
+        // only the replacement's \1/\2 gets rewritten to $1/$2.
+        let mut cmd = substitution("(foo)(bar)", r"\2\1");
+        parser.apply_flavor_to_substitutions(&mut cmd);
+        match cmd {
+            Command::Substitution {
+                pattern,
+                replacement,
+                ..
+            } => {
+                assert_eq!(pattern, "(foo)(bar)");
+                assert_eq!(replacement, "$2$1");
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn bre_flavor_converts_pattern_and_backrefs() {
+        let parser = Parser::new(RegexFlavor::BRE);
+        // BRE pattern `\(foo\)` becomes `(foo)`; `\1` becomes `$1`.
+        let mut cmd = substitution(r"\(foo\)", r"\1");
+        parser.apply_flavor_to_substitutions(&mut cmd);
+        match cmd {
+            Command::Substitution {
+                pattern,
+                replacement,
+                ..
+            } => {
+                assert_eq!(pattern, "(foo)");
+                assert_eq!(replacement, "$1");
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn group_commands_recurse_into_nested_substitutions() {
+        let parser = Parser::new(RegexFlavor::BRE);
+        let mut group = Command::Group {
+            commands: vec![substitution(r"\(a\)", r"\1"), substitution(r"\(b\)", r"\1")],
+            range: None,
+        };
+        parser.apply_flavor_to_substitutions(&mut group);
+        match group {
+            Command::Group { commands, .. } => {
+                match &commands[0] {
+                    Command::Substitution {
+                        pattern,
+                        replacement,
+                        ..
+                    } => {
+                        assert_eq!(pattern, "(a)");
+                        assert_eq!(replacement, "$1");
+                    }
+                    _ => unreachable!(),
+                }
+                match &commands[1] {
+                    Command::Substitution {
+                        pattern,
+                        replacement,
+                        ..
+                    } => {
+                        assert_eq!(pattern, "(b)");
+                        assert_eq!(replacement, "$1");
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            _ => unreachable!(),
+        }
     }
 }
