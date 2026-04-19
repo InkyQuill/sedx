@@ -84,17 +84,35 @@ fn print_with_quiet_emits_only_addressed_lines() {
 
 #[test]
 fn quit_prints_then_stops() {
-    // sedx in file mode treats `q` as read-only (no backup written) yet
-    // truncates the file to the lines printed up to the quit. We codify
-    // that current behavior here — no claim of GNU-sed parity.
+    // `q` is a read-only command: it prints lines up to the quit point but
+    // must NOT modify the file on disk.
     use tempfile::TempDir;
     let home = TempDir::new().unwrap();
-    let file = common::write_file(home.path(), "in.txt", "a\nb\nc\nd\n");
-    common::sedx_isolated(home.path())
+    let original = "line 1\nline 2\nline 3\n";
+    let file = common::write_file(home.path(), "in.txt", original);
+    let output = common::sedx_isolated(home.path())
         .args(["2q", file.to_str().unwrap()])
         .assert()
-        .success();
-    assert_eq!(common::read_file(&file), "a\nb\n");
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8_lossy(&output);
+    // The printed output must contain the lines seen up to the quit point.
+    assert!(
+        stdout.contains("line 1"),
+        "stdout should contain 'line 1', got: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("line 2"),
+        "stdout should contain 'line 2', got: {stdout:?}"
+    );
+    // File on disk must be completely unchanged.
+    assert_eq!(
+        common::read_file(&file),
+        original,
+        "q is read-only: file must not be modified"
+    );
 }
 
 #[test]

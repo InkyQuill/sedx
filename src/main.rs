@@ -556,62 +556,69 @@ fn execute_command(
         }
     };
 
-    // Apply changes
+    // Apply changes — skipped entirely for read-only expressions (q, Q, p, =, …)
+    // so that non-modifying commands never write, rename, or truncate files.
     let mut apply_errors = Vec::new();
-    for file_path in &file_paths {
-        if streaming_files.contains(file_path) {
-            // Streaming files: Re-process with dry_run=false to apply changes
-            let mut stream_processor =
-                file_processor::StreamProcessor::with_regex_flavor(commands.clone(), regex_flavor)
-                    .with_context_size(context)
-                    .with_dry_run(false); // Apply changes now
-            match stream_processor.process_streaming_forced(file_path) {
-                Ok(_) => {
-                    if debug_enabled {
-                        tracing::debug!(
-                            file = %file_path.display(),
-                            mode = "streaming",
-                            "Changes applied successfully"
-                        );
+    if can_modify_files {
+        for file_path in &file_paths {
+            if streaming_files.contains(file_path) {
+                // Streaming files: Re-process with dry_run=false to apply changes
+                let mut stream_processor = file_processor::StreamProcessor::with_regex_flavor(
+                    commands.clone(),
+                    regex_flavor,
+                )
+                .with_context_size(context)
+                .with_dry_run(false); // Apply changes now
+                match stream_processor.process_streaming_forced(file_path) {
+                    Ok(_) => {
+                        if debug_enabled {
+                            tracing::debug!(
+                                file = %file_path.display(),
+                                mode = "streaming",
+                                "Changes applied successfully"
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        if debug_enabled {
+                            tracing::error!(
+                                file = %file_path.display(),
+                                error = %e,
+                                "Failed to apply changes"
+                            );
+                        }
+                        eprintln!("Error applying to {}: {}", file_path.display(), e);
+                        apply_errors.push((file_path.clone(), e));
                     }
                 }
-                Err(e) => {
-                    if debug_enabled {
-                        tracing::error!(
-                            file = %file_path.display(),
-                            error = %e,
-                            "Failed to apply changes"
-                        );
+            } else {
+                // In-memory files: Apply using apply_to_file()
+                let mut processor = file_processor::FileProcessor::with_regex_flavor(
+                    commands.clone(),
+                    regex_flavor,
+                );
+                processor.set_no_default_output(quiet); // Wire up -n flag
+                match processor.apply_to_file(file_path) {
+                    Ok(_) => {
+                        if debug_enabled {
+                            tracing::debug!(
+                                file = %file_path.display(),
+                                mode = "in-memory",
+                                "Changes applied successfully"
+                            );
+                        }
                     }
-                    eprintln!("Error applying to {}: {}", file_path.display(), e);
-                    apply_errors.push((file_path.clone(), e));
-                }
-            }
-        } else {
-            // In-memory files: Apply using apply_to_file()
-            let mut processor =
-                file_processor::FileProcessor::with_regex_flavor(commands.clone(), regex_flavor);
-            processor.set_no_default_output(quiet); // Wire up -n flag
-            match processor.apply_to_file(file_path) {
-                Ok(_) => {
-                    if debug_enabled {
-                        tracing::debug!(
-                            file = %file_path.display(),
-                            mode = "in-memory",
-                            "Changes applied successfully"
-                        );
+                    Err(e) => {
+                        if debug_enabled {
+                            tracing::error!(
+                                file = %file_path.display(),
+                                error = %e,
+                                "Failed to apply changes"
+                            );
+                        }
+                        eprintln!("Error applying to {}: {}", file_path.display(), e);
+                        apply_errors.push((file_path.clone(), e));
                     }
-                }
-                Err(e) => {
-                    if debug_enabled {
-                        tracing::error!(
-                            file = %file_path.display(),
-                            error = %e,
-                            "Failed to apply changes"
-                        );
-                    }
-                    eprintln!("Error applying to {}: {}", file_path.display(), e);
-                    apply_errors.push((file_path.clone(), e));
                 }
             }
         }
