@@ -185,7 +185,6 @@ pub fn get_disk_space(path: &Path) -> Result<DiskSpaceInfo> {
 ///
 /// # Returns
 /// `Ok(())` if there's enough space, `Err` otherwise
-#[cfg(unix)]
 pub fn check_disk_space_for_backup(
     backup_dir: &Path,
     file_size: u64,
@@ -222,19 +221,6 @@ pub fn check_disk_space_for_backup(
         ));
     }
 
-    Ok(())
-}
-
-/// Check if there's enough disk space for a backup (Windows stub)
-///
-/// Windows version - skips disk space checking
-#[cfg(windows)]
-pub fn check_disk_space_for_backup(
-    _backup_dir: &Path,
-    _file_size: u64,
-    _max_percent: f64,
-) -> Result<()> {
-    // Skip disk space checking on Windows
     Ok(())
 }
 
