@@ -1,11 +1,72 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use flate2::Compression;
+use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
 use serde::{Deserialize, Serialize};
+use std::ffi::OsString;
 use std::fs;
+use std::io::{BufReader, BufWriter, copy as io_copy};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 const MAX_BACKUPS: usize = 50;
+const GZ_EXT: &str = ".gz";
+
+/// Append a `.gz` suffix to `path`, keeping the existing extension intact.
+/// `Path::with_extension` would replace the extension (`file.txt` -> `file.gz`),
+/// which loses information the restore path relies on — we want
+/// `file.txt.gz` so the original filename is recoverable.
+fn append_gz_extension(path: &Path) -> PathBuf {
+    let mut s: OsString = path.into();
+    s.push(GZ_EXT);
+    PathBuf::from(s)
+}
+
+/// True if `path`'s final extension is `.gz`.
+fn is_gzipped(path: &Path) -> bool {
+    path.extension().is_some_and(|ext| ext == "gz")
+}
+
+/// Gzip-copy `src` to `dst` using streaming I/O so memory stays flat for
+/// large files. The destination gets the full gzip container (magic bytes +
+/// header + deflate stream + trailer), suitable for standard `gunzip`.
+fn gzip_copy(src: &Path, dst: &Path) -> Result<()> {
+    let source =
+        fs::File::open(src).with_context(|| format!("Failed to open source: {}", src.display()))?;
+    let mut reader = BufReader::new(source);
+
+    let dest = fs::File::create(dst)
+        .with_context(|| format!("Failed to create backup: {}", dst.display()))?;
+    let mut encoder = GzEncoder::new(BufWriter::new(dest), Compression::default());
+
+    io_copy(&mut reader, &mut encoder)
+        .with_context(|| format!("Failed to gzip-copy to: {}", dst.display()))?;
+    encoder
+        .finish()
+        .with_context(|| format!("Failed to finalize gzip stream: {}", dst.display()))?;
+    Ok(())
+}
+
+/// Restore a backup file into place. If `src` is gzipped (`.gz` suffix), it
+/// is streamed through GzDecoder on the way out; otherwise it's a plain
+/// byte-for-byte copy so that legacy (pre-v1.1) uncompressed backups keep
+/// working.
+fn restore_file(src: &Path, dst: &Path) -> Result<()> {
+    if is_gzipped(src) {
+        let source = fs::File::open(src)
+            .with_context(|| format!("Failed to open backup: {}", src.display()))?;
+        let mut decoder = GzDecoder::new(BufReader::new(source));
+        let dest = fs::File::create(dst)
+            .with_context(|| format!("Failed to create restore target: {}", dst.display()))?;
+        let mut writer = BufWriter::new(dest);
+        io_copy(&mut decoder, &mut writer)
+            .with_context(|| format!("Failed to decompress into: {}", dst.display()))?;
+    } else {
+        fs::copy(src, dst).with_context(|| format!("Failed to restore file: {}", dst.display()))?;
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupMetadata {
@@ -145,9 +206,9 @@ impl BackupManager {
                 .file_name()
                 .ok_or_else(|| anyhow::anyhow!("Invalid file name: {}", file_path.display()))?;
 
-            let backup_path = backup_dir.join(file_name);
+            let backup_path = append_gz_extension(&backup_dir.join(file_name));
 
-            fs::copy(file_path, &backup_path)
+            gzip_copy(file_path, &backup_path)
                 .with_context(|| format!("Failed to backup file: {}", file_path.display()))?;
 
             file_backups.push(FileBackup {
@@ -200,12 +261,14 @@ impl BackupManager {
                 continue;
             }
 
-            fs::copy(&file_backup.backup_path, &file_backup.original_path).with_context(|| {
-                format!(
-                    "Failed to restore file: {}",
-                    file_backup.original_path.display()
-                )
-            })?;
+            restore_file(&file_backup.backup_path, &file_backup.original_path).with_context(
+                || {
+                    format!(
+                        "Failed to restore file: {}",
+                        file_backup.original_path.display()
+                    )
+                },
+            )?;
 
             println!("Restored: {}", file_backup.original_path.display());
         }
@@ -376,16 +439,20 @@ mod tests {
         let metadata_path = backup_dir.join("operation.json");
         assert!(metadata_path.exists(), "Metadata file should exist");
 
-        // Verify backup file exists
-        let backup_file = backup_dir.join("test.txt");
-        assert!(backup_file.exists(), "Backup file should exist");
+        // Verify gzipped backup file exists.
+        let backup_file = backup_dir.join("test.txt.gz");
+        assert!(backup_file.exists(), "Gzipped backup file should exist");
 
-        // Verify backup content matches original
-        let backup_content = fs::read_to_string(&backup_file).unwrap();
+        // Verify backup round-trips: decompress into a temp file and compare
+        // the recovered content to the original.
+        let recovered_dir = tempfile::tempdir().unwrap();
+        let recovered = recovered_dir.path().join("recovered.txt");
+        restore_file(&backup_file, &recovered).unwrap();
+        let recovered_content = fs::read_to_string(&recovered).unwrap();
         let original_content = fs::read_to_string(&test_file).unwrap();
         assert_eq!(
-            backup_content, original_content,
-            "Backup content should match original"
+            recovered_content, original_content,
+            "Backup content should round-trip through gzip"
         );
 
         // Verify metadata is correct
@@ -414,10 +481,10 @@ mod tests {
         let backup_dir = manager.backups_dir().join(&backup_id);
         assert!(backup_dir.exists());
 
-        // Verify all files were backed up
-        assert!(backup_dir.join("file1.txt").exists());
-        assert!(backup_dir.join("file2.txt").exists());
-        assert!(backup_dir.join("file3.txt").exists());
+        // Verify all files were backed up (with .gz suffix).
+        assert!(backup_dir.join("file1.txt.gz").exists());
+        assert!(backup_dir.join("file2.txt.gz").exists());
+        assert!(backup_dir.join("file3.txt.gz").exists());
 
         // Verify metadata
         let metadata_path = backup_dir.join("operation.json");
@@ -437,13 +504,27 @@ mod tests {
             .unwrap();
 
         let backup_dir = manager.backups_dir().join(&backup_id);
-        let backup_file = backup_dir.join("large.txt");
+        let backup_file = backup_dir.join("large.txt.gz");
+        assert!(backup_file.exists(), "Gzipped backup file should exist");
 
-        // Verify file size matches
-        let backup_metadata = fs::metadata(&backup_file).unwrap();
-        let original_metadata = fs::metadata(&large_file).unwrap();
-        assert_eq!(backup_metadata.len(), original_metadata.len());
-        assert_eq!(backup_metadata.len(), 1_000_000);
+        // A compressible 1 MB blob of `x` gzips to well under 10 KB —
+        // asserting that gives us a meaningful size expectation without
+        // being brittle to compression-level tweaks. The exact ratio
+        // depends on zlib internals; anywhere under 10% is plenty of
+        // signal that compression actually happened.
+        let backup_len = fs::metadata(&backup_file).unwrap().len();
+        let original_len = fs::metadata(&large_file).unwrap().len();
+        assert_eq!(original_len, 1_000_000);
+        assert!(
+            backup_len < original_len / 10,
+            "gzip should shrink a 1MB run of 'x' to <10% of the original, got {backup_len}",
+        );
+
+        // Verify content round-trips through gzip.
+        let recovered_dir = tempfile::tempdir().unwrap();
+        let recovered = recovered_dir.path().join("recovered.txt");
+        restore_file(&backup_file, &recovered).unwrap();
+        assert_eq!(fs::metadata(&recovered).unwrap().len(), original_len);
     }
 
     #[test]
@@ -468,12 +549,14 @@ mod tests {
 
         let backup_dir = manager.backups_dir().join(&backup_id);
 
-        // Verify all files with special characters were backed up
+        // Verify all files with special characters were backed up (gzipped).
         for (name, _) in &test_cases {
+            let gzipped = append_gz_extension(&backup_dir.join(name));
             assert!(
-                backup_dir.join(name).exists(),
-                "File '{}' should exist in backup",
-                name
+                gzipped.exists(),
+                "File '{}' should exist in backup as {}.gz",
+                name,
+                name,
             );
         }
     }
@@ -1024,6 +1107,46 @@ mod tests {
     }
 
     // ============================================================================
+    // Legacy backup compatibility
+    // ============================================================================
+
+    #[test]
+    fn restore_accepts_legacy_uncompressed_backup() {
+        // Pre-v1.1 backups stored files as raw copies (no .gz). restore_backup
+        // must still handle those so in-flight backups from older installs
+        // remain recoverable after an upgrade.
+        let (mut manager, temp_dir) = create_test_manager();
+        let original = create_test_file(temp_dir.path(), "legacy.txt", "pre-upgrade");
+
+        // Create a backup the new way, then rewrite the backup on disk and
+        // metadata to look like a legacy uncompressed backup.
+        let backup_id = manager
+            .create_backup("s/a/b/", std::slice::from_ref(&original))
+            .unwrap();
+        let backup_dir = manager.backups_dir().join(&backup_id);
+        let gzipped = backup_dir.join("legacy.txt.gz");
+        let uncompressed = backup_dir.join("legacy.txt");
+        fs::remove_file(&gzipped).unwrap();
+        fs::write(&uncompressed, "pre-upgrade").unwrap();
+
+        let metadata_path = backup_dir.join("operation.json");
+        let mut metadata: BackupMetadata =
+            serde_json::from_str(&fs::read_to_string(&metadata_path).unwrap()).unwrap();
+        metadata.files[0].backup_path = uncompressed;
+        fs::write(
+            &metadata_path,
+            serde_json::to_string_pretty(&metadata).unwrap(),
+        )
+        .unwrap();
+
+        // Mutate the original so we can detect that restore ran.
+        fs::write(&original, "after-edit").unwrap();
+
+        manager.restore_backup(&backup_id).unwrap();
+        assert_eq!(fs::read_to_string(&original).unwrap(), "pre-upgrade");
+    }
+
+    // ============================================================================
     // cleanup_old_backups() behavior via MAX_BACKUPS
     // ============================================================================
 
@@ -1089,7 +1212,7 @@ mod tests {
 
         // Manually remove the backup file (simulating corruption)
         let backup_dir = manager.backups_dir().join(&backup_id);
-        let backup_file = backup_dir.join("test.txt");
+        let backup_file = backup_dir.join("test.txt.gz");
         fs::remove_file(&backup_file).unwrap();
 
         // Restore should still succeed but warn about missing file
