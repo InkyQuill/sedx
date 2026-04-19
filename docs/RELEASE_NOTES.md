@@ -404,7 +404,7 @@ cp ~/.sedx/config.toml.bak ~/.sedx/config.toml
 - **Windows support**: Enhanced Windows compatibility
 - **Fuzz testing**: Comprehensive fuzzing infrastructure
 
-See [ROADMAP.md](docs/ROADMAP.md) for full details.
+Track ongoing work in [CHANGELOG.md](../CHANGELOG.md) and the GitHub issues/milestones.
 
 ---
 
