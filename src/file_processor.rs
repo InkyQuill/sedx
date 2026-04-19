@@ -2182,10 +2182,10 @@ impl FileProcessor {
             state.line_num += 1;
             Ok(CycleResult::Continue)
         } else {
-            // At EOF: GNU sed prints the current pattern space and terminates.
-            // Push to side_effects so it is flushed before the cycle ends, then
-            // signal DeleteLine to break the command loop without the normal
-            // default-output path (which would double-print if not quiet).
+            // GNU sed parity: N at EOF prints the pattern space (unless -n)
+            // then terminates without reading another line. DeleteLine halts
+            // the command loop and suppresses the cycle-end auto-print so the
+            // pattern space is emitted exactly once via side_effects.
             if !self.no_default_output {
                 state.side_effects.push(state.pattern_space.clone());
             }
