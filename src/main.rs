@@ -688,12 +688,20 @@ fn commands_can_modify_files(commands: &[crate::command::Command]) -> bool {
             | Command::PrintLineNumber { .. } | Command::PrintFilename { .. }
             => continue,  // Skip read-only commands, keep checking
 
+            // Groups may be provably read-only (e.g. `{p; =}`) — recurse to
+            // avoid creating an unnecessary backup.
+            Command::Group { commands: inner, .. } => {
+                if commands_can_modify_files(inner) {
+                    return true;
+                }
+            }
+
             // Commands that MIGHT modify files
             Command::Substitution { .. } | Command::Delete { .. }
             | Command::Insert { .. } | Command::Append { .. } | Command::Change { .. }
             | Command::Hold { .. } | Command::HoldAppend { .. } | Command::Get { .. }
             | Command::GetAppend { .. } | Command::Exchange { .. }
-            | Command::Group { .. } | Command::DeleteFirstLine { .. }
+            | Command::DeleteFirstLine { .. }
             | Command::ReadFile { .. } | Command::WriteFile { .. } | Command::ReadLine { .. } | Command::WriteFirstLine { .. }
             | Command::ClearPatternSpace { .. }
             => return true,  // Found a modifying command
