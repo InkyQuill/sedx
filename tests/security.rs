@@ -36,7 +36,12 @@ fn write_file_command_rejects_parent_traversal() {
 
     sedx_isolated(dir)
         .current_dir(&work)
-        .args(["--no-backup", "--force", "w ../outside.txt", input.to_str().unwrap()])
+        .args([
+            "--no-backup",
+            "--force",
+            "w ../outside.txt",
+            input.to_str().unwrap(),
+        ])
         .assert()
         .failure()
         .stderr(predicate::str::contains("unsafe file I/O path"))
@@ -53,7 +58,11 @@ fn read_file_command_rejects_absolute_path() {
     let secret = write_file(dir, "secret.txt", "secret\n");
 
     sedx_isolated(dir)
-        .args(["--dry-run", &format!("r {}", secret.display()), input.to_str().unwrap()])
+        .args([
+            "--dry-run",
+            &format!("r {}", secret.display()),
+            input.to_str().unwrap(),
+        ])
         .assert()
         .failure()
         .stderr(predicate::str::contains("unsafe file I/O path"));
@@ -82,8 +91,7 @@ fn backup_restore_rejects_tampered_original_path() {
         .into_owned();
 
     let metadata_path = backups_dir.join(&backup_id).join("operation.json");
-    let mut metadata: serde_json::Value =
-        serde_json::from_str(&read_file(&metadata_path)).unwrap();
+    let mut metadata: serde_json::Value = serde_json::from_str(&read_file(&metadata_path)).unwrap();
     metadata["files"][0]["original_path"] =
         serde_json::Value::String(target.to_string_lossy().into_owned());
     std::fs::write(
@@ -96,7 +104,9 @@ fn backup_restore_rejects_tampered_original_path() {
         .args(["rollback", &backup_id])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("backup metadata path validation failed"));
+        .stderr(predicate::str::contains(
+            "backup metadata path validation failed",
+        ));
 
     assert_eq!(read_file(&target), "do not overwrite\n");
 }
@@ -113,10 +123,63 @@ fn edit_rejects_symlink_target() {
     symlink(&target, &link).unwrap();
 
     sedx_isolated(dir)
-        .args(["--no-backup", "--force", "s/secret/public/", link.to_str().unwrap()])
+        .args([
+            "--no-backup",
+            "--force",
+            "s/secret/public/",
+            link.to_str().unwrap(),
+        ])
         .assert()
         .failure()
         .stderr(predicate::str::contains("symlink targets are not allowed"));
 
     assert_eq!(read_file(&target), "secret\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn read_file_command_rejects_symlink_operand() {
+    use std::os::unix::fs::symlink;
+
+    let home = TempDir::new().unwrap();
+    let dir = home.path();
+    let input = write_file(dir, "input.txt", "alpha\n");
+    let target = write_file(dir, "target.txt", "secret\n");
+    let link = dir.join("link.txt");
+    symlink(&target, &link).unwrap();
+
+    sedx_isolated(dir)
+        .current_dir(dir)
+        .args(["--dry-run", "r link.txt", input.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("symlink targets are not allowed"));
+}
+
+#[cfg(unix)]
+#[test]
+fn write_file_command_rejects_symlink_directory_operand() {
+    use std::os::unix::fs::symlink;
+
+    let home = TempDir::new().unwrap();
+    let dir = home.path();
+    let outside = TempDir::new().unwrap();
+    let input = write_file(dir, "input.txt", "alpha\n");
+    let linkdir = dir.join("linkdir");
+    let outside_pwned = outside.path().join("pwned.txt");
+    symlink(outside.path(), &linkdir).unwrap();
+
+    sedx_isolated(dir)
+        .current_dir(dir)
+        .args([
+            "--no-backup",
+            "--force",
+            "w linkdir/pwned.txt",
+            input.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("symlink targets are not allowed"));
+
+    assert!(!outside_pwned.exists());
 }

@@ -42,12 +42,24 @@ pub fn validate_script_file_operand(path: &str) -> Result<PathBuf> {
 }
 
 pub fn ensure_not_symlink(path: &Path) -> Result<()> {
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => {
-            bail!("symlink targets are not allowed: {}", path.display());
+    ensure_no_symlink_components(path)
+}
+
+pub fn ensure_no_symlink_components(path: &Path) -> Result<()> {
+    let mut current = PathBuf::new();
+
+    for component in path.components() {
+        current.push(component);
+
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                bail!("symlink targets are not allowed: {}", current.display());
+            }
+            Ok(_) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err.into()),
         }
-        Ok(_) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err.into()),
     }
+
+    Ok(())
 }
