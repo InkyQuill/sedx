@@ -956,11 +956,21 @@ sedx 's/pattern/replacement/[flags]' file.txt
 The delimiter is the character immediately after `s`. Any non-newline
 character is accepted, so `s/foo/bar/`, `s#foo#bar#`, `s.foo.bar.`, and
 `s@foo@bar@` are all valid. A delimiter that appears inside the pattern or
-replacement is written with a leading backslash. That delimiter-origin escape
-is treated as literal delimiter text:
+replacement is written with a leading backslash. The substitution parser
+consumes the delimiter escape so the delimiter character can be part of the
+field. For patterns, that resulting character is then interpreted by the
+selected regex flavor:
 
 ```bash
-sedx 's.a\.b.X.'   # Matches literal "a.b", not "acb"
+sedx -B 's|a\|b|X|' # BRE: raw `|` is literal, so this matches "a|b"
+sedx -E 's|a\|b|X|' # ERE: raw `|` is alternation, so this matches "a" or "b"
+sedx    's|a\|b|X|' # PCRE/default: raw `|` is alternation
+```
+
+For replacements, escaped delimiter characters are preserved as literal
+replacement text and do not trigger replacement backreference expansion:
+
+```bash
 sedx 's&foo&a\&b&' # Replaces with literal "a&b"
 sedx 's$foo$a\$1$' # Replaces with literal "a$1"
 ```
