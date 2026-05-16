@@ -1138,14 +1138,6 @@ impl StreamProcessor {
         }
     }
 
-    fn check_stepping(&self, start: usize, step: usize) -> bool {
-        if self.current_line < start {
-            false
-        } else {
-            (self.current_line - start).is_multiple_of(step)
-        }
-    }
-
     fn address_matches_current(&self, address: &Address, line: &str) -> Result<bool> {
         try_matches_address(
             address,
@@ -1200,10 +1192,11 @@ impl StreamProcessor {
             (LastLine, LineNumber(end)) => {
                 Ok(self.current_is_last_line && self.current_line <= *end)
             }
-            (Step { start, step }, _) | (_, Step { start, step }) => {
-                Ok(self.check_stepping(*start, *step))
+            (start, end) => {
+                let start_match = self.address_matches_current(start, line)?;
+                let end_match = self.address_matches_current(end, line)?;
+                Ok(start_match || end_match)
             }
-            _ => Ok(false),
         }
     }
 }

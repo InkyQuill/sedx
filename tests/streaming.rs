@@ -460,6 +460,55 @@ fn forced_streaming_reversed_line_range_matches_only_start_line() {
         .stdout("four\n");
 }
 
+#[test]
+fn forced_streaming_negated_invalid_pattern_range_fails() {
+    let home = TempDir::new().unwrap();
+    let dir = home.path();
+    let file = write_file(dir, "input.txt", "one\ntwo\n");
+
+    sedx_isolated(dir)
+        .args([
+            "--streaming",
+            "-n",
+            "/[unterminated/!,/x/p",
+            file.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("Invalid regex pattern"));
+}
+
+#[test]
+fn forced_streaming_grouped_negated_invalid_pattern_range_fails() {
+    let home = TempDir::new().unwrap();
+    let dir = home.path();
+    let file = write_file(dir, "input.txt", "one\ntwo\n");
+
+    sedx_isolated(dir)
+        .args([
+            "--streaming",
+            "-n",
+            "{ /[unterminated/!,/x/p }",
+            file.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("Invalid regex pattern"));
+}
+
+#[test]
+fn forced_streaming_step_range_with_invalid_pattern_fails() {
+    let home = TempDir::new().unwrap();
+    let dir = home.path();
+    let file = write_file(dir, "input.txt", "one\ntwo\n");
+
+    sedx_isolated(dir)
+        .args(["--streaming", "-n", "/(/!,2p", file.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("Invalid regex pattern"));
+}
+
 #[cfg(unix)]
 #[test]
 fn streaming_via_symlink_is_rejected() {
