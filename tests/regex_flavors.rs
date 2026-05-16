@@ -187,13 +187,13 @@ fn escaped_delimiter_in_pattern_is_literal() {
 }
 
 #[test]
-fn escaped_regex_metachar_delimiter_in_pattern_is_literal() {
+fn escaped_regex_metachar_delimiter_in_pattern_is_regex_metacharacter() {
     sedx()
         .arg(r"s.a\.b.X.")
         .write_stdin("a.b\nacb\n")
         .assert()
         .success()
-        .stdout("X\nacb\n");
+        .stdout("X\nX\n");
 }
 
 #[test]

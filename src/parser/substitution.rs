@@ -15,10 +15,10 @@ where
     F: Fn(&str) -> String,
 {
     convert_preserving_escaped_delimiters(pattern, &convert_segment, |delimiter| {
-        if delimiter == '|' && !escape_pipe {
-            delimiter.to_string()
-        } else {
+        if delimiter == '|' && escape_pipe {
             regex::escape(&delimiter.to_string())
+        } else {
+            delimiter.to_string()
         }
     })
 }
