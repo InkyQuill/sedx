@@ -1075,6 +1075,8 @@ impl StreamProcessor {
         let key = MixedRangeKey {
             command_key: command_key.clone(),
         };
+        let end_re =
+            Regex::new(end_pat).with_context(|| format!("Invalid regex pattern: {}", end_pat))?;
         let state = self
             .mixed_range_states
             .entry(key)
@@ -1088,9 +1090,7 @@ impl StreamProcessor {
                 true
             }
             MixedRangeState::LookingForPattern => false,
-            MixedRangeState::InRangeUntilPattern { end_pattern } => {
-                let end_re = Regex::new(end_pattern)
-                    .with_context(|| format!("Invalid regex pattern: {}", end_pattern))?;
+            MixedRangeState::InRangeUntilPattern { .. } => {
                 if end_re.is_match(line) {
                     *state = MixedRangeState::LookingForPattern;
                 }
