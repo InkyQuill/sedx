@@ -1,5 +1,37 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
+use std::fs::{File, OpenOptions};
 use std::path::{Component, Path, PathBuf};
+
+pub fn create_file_no_follow(path: &Path) -> Result<File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(path)
+            .with_context(|| {
+                format!(
+                    "Failed to create file without following symlinks: {}",
+                    path.display()
+                )
+            })
+    }
+
+    #[cfg(not(unix))]
+    {
+        ensure_no_symlink_components(path)?;
+        OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)
+            .with_context(|| format!("Failed to create file: {}", path.display()))
+    }
+}
 
 pub fn validate_script_file_operand(path: &str) -> Result<PathBuf> {
     let candidate = Path::new(path);
@@ -73,7 +105,14 @@ pub fn validate_restore_target(path: &Path) -> Result<PathBuf> {
             }
             Ok(_) => {}
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(err) => return Err(err.into()),
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!(
+                        "backup metadata path validation failed for '{}'",
+                        current.display()
+                    )
+                });
+            }
         }
     }
 

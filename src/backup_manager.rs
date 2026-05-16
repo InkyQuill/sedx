@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use flate2::Compression;
 use flate2::read::GzDecoder;
@@ -26,6 +26,72 @@ fn append_gz_extension(path: &Path) -> PathBuf {
 /// True if `path`'s final extension is `.gz`.
 fn is_gzipped(path: &Path) -> bool {
     path.extension().is_some_and(|ext| ext == "gz")
+}
+
+fn path_identity(path: &Path) -> String {
+    fn update_hash(hash: u64, byte: u8) -> u64 {
+        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+    }
+
+    #[cfg(unix)]
+    let hash = {
+        use std::os::unix::ffi::OsStrExt;
+
+        path.as_os_str()
+            .as_bytes()
+            .iter()
+            .fold(0xcbf29ce484222325, |hash, byte| update_hash(hash, *byte))
+    };
+
+    #[cfg(windows)]
+    let hash = {
+        use std::os::windows::ffi::OsStrExt;
+
+        path.as_os_str()
+            .encode_wide()
+            .flat_map(u16::to_le_bytes)
+            .fold(0xcbf29ce484222325, update_hash)
+    };
+
+    #[cfg(not(any(unix, windows)))]
+    let hash = path
+        .to_string_lossy()
+        .as_bytes()
+        .iter()
+        .fold(0xcbf29ce484222325, |hash, byte| update_hash(hash, *byte));
+
+    format!("path-v1-{hash:016x}")
+}
+
+fn backup_path_for_original(backup_dir: &Path, original_path: &Path) -> PathBuf {
+    append_gz_extension(&backup_dir.join(path_identity(original_path)))
+}
+
+fn metadata_backup_path(backup_dir: &Path, backup_path: &Path) -> Result<PathBuf> {
+    if backup_path
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        bail!(
+            "backup metadata path validation failed for '{}': parent traversal is not allowed",
+            backup_path.display()
+        );
+    }
+
+    let candidate = if backup_path.is_absolute() || backup_path.starts_with(backup_dir) {
+        backup_path.to_path_buf()
+    } else {
+        backup_dir.join(backup_path)
+    };
+
+    if !candidate.starts_with(backup_dir) {
+        bail!(
+            "backup metadata path validation failed for '{}': backup path is outside backup directory",
+            candidate.display()
+        );
+    }
+
+    Ok(candidate)
 }
 
 fn backup_filename_matches_original(backup_path: &Path, original_path: &Path) -> bool {
@@ -68,13 +134,19 @@ fn restore_file(src: &Path, dst: &Path) -> Result<()> {
         let source = fs::File::open(src)
             .with_context(|| format!("Failed to open backup: {}", src.display()))?;
         let mut decoder = GzDecoder::new(BufReader::new(source));
-        let dest = fs::File::create(dst)
+        let dest = crate::path_policy::create_file_no_follow(dst)
             .with_context(|| format!("Failed to create restore target: {}", dst.display()))?;
         let mut writer = BufWriter::new(dest);
         io_copy(&mut decoder, &mut writer)
             .with_context(|| format!("Failed to decompress into: {}", dst.display()))?;
     } else {
-        fs::copy(src, dst).with_context(|| format!("Failed to restore file: {}", dst.display()))?;
+        let mut source = fs::File::open(src)
+            .with_context(|| format!("Failed to open backup: {}", src.display()))?;
+        let dest = crate::path_policy::create_file_no_follow(dst)
+            .with_context(|| format!("Failed to create restore target: {}", dst.display()))?;
+        let mut writer = BufWriter::new(dest);
+        io_copy(&mut source, &mut writer)
+            .with_context(|| format!("Failed to restore file: {}", dst.display()))?;
     }
     Ok(())
 }
@@ -91,6 +163,8 @@ pub struct BackupMetadata {
 pub struct FileBackup {
     pub original_path: PathBuf,
     pub backup_path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path_identity: Option<String>,
 }
 
 pub struct BackupManager {
@@ -214,11 +288,8 @@ impl BackupManager {
                 continue;
             }
 
-            let file_name = file_path
-                .file_name()
-                .ok_or_else(|| anyhow::anyhow!("Invalid file name: {}", file_path.display()))?;
-
-            let backup_path = append_gz_extension(&backup_dir.join(file_name));
+            let identity = path_identity(file_path);
+            let backup_path = backup_path_for_original(&backup_dir, file_path);
 
             gzip_copy(file_path, &backup_path)
                 .with_context(|| format!("Failed to backup file: {}", file_path.display()))?;
@@ -226,6 +297,7 @@ impl BackupManager {
             file_backups.push(FileBackup {
                 original_path: file_path.clone(),
                 backup_path,
+                path_identity: Some(identity),
             });
         }
 
@@ -268,13 +340,23 @@ impl BackupManager {
         for file_backup in &metadata.files {
             let original_path =
                 crate::path_policy::validate_restore_target(&file_backup.original_path)?;
-            if !backup_filename_matches_original(&file_backup.backup_path, &original_path) {
-                anyhow::bail!(
+            let backup_path = metadata_backup_path(&backup_dir, &file_backup.backup_path)?;
+            if let Some(identity) = &file_backup.path_identity {
+                let expected_identity = path_identity(&original_path);
+                let expected_backup_path = backup_path_for_original(&backup_dir, &original_path);
+                if identity != &expected_identity || backup_path != expected_backup_path {
+                    bail!(
+                        "backup metadata path validation failed for '{}': backup entry does not match original path",
+                        original_path.display()
+                    );
+                }
+            } else if !backup_filename_matches_original(&backup_path, &original_path) {
+                bail!(
                     "backup metadata path validation failed for '{}': backup entry does not match original path",
                     original_path.display()
                 );
             }
-            restore_entries.push((file_backup.backup_path.clone(), original_path));
+            restore_entries.push((backup_path, original_path));
         }
 
         for (backup_path, original_path) in restore_entries {
@@ -456,7 +538,7 @@ mod tests {
         assert!(metadata_path.exists(), "Metadata file should exist");
 
         // Verify gzipped backup file exists.
-        let backup_file = backup_dir.join("test.txt.gz");
+        let backup_file = backup_path_for_original(&backup_dir, &test_file);
         assert!(backup_file.exists(), "Gzipped backup file should exist");
 
         // Verify backup round-trips: decompress into a temp file and compare
@@ -498,9 +580,9 @@ mod tests {
         assert!(backup_dir.exists());
 
         // Verify all files were backed up (with .gz suffix).
-        assert!(backup_dir.join("file1.txt.gz").exists());
-        assert!(backup_dir.join("file2.txt.gz").exists());
-        assert!(backup_dir.join("file3.txt.gz").exists());
+        assert!(backup_path_for_original(&backup_dir, &file1).exists());
+        assert!(backup_path_for_original(&backup_dir, &file2).exists());
+        assert!(backup_path_for_original(&backup_dir, &file3).exists());
 
         // Verify metadata
         let metadata_path = backup_dir.join("operation.json");
@@ -520,7 +602,7 @@ mod tests {
             .unwrap();
 
         let backup_dir = manager.backups_dir().join(&backup_id);
-        let backup_file = backup_dir.join("large.txt.gz");
+        let backup_file = backup_path_for_original(&backup_dir, &large_file);
         assert!(backup_file.exists(), "Gzipped backup file should exist");
 
         // A compressible 1 MB blob of `x` gzips to well under 10 KB —
@@ -566,13 +648,13 @@ mod tests {
         let backup_dir = manager.backups_dir().join(&backup_id);
 
         // Verify all files with special characters were backed up (gzipped).
-        for (name, _) in &test_cases {
-            let gzipped = append_gz_extension(&backup_dir.join(name));
+        for file in &files {
+            let gzipped = backup_path_for_original(&backup_dir, file);
             assert!(
                 gzipped.exists(),
-                "File '{}' should exist in backup as {}.gz",
-                name,
-                name,
+                "File '{}' should exist in backup as {}",
+                file.display(),
+                gzipped.display(),
             );
         }
     }
@@ -1140,7 +1222,7 @@ mod tests {
             .create_backup("s/a/b/", std::slice::from_ref(&original))
             .unwrap();
         let backup_dir = manager.backups_dir().join(&backup_id);
-        let gzipped = backup_dir.join("legacy.txt.gz");
+        let gzipped = backup_path_for_original(&backup_dir, &original);
         let uncompressed = backup_dir.join("legacy.txt");
         fs::remove_file(&gzipped).unwrap();
         fs::write(&uncompressed, "pre-upgrade").unwrap();
@@ -1149,6 +1231,7 @@ mod tests {
         let mut metadata: BackupMetadata =
             serde_json::from_str(&fs::read_to_string(&metadata_path).unwrap()).unwrap();
         metadata.files[0].backup_path = uncompressed;
+        metadata.files[0].path_identity = None;
         fs::write(
             &metadata_path,
             serde_json::to_string_pretty(&metadata).unwrap(),
@@ -1228,7 +1311,7 @@ mod tests {
 
         // Manually remove the backup file (simulating corruption)
         let backup_dir = manager.backups_dir().join(&backup_id);
-        let backup_file = backup_dir.join("test.txt.gz");
+        let backup_file = backup_path_for_original(&backup_dir, &test_file);
         fs::remove_file(&backup_file).unwrap();
 
         // Restore should still succeed but warn about missing file

@@ -5,7 +5,7 @@ use crate::file_processor::common::{
 };
 use anyhow::{Context, Result};
 use std::collections::HashMap;
-use std::fs::{self, File};
+use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
@@ -364,7 +364,8 @@ impl FileProcessor {
 
         let new_content = result_lines.join("\n") + "\n";
         preserve_perms_after(file_path, || {
-            fs::write(file_path, &new_content)
+            let mut file = crate::path_policy::create_file_no_follow(file_path)?;
+            file.write_all(new_content.as_bytes())
                 .with_context(|| format!("Failed to write file: {}", file_path.display()))
         })?;
 
@@ -731,7 +732,7 @@ impl FileProcessor {
                 } else {
                     let safe_path = crate::path_policy::validate_script_file_operand(filename)?;
                     crate::path_policy::ensure_not_symlink(&safe_path)?;
-                    let file = File::create(&safe_path)?;
+                    let file = crate::path_policy::create_file_no_follow(&safe_path)?;
                     let mut writer = BufWriter::new(file);
                     writeln!(writer, "{}", state.pattern_space)?;
                     writer.flush()?;
@@ -747,7 +748,7 @@ impl FileProcessor {
                 } else {
                     let safe_path = crate::path_policy::validate_script_file_operand(filename)?;
                     crate::path_policy::ensure_not_symlink(&safe_path)?;
-                    let file = File::create(&safe_path)?;
+                    let file = crate::path_policy::create_file_no_follow(&safe_path)?;
                     let mut writer = BufWriter::new(file);
                     writeln!(writer, "{}", first)?;
                     writer.flush()?;

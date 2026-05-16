@@ -145,6 +145,53 @@ fn backup_restore_rejects_tampered_original_path() {
     assert_eq!(read_file(&target), "do not overwrite\n");
 }
 
+#[test]
+fn backup_restore_rejects_same_basename_tampered_original_path() {
+    let home = TempDir::new().unwrap();
+    let dir = home.path();
+    let safe_dir = dir.join("safe");
+    let other_dir = dir.join("other");
+    std::fs::create_dir(&safe_dir).unwrap();
+    std::fs::create_dir(&other_dir).unwrap();
+    let input = write_file(&safe_dir, "input.txt", "foo\n");
+    let other = write_file(&other_dir, "input.txt", "do not overwrite\n");
+
+    sedx_isolated(dir)
+        .args(["s/foo/bar/", input.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let backups_dir = dir.join(".sedx").join("backups");
+    let backup_id = std::fs::read_dir(&backups_dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .find(|entry| entry.path().is_dir())
+        .unwrap()
+        .file_name()
+        .to_string_lossy()
+        .into_owned();
+
+    let metadata_path = backups_dir.join(&backup_id).join("operation.json");
+    let mut metadata: serde_json::Value = serde_json::from_str(&read_file(&metadata_path)).unwrap();
+    metadata["files"][0]["original_path"] =
+        serde_json::Value::String(other.to_string_lossy().into_owned());
+    std::fs::write(
+        &metadata_path,
+        serde_json::to_string_pretty(&metadata).unwrap(),
+    )
+    .unwrap();
+
+    sedx_isolated(dir)
+        .args(["rollback", &backup_id])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "backup metadata path validation failed",
+        ));
+
+    assert_eq!(read_file(&other), "do not overwrite\n");
+}
+
 #[cfg(unix)]
 #[test]
 fn edit_rejects_symlink_target() {

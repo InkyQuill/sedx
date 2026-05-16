@@ -408,6 +408,7 @@ mod tests {
                 .map(|f| FileBackup {
                     original_path: PathBuf::from(f),
                     backup_path: PathBuf::from(format!("/tmp/backup/{}", f)),
+                    path_identity: None,
                 })
                 .collect(),
         }
