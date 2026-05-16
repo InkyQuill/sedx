@@ -340,7 +340,7 @@ fn streaming_change_pattern_range_collapses_to_single_replacement() {
 
 #[cfg(unix)]
 #[test]
-fn streaming_via_symlink_writes_to_target() {
+fn streaming_via_symlink_is_rejected() {
     use std::os::unix::fs::symlink;
 
     let home = TempDir::new().unwrap();
@@ -352,10 +352,11 @@ fn streaming_via_symlink_writes_to_target() {
     sedx_isolated(dir)
         .args(["--streaming", "s/bar/BAR/", link.to_str().unwrap()])
         .assert()
-        .success();
+        .failure()
+        .stderr(predicates::str::contains("symlink targets are not allowed"));
 
     assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
-    assert_eq!(read_file(&target), "foo\nBAR\nbaz\n");
+    assert_eq!(read_file(&target), "foo\nbar\nbaz\n");
 }
 
 /// Opt-in via `cargo test -- --ignored`. Generates a ~100 MB input file and

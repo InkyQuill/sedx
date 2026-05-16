@@ -1,4 +1,4 @@
-//! Tests for atomic write semantics: Unix mode preservation and symlink follow.
+//! Tests for atomic write semantics: Unix mode preservation and symlink rejection.
 //! Covers both the in-memory (<100MB) and streaming (≥100MB) write paths.
 //!
 //! Every test here exercises a Unix-only invariant (mode bits, symlinks), so
@@ -13,10 +13,7 @@ use tempfile::TempDir;
 
 #[cfg(unix)]
 #[test]
-fn editing_via_symlink_writes_to_target_not_link() {
-    // Regression: editing `link` that points at `target` must modify `target`
-    // in place and leave the symlink intact. Previously the atomic rename
-    // replaced the symlink with a regular file.
+fn editing_via_symlink_is_rejected() {
     use std::os::unix::fs::symlink;
 
     let home = TempDir::new().unwrap();
@@ -28,11 +25,11 @@ fn editing_via_symlink_writes_to_target_not_link() {
     sedx_isolated(home.path())
         .args(["s/old/new/", link.to_str().unwrap()])
         .assert()
-        .success();
+        .failure()
+        .stderr(predicates::str::contains("symlink targets are not allowed"));
 
-    // Link still a symlink, target updated.
     assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
-    assert_eq!(read_file(&target), "new\n");
+    assert_eq!(read_file(&target), "old\n");
 }
 
 #[cfg(unix)]

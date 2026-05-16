@@ -104,6 +104,8 @@ impl StreamProcessor {
         };
 
         if !self.dry_run {
+            crate::path_policy::ensure_not_symlink(file_path)?;
+
             preserve_perms_after(file_path, || {
                 temp_file.persist(file_path).with_context(|| {
                     format!("Failed to persist temp file to {}", file_path.display())

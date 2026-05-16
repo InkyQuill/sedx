@@ -354,6 +354,8 @@ impl FileProcessor {
     }
 
     pub fn apply_to_file(&mut self, file_path: &Path) -> Result<usize> {
+        crate::path_policy::ensure_not_symlink(file_path)?;
+
         let content = fs::read_to_string(file_path)
             .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
 

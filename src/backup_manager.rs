@@ -28,6 +28,17 @@ fn is_gzipped(path: &Path) -> bool {
     path.extension().is_some_and(|ext| ext == "gz")
 }
 
+fn backup_filename_matches_original(backup_path: &Path, original_path: &Path) -> bool {
+    let Some(backup_name) = backup_path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let Some(original_name) = original_path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+
+    backup_name == original_name || backup_name.strip_suffix(GZ_EXT) == Some(original_name)
+}
+
 /// Gzip-copy `src` to `dst` using streaming I/O so memory stays flat for
 /// large files. The destination gets the full gzip container (magic bytes +
 /// header + deflate stream + trailer), suitable for standard `gunzip`.
@@ -253,25 +264,29 @@ impl BackupManager {
         let metadata: BackupMetadata =
             serde_json::from_str(&metadata_json).context("Failed to parse metadata")?;
 
+        let mut restore_entries = Vec::with_capacity(metadata.files.len());
         for file_backup in &metadata.files {
-            if !file_backup.backup_path.exists() {
-                eprintln!(
-                    "Warning: Backup file missing: {}",
-                    file_backup.backup_path.display()
+            let original_path =
+                crate::path_policy::validate_restore_target(&file_backup.original_path)?;
+            if !backup_filename_matches_original(&file_backup.backup_path, &original_path) {
+                anyhow::bail!(
+                    "backup metadata path validation failed for '{}': backup entry does not match original path",
+                    original_path.display()
                 );
+            }
+            restore_entries.push((file_backup.backup_path.clone(), original_path));
+        }
+
+        for (backup_path, original_path) in restore_entries {
+            if !backup_path.exists() {
+                eprintln!("Warning: Backup file missing: {}", backup_path.display());
                 continue;
             }
 
-            restore_file(&file_backup.backup_path, &file_backup.original_path).with_context(
-                || {
-                    format!(
-                        "Failed to restore file: {}",
-                        file_backup.original_path.display()
-                    )
-                },
-            )?;
+            restore_file(&backup_path, &original_path)
+                .with_context(|| format!("Failed to restore file: {}", original_path.display()))?;
 
-            println!("Restored: {}", file_backup.original_path.display());
+            println!("Restored: {}", original_path.display());
         }
 
         // Remove backup after successful restore

@@ -182,6 +182,9 @@ fn execute_command(
     let mut file_paths = Vec::new();
     for f in files {
         let path = PathBuf::from(f);
+        if can_modify_files && !dry_run {
+            path_policy::ensure_not_symlink(&path)?;
+        }
         if let Ok(p) = fs::canonicalize(&path) {
             file_paths.push(p);
         } else {
