@@ -28,10 +28,8 @@ pub fn find_command_char(cmd: &str) -> Option<(usize, char)> {
                 // Special case for 's' - it must be followed by a delimiter
                 if c == 's' {
                     let rest = &cmd[pos + 1..];
-                    if let Some(delim) = rest.chars().next() {
-                        if "/#:|".contains(delim) {
-                            return Some((pos, 's'));
-                        }
+                    if !rest.is_empty() {
+                        return Some((pos, 's'));
                     }
                     continue; // False alarm 's' (maybe in a filename)
                 }

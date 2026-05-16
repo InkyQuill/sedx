@@ -164,6 +164,17 @@ fn group_parser_ignores_literal_closing_brace_in_substitution_replacement() {
 }
 
 #[test]
+fn group_parser_ignores_literal_closing_brace_in_arbitrary_delimiter_substitution_replacement() {
+    common::sedx()
+        .arg(r"{s@foo@}@;p}")
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("}\n}\n")
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
 fn group_parser_ignores_literal_closing_brace_in_substitution_pattern() {
     common::sedx()
         .args(["-n", r"{s/foo}bar/X/;p}"])

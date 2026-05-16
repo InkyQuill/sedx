@@ -148,9 +148,7 @@ pub fn parse_sed_expression(expr: &str) -> Result<Vec<Command>> {
 
         if c == 's' {
             if let Some(&delimiter) = chars.peek() {
-                if is_substitution_delimiter(delimiter)
-                    && is_substitution_command_start(&current_expr, delimiter)
-                {
+                if is_substitution_command_start(&current_expr, delimiter) {
                     current_expr.push(c);
                     current_expr.push(delimiter);
                     chars.next();
@@ -206,10 +204,6 @@ struct SubstitutionSplitState {
     delimiter: char,
     closed_sections: u8,
     escaped: bool,
-}
-
-fn is_substitution_delimiter(c: char) -> bool {
-    matches!(c, '/' | '#' | ':' | '|')
 }
 
 fn is_substitution_command_start(current_expr: &str, delimiter: char) -> bool {
@@ -349,9 +343,7 @@ pub(crate) fn find_structural_group_close(expr: &str, open_pos: usize) -> Option
 
         if c == 's' {
             if let Some((_, delimiter)) = chars.peek().copied() {
-                if is_substitution_delimiter(delimiter)
-                    && is_substitution_command_start(&current_expr, delimiter)
-                {
+                if is_substitution_command_start(&current_expr, delimiter) {
                     current_expr.push(c);
                     current_expr.push(delimiter);
                     chars.next();

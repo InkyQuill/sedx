@@ -267,6 +267,16 @@ fn semicolon_inside_substitution_pattern_does_not_split_command() {
 }
 
 #[test]
+fn semicolon_inside_arbitrary_delimiter_substitution_pattern_does_not_split_command() {
+    sedx()
+        .arg("s@a;b@X@")
+        .write_stdin("a;b\n")
+        .assert()
+        .success()
+        .stdout("X\n");
+}
+
+#[test]
 fn semicolon_inside_substitution_replacement_does_not_split_command() {
     sedx()
         .arg("s/foo/a;b/")

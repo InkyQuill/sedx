@@ -541,7 +541,9 @@ applied per-cycle with proper state tracking across cycles.
 - `g` - Global replacement (all occurrences in line)
 - `i` - Case-insensitive matching
 - `p` - Print line if substitution made
-- `1-9` - Replace only Nth occurrence
+- `0` - Replace all occurrences (same replacement scope as `g`)
+- `N` - Replace only the Nth occurrence; multi-digit values are supported
+- `Ng` - Replace from the Nth occurrence onward
 - (Future: `w file` - Write to file)
 
 **Examples:**
@@ -566,6 +568,8 @@ sedx -n 's/foo/bar/p' file.txt
 
 # Numbered substitution
 sedx 's/foo/bar/2' file.txt  # Replace only 2nd occurrence
+sedx 's/foo/bar/10' file.txt # Replace only 10th occurrence
+sedx 's/foo/bar/3g' file.txt # Replace from 3rd occurrence onward
 ```
 
 ---
@@ -934,7 +938,7 @@ sedx 's/pattern/replacement/[flags]' file.txt
 **Characteristics:**
 - Uses delimiter (typically `/`)
 - Explicit flags: `g` for global, `i` for case-insensitive, etc.
-- Modern backreferences: `$1`, `$2` (or `\1`, `\2` in BRE mode)
+- Modern backreferences in PCRE mode: `$1`, `$2` (or sed-style `\1`, `\2` in BRE/ERE modes)
 - Compatible with GNU sed syntax
 
 **Examples:**
@@ -975,7 +979,7 @@ sedx -B 's/\(foo\)\(bar\)/\2\1/' file.txt  # BRE backreferences (\1, \2)
 **ERE Mode (-E flag):**
 ```bash
 sedx -E 's/(foo|bar)/baz/g' file.txt        # Extended syntax (no PCRE features)
-sedx -E 's/(foo)(bar)/\2\1/' file.txt      # Uses $1, $2 internally
+sedx -E 's/(foo)(bar)/\2\1/' file.txt      # Sed-style backreferences
 ```
 
 ---
@@ -988,6 +992,9 @@ sedx 's/foo/bar/g' file.txt      # Global (all occurrences in line)
 sedx 's/foo/bar/i' file.txt      # Case-insensitive
 sedx 's/foo/bar/gi' file.txt     # Both global and case-insensitive
 sedx 's/foo/bar/2' file.txt      # Replace only 2nd occurrence
+sedx 's/foo/bar/10' file.txt     # Replace only 10th occurrence
+sedx 's/foo/bar/0' file.txt      # Replace all occurrences
+sedx 's/foo/bar/3g' file.txt     # Replace from 3rd occurrence onward
 sedx 's/foo/bar/p' file.txt      # Print line if substitution made
 ```
 
@@ -995,7 +1002,13 @@ sedx 's/foo/bar/p' file.txt      # Print line if substitution made
 - `g` - Global replacement (all occurrences in line)
 - `i` / `I` - Case-insensitive matching
 - `p` - Print line if substitution made
-- `1`-`9` - Replace only Nth occurrence
+- `0` - Replace all occurrences
+- `N` - Replace only the Nth occurrence; multi-digit values are supported
+- `Ng` - Replace from the Nth occurrence onward
+
+Only one numeric flag is allowed. Expressions such as `s/foo/bar/23` are
+interpreted as the 23rd occurrence, while duplicate numeric flags such as
+`s/foo/bar/2g3` are rejected.
 
 ---
 
@@ -1031,7 +1044,7 @@ sedx -B 's/\(foo\)\(bar\)/\2\1/' file.txt  # "foobar" → "barfoo"
 
 **ERE Mode (-E flag):**
 ```bash
-sedx -E 's/(foo)(bar)/$2$1/' file.txt  # Uses $1, $2 internally
+sedx -E 's/(foo)(bar)/\2\1/' file.txt  # "foobar" → "barfoo"
 ```
 
 ---
@@ -1047,6 +1060,17 @@ $ sedx 's/(\d+)/$1user/' file.txt
 
 $ sedx 's/(\d+)/${1}user/' file.txt  # Unambiguous
 123 → 123user
+```
+
+In default PCRE mode, `$&` expands to the whole match. To keep a literal `$&`,
+escape the dollar using Rust regex replacement syntax:
+
+```bash
+$ sedx 's/foo/[$&]/' file.txt
+foo → [foo]
+
+$ sedx 's/foo/[$$&]/' file.txt
+foo → [$&]
 ```
 
 ---
@@ -1510,7 +1534,7 @@ sedx --color=never 's/foo/bar/g' file.txt | less
 | `sed -n '1,10p' file` | `sedx -n '1,10p' file` | Same |
 | `sed -e 's/a/b/' -e 's/c/d/' file` | `sedx -e 's/a/b/' -e 's/c/d/' file` | Same |
 | `sed -f script.sed file` | `sedx -f script.sed file` | Same (v0.4.0+) |
-| `sed -E 's/(foo|bar)/baz/' file` | `sedx 's/(foo|bar)/baz/' file` | SedX default is ERE |
+| `sed -E 's/(foo|bar)/baz/' file` | `sedx 's/(foo|bar)/baz/' file` | SedX default is PCRE |
 | `sed 's/\(foo\|bar\)/baz/' file` | `sedx -B 's/\(foo\|bar\)/baz/' file` | Use `-B` for BRE |
 
 ---
