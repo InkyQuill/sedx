@@ -502,7 +502,7 @@ fn find_invalid_quantifier(pattern: &str) -> Option<usize> {
                 {
                     // Check if it's a valid quantifier like {3}, {3,}, {3,5}
                     let closing = rest.find('}');
-                    if closing.is_none() || (closing.is_some() && closing.unwrap() < 2) {
+                    if closing.is_none_or(|position| position < 2) {
                         return Some(i);
                     }
                 }

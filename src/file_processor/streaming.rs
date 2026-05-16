@@ -1215,24 +1215,28 @@ mod tests {
     use crate::parser::Parser;
     use std::fs;
     use std::io::Write;
+    use std::path::PathBuf;
+
+    fn write_test_file(file_name: &str, content: &str) -> (tempfile::TempDir, PathBuf) {
+        let temp_dir = tempfile::TempDir::new().expect("Failed to create temp dir");
+        let test_file_path = temp_dir.path().join(file_name);
+        let mut file = fs::File::create(&test_file_path).expect("Failed to create test file");
+        file.write_all(content.as_bytes())
+            .expect("Failed to write to test file");
+        (temp_dir, test_file_path)
+    }
 
     #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_passthrough() {
-        let test_file_path = "/tmp/test_streaming.txt";
         let original_content = "line 1\nline 2\nline 3\nline 4\nline 5\n";
-
-        {
-            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
-            file.write_all(original_content.as_bytes())
-                .expect("Failed to write to test file");
-        }
+        let (_temp_dir, test_file_path) = write_test_file("test_streaming.txt", original_content);
 
         let parser = Parser::new(RegexFlavor::PCRE);
         let commands = parser.parse("").expect("Failed to parse empty expression");
         let mut processor = StreamProcessor::new(commands);
 
-        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        let result = processor.process_streaming_forced(&test_file_path);
         assert!(result.is_ok(), "Processing should succeed");
 
         let diff = result.unwrap();
@@ -1242,26 +1246,19 @@ mod tests {
         );
 
         let processed_content =
-            fs::read_to_string(test_file_path).expect("Failed to read processed file");
+            fs::read_to_string(&test_file_path).expect("Failed to read processed file");
         assert_eq!(
             processed_content, original_content,
             "Content should be unchanged"
         );
-
-        fs::remove_file(test_file_path).ok();
     }
 
     #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_substitution() {
-        let test_file_path = "/tmp/test_substitution.txt";
         let original_content = "foo bar\nbaz foo\nfoo foo\n";
-
-        {
-            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
-            file.write_all(original_content.as_bytes())
-                .expect("Failed to write to test file");
-        }
+        let (_temp_dir, test_file_path) =
+            write_test_file("test_substitution.txt", original_content);
 
         let parser = Parser::new(RegexFlavor::PCRE);
         let commands = parser
@@ -1269,31 +1266,23 @@ mod tests {
             .expect("Failed to parse substitution");
         let mut processor = StreamProcessor::new(commands);
 
-        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        let result = processor.process_streaming_forced(&test_file_path);
         assert!(result.is_ok(), "Processing should succeed");
 
         let diff = result.unwrap();
         assert_eq!(diff.changes.len(), 3, "Should have 3 line changes");
 
         let processed_content =
-            fs::read_to_string(test_file_path).expect("Failed to read processed file");
+            fs::read_to_string(&test_file_path).expect("Failed to read processed file");
         let expected = "QUX bar\nbaz QUX\nQUX foo\n";
         assert_eq!(processed_content, expected, "Content should be substituted");
-
-        fs::remove_file(test_file_path).ok();
     }
 
     #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_global_substitution() {
-        let test_file_path = "/tmp/test_global.txt";
         let original_content = "foo foo foo\nbar foo bar\n";
-
-        {
-            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
-            file.write_all(original_content.as_bytes())
-                .expect("Failed to write to test file");
-        }
+        let (_temp_dir, test_file_path) = write_test_file("test_global.txt", original_content);
 
         let parser = Parser::new(RegexFlavor::PCRE);
         let commands = parser
@@ -1301,31 +1290,23 @@ mod tests {
             .expect("Failed to parse substitution");
         let mut processor = StreamProcessor::new(commands);
 
-        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        let result = processor.process_streaming_forced(&test_file_path);
         assert!(result.is_ok(), "Processing should succeed");
 
         let processed_content =
-            fs::read_to_string(test_file_path).expect("Failed to read processed file");
+            fs::read_to_string(&test_file_path).expect("Failed to read processed file");
         let expected = "QUX QUX QUX\nbar QUX bar\n";
         assert_eq!(
             processed_content, expected,
             "All occurrences should be substituted"
         );
-
-        fs::remove_file(test_file_path).ok();
     }
 
     #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_numbered_substitution() {
-        let test_file_path = "/tmp/test_numbered.txt";
         let original_content = "foo foo foo foo\n";
-
-        {
-            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
-            file.write_all(original_content.as_bytes())
-                .expect("Failed to write to test file");
-        }
+        let (_temp_dir, test_file_path) = write_test_file("test_numbered.txt", original_content);
 
         let parser = Parser::new(RegexFlavor::PCRE);
         let commands = parser
@@ -1333,31 +1314,24 @@ mod tests {
             .expect("Failed to parse substitution");
         let mut processor = StreamProcessor::new(commands);
 
-        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        let result = processor.process_streaming_forced(&test_file_path);
         assert!(result.is_ok(), "Processing should succeed");
 
         let processed_content =
-            fs::read_to_string(test_file_path).expect("Failed to read processed file");
+            fs::read_to_string(&test_file_path).expect("Failed to read processed file");
         let expected = "foo QUX foo foo\n";
         assert_eq!(
             processed_content, expected,
             "Only 2nd occurrence should be substituted"
         );
-
-        fs::remove_file(test_file_path).ok();
     }
 
     #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_case_insensitive() {
-        let test_file_path = "/tmp/test_case_insensitive.txt";
         let original_content = "FOO bar Foo baz\n";
-
-        {
-            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
-            file.write_all(original_content.as_bytes())
-                .expect("Failed to write to test file");
-        }
+        let (_temp_dir, test_file_path) =
+            write_test_file("test_case_insensitive.txt", original_content);
 
         let parser = Parser::new(RegexFlavor::PCRE);
         let commands = parser
@@ -1365,75 +1339,57 @@ mod tests {
             .expect("Failed to parse substitution");
         let mut processor = StreamProcessor::new(commands);
 
-        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        let result = processor.process_streaming_forced(&test_file_path);
         assert!(result.is_ok(), "Processing should succeed");
 
         let processed_content =
-            fs::read_to_string(test_file_path).expect("Failed to read processed file");
+            fs::read_to_string(&test_file_path).expect("Failed to read processed file");
         let expected = "QUX bar QUX baz\n";
         assert_eq!(
             processed_content, expected,
             "All case variants should be substituted"
         );
-
-        fs::remove_file(test_file_path).ok();
     }
 
     #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_delete() {
-        let test_file_path = "/tmp/test_delete.txt";
         let original_content = "line 1\nline 2\nline 3\n";
-
-        {
-            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
-            file.write_all(original_content.as_bytes())
-                .expect("Failed to write to test file");
-        }
+        let (_temp_dir, test_file_path) = write_test_file("test_delete.txt", original_content);
 
         let parser = Parser::new(RegexFlavor::PCRE);
         let commands = parser.parse(r"1,$d").expect("Failed to parse delete");
         let mut processor = StreamProcessor::new(commands);
 
-        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        let result = processor.process_streaming_forced(&test_file_path);
         assert!(result.is_ok(), "Processing should succeed");
 
         let diff = result.unwrap();
         assert_eq!(diff.changes.len(), 3, "Should track 3 deleted lines");
 
         let processed_content =
-            fs::read_to_string(test_file_path).expect("Failed to read processed file");
+            fs::read_to_string(&test_file_path).expect("Failed to read processed file");
         assert_eq!(processed_content, "", "All lines should be deleted");
-
-        fs::remove_file(test_file_path).ok();
     }
 
     #[cfg_attr(not(unix), ignore)]
     #[test]
     fn test_streaming_print() {
-        let test_file_path = "/tmp/test_print.txt";
         let original_content = "line 1\nline 2\nline 3\n";
-
-        {
-            let mut file = fs::File::create(test_file_path).expect("Failed to create test file");
-            file.write_all(original_content.as_bytes())
-                .expect("Failed to write to test file");
-        }
+        let (_temp_dir, test_file_path) = write_test_file("test_print.txt", original_content);
 
         let parser = Parser::new(RegexFlavor::PCRE);
         let commands = parser.parse(r"1,$p").expect("Failed to parse print");
         let mut processor = StreamProcessor::new(commands);
 
-        let result = processor.process_streaming_forced(Path::new(test_file_path));
+        let result = processor.process_streaming_forced(&test_file_path);
         assert!(result.is_ok(), "Processing should succeed");
 
         let processed_content =
-            fs::read_to_string(test_file_path).expect("Failed to read processed file");
+            fs::read_to_string(&test_file_path).expect("Failed to read processed file");
         assert_eq!(
             processed_content, original_content,
             "File should be unchanged"
         );
-
-        fs::remove_file(test_file_path).ok();
     }
 }

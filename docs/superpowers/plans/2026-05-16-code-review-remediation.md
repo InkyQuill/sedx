@@ -1119,7 +1119,7 @@ git commit -m "fix: make streaming default threshold based"
 - Modify: `src/file_processor/in_memory.rs`
 - Modify: `src/file_processor/streaming.rs`
 
-- [ ] **Step 1: Replace `regex_error.rs` unwrap**
+- [x] **Step 1: Replace `regex_error.rs` unwrap**
 
 Find:
 
@@ -1133,7 +1133,7 @@ Replace with:
 if closing.is_none_or(|position| position < 2) {
 ```
 
-- [ ] **Step 2: Replace fragile HashMap unwraps in diff generation**
+- [x] **Step 2: Replace fragile HashMap unwraps in diff generation**
 
 In `src/file_processor/in_memory.rs`, replace patterns like:
 
@@ -1156,7 +1156,7 @@ if let Some(deleted_content) = deletions.get(&line_num) {
 
 Apply the same binding style for insertions and deletions in `generate_line_changes` and `generate_diff_lines`.
 
-- [ ] **Step 3: Replace hardcoded `/tmp` tests**
+- [x] **Step 3: Replace hardcoded `/tmp` tests**
 
 In `src/file_processor/streaming.rs` test module, replace hardcoded paths like:
 
@@ -1173,7 +1173,7 @@ let test_file_path = temp_dir.path().join("test_streaming.txt");
 
 Pass `&test_file_path` directly to processor calls.
 
-- [ ] **Step 4: Run focused tests and clippy**
+- [x] **Step 4: Run focused tests and clippy**
 
 Run:
 
@@ -1185,7 +1185,7 @@ cargo clippy --all-targets --all-features --locked -- -D warnings
 
 Expected: pass.
 
-- [ ] **Step 5: Commit quality cleanup**
+- [x] **Step 5: Commit quality cleanup**
 
 ```bash
 git add src/regex_error.rs src/file_processor/in_memory.rs src/file_processor/streaming.rs

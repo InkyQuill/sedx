@@ -240,28 +240,33 @@ impl FileProcessor {
         for &(line_num, ref ct) in &all_changes {
             if *ct == ChangeType::Deleted && !handled_deletes.contains(&line_num) {
                 if let Some(new_content) = insertions.get(&line_num) {
-                    changes.push(LineChange {
-                        line_number: line_num,
-                        change_type: ChangeType::Modified,
-                        content: new_content.clone(),
-                        old_content: Some(deletions.get(&line_num).unwrap().clone()),
-                    });
-                    handled_deletes.insert(line_num);
-                    handled_inserts.insert(line_num);
-                } else {
+                    if let Some(deleted_content) = deletions.get(&line_num) {
+                        changes.push(LineChange {
+                            line_number: line_num,
+                            change_type: ChangeType::Modified,
+                            content: new_content.clone(),
+                            old_content: Some(deleted_content.clone()),
+                        });
+                        handled_deletes.insert(line_num);
+                        handled_inserts.insert(line_num);
+                    }
+                } else if let Some(deleted_content) = deletions.get(&line_num) {
                     changes.push(LineChange {
                         line_number: line_num,
                         change_type: ChangeType::Deleted,
-                        content: deletions.get(&line_num).unwrap().clone(),
+                        content: deleted_content.clone(),
                         old_content: None,
                     });
                     handled_deletes.insert(line_num);
                 }
-            } else if *ct == ChangeType::Added && !handled_inserts.contains(&line_num) {
+            } else if *ct == ChangeType::Added
+                && !handled_inserts.contains(&line_num)
+                && let Some(inserted_content) = insertions.get(&line_num)
+            {
                 changes.push(LineChange {
                     line_number: line_num,
                     change_type: ChangeType::Added,
-                    content: insertions.get(&line_num).unwrap().clone(),
+                    content: inserted_content.clone(),
                     old_content: None,
                 });
                 handled_inserts.insert(line_num);
@@ -330,22 +335,16 @@ impl FileProcessor {
                         result.push((line_num, new_content.clone(), ChangeType::Modified));
                         handled_deletes.insert(line_num);
                         handled_inserts.insert(line_num);
-                    } else {
-                        result.push((
-                            line_num,
-                            deletions.get(&line_num).unwrap().clone(),
-                            ChangeType::Deleted,
-                        ));
+                    } else if let Some(deleted_content) = deletions.get(&line_num) {
+                        result.push((line_num, deleted_content.clone(), ChangeType::Deleted));
                         handled_deletes.insert(line_num);
                     }
                 }
                 ChangeType::Added if !handled_inserts.contains(&line_num) => {
-                    result.push((
-                        line_num,
-                        insertions.get(&line_num).unwrap().clone(),
-                        ChangeType::Added,
-                    ));
-                    handled_inserts.insert(line_num);
+                    if let Some(inserted_content) = insertions.get(&line_num) {
+                        result.push((line_num, inserted_content.clone(), ChangeType::Added));
+                        handled_inserts.insert(line_num);
+                    }
                 }
                 _ => {}
             }
