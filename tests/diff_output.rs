@@ -4,6 +4,7 @@ mod common;
 
 use common::{sedx_isolated, write_file};
 use predicates::prelude::*;
+use serde_json::Value;
 use tempfile::TempDir;
 
 #[test]
@@ -128,4 +129,25 @@ fn no_color_env_suppresses_ansi_escapes() {
         "output contained ESC byte: {:?}",
         String::from_utf8_lossy(&output)
     );
+}
+
+#[test]
+fn json_dry_run_outputs_machine_readable_diff() {
+    let home = TempDir::new().unwrap();
+    let dir = home.path();
+    let file = write_file(dir, "in.txt", "foo\n");
+
+    let output = sedx_isolated(dir)
+        .args(["--dry-run", "--json", "s/foo/bar/", file.to_str().unwrap()])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(json["expression"], "s/foo/bar/");
+    assert_eq!(json["files"][0]["path"], file.to_string_lossy().as_ref());
+    assert_eq!(json["files"][0]["changes"][0]["change_type"], "modified");
+    assert_eq!(json["files"][0]["changes"][0]["content"], "bar");
 }

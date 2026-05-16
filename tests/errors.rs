@@ -35,11 +35,23 @@ fn missing_input_file_emits_warning_to_stderr() {
         .args(["s/foo/bar/", "/nonexistent/definitely/missing.txt"])
         .assert()
         .success()
-        .stderr(predicate::str::contains("Error resolving"))
+        .stderr(predicate::str::contains("File not found"))
         .stderr(
             predicate::str::contains("No such file")
-                .or(predicate::str::contains("cannot find the path")),
+                .or(predicate::str::contains("cannot find the path"))
+                .or(predicate::str::contains("Check the file path is correct")),
         );
+}
+
+#[test]
+fn missing_input_file_includes_possible_fixes() {
+    let home = TempDir::new().unwrap();
+    sedx_isolated(home.path())
+        .args(["s/foo/bar/", "/nonexistent/definitely/missing.txt"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Possible fixes"))
+        .stderr(predicate::str::contains("Check the file path is correct"));
 }
 
 #[cfg(unix)]

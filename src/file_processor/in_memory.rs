@@ -1,9 +1,9 @@
 use crate::command::{Address, Command, SubstitutionFlags};
 use crate::file_processor::common::{
-    ChangeType, FileDiff, LineChange, SubstitutionEngine, preserve_perms_after,
+    AddressContext, ChangeType, FileDiff, LineChange, SubstitutionEngine, matches_address,
+    preserve_perms_after,
 };
 use anyhow::{Context, Result};
-use regex::Regex;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
@@ -547,40 +547,16 @@ impl FileProcessor {
     }
 
     fn address_matches_cycle(&self, addr: &Address, state: &CycleState) -> bool {
-        match addr {
-            Address::LineNumber(n) => {
-                if *n == 0 {
-                    state.line_num == 0
-                } else {
-                    state.line_num == *n
-                }
-            }
-            Address::Pattern(pattern) => {
-                if let Ok(re) = Regex::new(pattern) {
-                    re.is_match(&state.pattern_space)
-                } else {
-                    false
-                }
-            }
-            Address::FirstLine => state.line_num == 1,
-            Address::LastLine => state.line_num == state.line_iter.total_lines(),
-            Address::Negated(inner) => !self.address_matches_cycle(inner, state),
-            Address::Relative { base, offset } => {
-                let base_line = match base.as_ref() {
-                    Address::LineNumber(n) => *n as isize,
-                    _ => state.line_num as isize,
-                };
-                let target_line = base_line + *offset;
-                target_line == state.line_num as isize
-            }
-            Address::Step { start, step } => {
-                if state.line_num >= *start {
-                    (state.line_num - *start).is_multiple_of(*step)
-                } else {
-                    false
-                }
-            }
-        }
+        let total_lines = state.line_iter.total_lines();
+        matches_address(
+            addr,
+            &AddressContext {
+                line: &state.pattern_space,
+                line_number: state.line_num,
+                total_lines: Some(total_lines),
+                is_last_line: state.line_num == total_lines,
+            },
+        )
     }
 
     fn check_range_inclusive(

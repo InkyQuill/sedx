@@ -152,6 +152,11 @@ struct Cli {
     )]
     backup_dir: Option<String>,
 
+    /// Emit machine-readable JSON diff output
+    #[arg(long = "json")]
+    #[arg(help = "Emit dry-run/apply diff output as JSON for scripts and CI pipelines")]
+    json: bool,
+
     /// Subcommands
     #[command(subcommand)]
     command: Option<Commands>,
@@ -494,6 +499,7 @@ pub fn parse_args() -> Result<Args> {
                 no_backup: cli.no_backup,
                 backup_dir: cli.backup_dir,
                 quiet: cli.quiet,
+                json: cli.json,
             })
         }
     }
@@ -525,6 +531,7 @@ pub enum Args {
         no_backup: bool,
         backup_dir: Option<String>,
         quiet: bool,
+        json: bool,
     },
     Rollback {
         id: Option<String>,

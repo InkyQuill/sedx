@@ -4,6 +4,7 @@ mod common;
 
 use common::{read_file, sedx_isolated, write_file};
 use predicates::prelude::*;
+use serde_json::Value;
 use tempfile::TempDir;
 
 fn backups_dir(home: &std::path::Path) -> std::path::PathBuf {
@@ -109,4 +110,43 @@ fn no_backup_flag_skips_backup_creation() {
                 .unwrap_or(true),
         "backup directory should be empty or absent"
     );
+}
+
+#[test]
+fn backup_prune_keep_days_removes_old_backups() {
+    let home = TempDir::new().unwrap();
+    let file = write_file(home.path(), "in.txt", "aaa\n");
+
+    sedx_isolated(home.path())
+        .args(["s/a/A/", file.to_str().unwrap()])
+        .assert()
+        .success();
+    let old_id = newest_backup_id(home.path());
+
+    sedx_isolated(home.path())
+        .args(["s/A/B/", file.to_str().unwrap()])
+        .assert()
+        .success();
+    let recent_id = newest_backup_id(home.path());
+
+    let old_metadata_path = backups_dir(home.path())
+        .join(&old_id)
+        .join("operation.json");
+    let mut metadata: Value = serde_json::from_str(&read_file(&old_metadata_path)).unwrap();
+    metadata["timestamp"] =
+        Value::String((chrono::Utc::now() - chrono::Duration::days(30)).to_rfc3339());
+    std::fs::write(
+        &old_metadata_path,
+        serde_json::to_string_pretty(&metadata).unwrap(),
+    )
+    .unwrap();
+
+    sedx_isolated(home.path())
+        .args(["backup", "prune", "--keep-days=7", "--force"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Pruned 1 backups."));
+
+    assert!(!backups_dir(home.path()).join(old_id).exists());
+    assert!(backups_dir(home.path()).join(recent_id).exists());
 }

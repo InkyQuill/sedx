@@ -1,7 +1,9 @@
 use crate::cli::RegexFlavor;
+use crate::command::Address;
 use crate::command::SubstitutionFlags;
 use crate::regex_error::compile_regex_with_context;
 use anyhow::Result;
+use regex::Regex;
 use std::fs;
 use std::path::Path;
 
@@ -18,6 +20,87 @@ pub fn preserve_perms_after<F: FnOnce() -> Result<()>>(path: &Path, write: F) ->
         let _ = fs::set_permissions(path, p);
     }
     Ok(())
+}
+
+pub struct AddressContext<'a> {
+    pub line: &'a str,
+    pub line_number: usize,
+    pub total_lines: Option<usize>,
+    pub is_last_line: bool,
+}
+
+pub fn matches_address(address: &Address, context: &AddressContext<'_>) -> bool {
+    match address {
+        Address::LineNumber(n) => {
+            if *n == 0 {
+                context.line_number == 0
+            } else {
+                context.line_number == *n
+            }
+        }
+        Address::Pattern(pattern) => Regex::new(pattern)
+            .map(|re| re.is_match(context.line))
+            .unwrap_or(false),
+        Address::FirstLine => context.line_number == 1,
+        Address::LastLine => context
+            .total_lines
+            .map_or(context.is_last_line, |total| context.line_number == total),
+        Address::Negated(inner) => !matches_address(inner, context),
+        Address::Relative { base, offset } => {
+            let base_line = match base.as_ref() {
+                Address::LineNumber(n) => *n as isize,
+                _ => context.line_number as isize,
+            };
+            base_line + *offset == context.line_number as isize
+        }
+        Address::Step { start, step } => {
+            context.line_number >= *start && (context.line_number - *start).is_multiple_of(*step)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matches_last_line_from_total_line_count() {
+        let context = AddressContext {
+            line: "last",
+            line_number: 3,
+            total_lines: Some(3),
+            is_last_line: false,
+        };
+
+        assert!(matches_address(&Address::LastLine, &context));
+    }
+
+    #[test]
+    fn matches_last_line_from_streaming_lookahead() {
+        let context = AddressContext {
+            line: "last",
+            line_number: 3,
+            total_lines: None,
+            is_last_line: true,
+        };
+
+        assert!(matches_address(&Address::LastLine, &context));
+    }
+
+    #[test]
+    fn matches_negated_pattern_address() {
+        let context = AddressContext {
+            line: "alpha",
+            line_number: 1,
+            total_lines: Some(1),
+            is_last_line: true,
+        };
+
+        assert!(matches_address(
+            &Address::Negated(Box::new(Address::Pattern("bravo".to_string()))),
+            &context,
+        ));
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

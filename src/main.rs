@@ -6,6 +6,7 @@ mod config;
 mod diff_formatter;
 mod disk_space;
 mod ere_converter;
+mod error_helpers;
 mod file_processor;
 mod logger;
 mod parser;
@@ -56,6 +57,7 @@ fn main() -> Result<()> {
             no_backup,
             backup_dir,
             quiet,
+            json,
         } => {
             if files.is_empty() {
                 execute_stdin(&expression, regex_flavor, quiet)?;
@@ -72,6 +74,7 @@ fn main() -> Result<()> {
                     no_backup,
                     backup_dir,
                     quiet,
+                    json,
                 )?;
             }
         }
@@ -118,6 +121,10 @@ fn main() -> Result<()> {
 }
 
 fn execute_stdin(expression: &str, regex_flavor: RegexFlavor, quiet: bool) -> Result<()> {
+    if let Ok(config) = load_config() {
+        emit_compatibility_warnings(expression, regex_flavor, &config);
+    }
+
     let parser = Parser::new(regex_flavor);
     let commands = parser
         .parse(expression)
@@ -150,10 +157,12 @@ fn execute_command(
     no_backup: bool,
     backup_dir: Option<String>,
     quiet: bool,
+    json: bool,
 ) -> Result<()> {
     let config = load_config()?;
     let backup_dir = backup_dir.or_else(|| config.backup.backup_dir.clone());
     let parser = Parser::new(regex_flavor);
+    emit_compatibility_warnings(expression, regex_flavor, &config);
     let commands = parser
         .parse(expression)
         .context("Failed to parse expression")?;
@@ -181,7 +190,10 @@ fn execute_command(
         let metadata = match fs::metadata(file_path) {
             Ok(metadata) => metadata,
             Err(err) => {
-                eprintln!("Error resolving {}: {}", file_path.display(), err);
+                eprintln!(
+                    "{}",
+                    error_helpers::file_error(file_path, "resolving", &err)
+                );
                 continue;
             }
         };
@@ -206,29 +218,41 @@ fn execute_command(
 
         match diff {
             Ok(diff) => diffs.push(diff),
-            Err(e) => eprintln!("Error processing {}: {}", file_path.display(), e),
+            Err(e) => eprintln!("{}", format_processing_error(file_path, &e)),
         }
     }
 
     let has_changes = diffs.iter().any(|d| !d.changes.is_empty());
 
     if dry_run || !has_changes || interactive {
-        if dry_run || interactive {
-            println!(
-                "{}",
-                diff_formatter::DiffFormatter::format_dry_run_header(expression)
-            );
-        }
-        for diff in &diffs {
+        if json {
             print!(
                 "{}",
-                diff_formatter::DiffFormatter::format_diff_with_context(diff, context, expression)
+                diff_formatter::DiffFormatter::format_json(&diffs, expression)?
             );
+            if !diffs.is_empty() {
+                println!();
+            }
+        } else {
+            if dry_run || interactive {
+                println!(
+                    "{}",
+                    diff_formatter::DiffFormatter::format_dry_run_header(expression)
+                );
+            }
+            for diff in &diffs {
+                print!(
+                    "{}",
+                    diff_formatter::DiffFormatter::format_diff_with_context(
+                        diff, context, expression
+                    )
+                );
+            }
         }
     }
 
     if dry_run || !has_changes {
-        if !has_changes && !dry_run {
+        if !has_changes && !dry_run && !json {
             println!("\nNo changes to apply.");
         }
         return Ok(());
@@ -279,20 +303,79 @@ fn execute_command(
     }
 
     if !interactive {
-        for diff in &diffs {
+        if json {
             print!(
                 "{}",
-                diff_formatter::DiffFormatter::format_diff_with_context(diff, context, expression)
+                diff_formatter::DiffFormatter::format_json(&diffs, expression)?
             );
+            println!();
+        } else {
+            for diff in &diffs {
+                print!(
+                    "{}",
+                    diff_formatter::DiffFormatter::format_diff_with_context(
+                        diff, context, expression
+                    )
+                );
+            }
         }
     }
 
     if let Some(id) = backup_id {
-        println!("\nBackup ID: {}", id);
-        println!("Rollback with: sedx rollback {}", id);
+        if !json {
+            println!("\nBackup ID: {}", id);
+            println!("Rollback with: sedx rollback {}", id);
+        }
     }
 
     Ok(())
+}
+
+fn format_processing_error(file_path: &std::path::Path, error: &anyhow::Error) -> String {
+    for cause in error.chain() {
+        if let Some(io_error) = cause.downcast_ref::<io::Error>() {
+            return error_helpers::file_error(file_path, "processing", io_error);
+        }
+    }
+
+    format!("Error processing {}: {}", file_path.display(), error)
+}
+
+fn emit_compatibility_warnings(
+    expression: &str,
+    regex_flavor: RegexFlavor,
+    config: &config::Config,
+) {
+    if config.compatibility.show_warnings != Some(true) || regex_flavor != RegexFlavor::PCRE {
+        return;
+    }
+
+    for warning in pcre_compatibility_warnings(expression) {
+        eprintln!("Warning: {}", warning);
+    }
+}
+
+fn pcre_compatibility_warnings(expression: &str) -> Vec<&'static str> {
+    let mut warnings = Vec::new();
+    if expression.contains(r"\d")
+        || expression.contains(r"\w")
+        || expression.contains(r"\s")
+        || expression.contains("(?")
+    {
+        warnings.push(
+            "PCRE-specific regex syntax may not behave the same as GNU sed BRE/ERE; use -E or -B for GNU-compatible parsing.",
+        );
+    }
+    if expression.contains("$1")
+        || expression.contains("$2")
+        || expression.contains("$3")
+        || expression.contains("${")
+    {
+        warnings.push(
+            "PCRE-style replacement backreferences differ from GNU sed; GNU sed uses \\1-style replacement references.",
+        );
+    }
+    warnings
 }
 
 fn can_use_streaming(commands: &[Command]) -> bool {
@@ -306,17 +389,15 @@ fn can_use_streaming(commands: &[Command]) -> bool {
             | Command::HoldAppend { .. }
             | Command::Get { .. }
             | Command::GetAppend { .. }
-            | Command::Exchange { .. } => {}
-            Command::Insert { address, .. } | Command::Append { address, .. } => {
-                if !is_streaming_line_address(address) {
-                    return false;
-                }
-            }
-            Command::Change { range, .. } => {
-                if !is_streaming_single_line_range(&range.0, &range.1) {
-                    return false;
-                }
-            }
+            | Command::Exchange { .. }
+            | Command::Next { .. }
+            | Command::NextAppend { .. }
+            | Command::PrintFirstLine { .. }
+            | Command::PrintLineNumber { .. }
+            | Command::PrintFilename { .. }
+            | Command::ClearPatternSpace { .. } => {}
+            Command::Insert { .. } | Command::Append { .. } => {}
+            Command::Change { .. } => {}
             Command::Group {
                 commands: inner, ..
             } => {
@@ -328,14 +409,6 @@ fn can_use_streaming(commands: &[Command]) -> bool {
         }
     }
     true
-}
-
-fn is_streaming_line_address(address: &command::Address) -> bool {
-    matches!(address, command::Address::LineNumber(_))
-}
-
-fn is_streaming_single_line_range(start: &command::Address, end: &command::Address) -> bool {
-    matches!((start, end), (command::Address::LineNumber(a), command::Address::LineNumber(b)) if a == b)
 }
 
 fn commands_can_modify_files(commands: &[Command]) -> bool {
@@ -446,9 +519,13 @@ fn backup_remove(id: &str, force: bool) -> Result<()> {
     Ok(())
 }
 
-fn backup_prune(keep: Option<usize>, _keep_days: Option<usize>, _force: bool) -> Result<()> {
+fn backup_prune(keep: Option<usize>, keep_days: Option<usize>, _force: bool) -> Result<()> {
     let bm = backup_manager::BackupManager::new()?;
-    let count = bm.prune_backups(keep.unwrap_or(10))?;
+    let count = if let Some(days) = keep_days {
+        bm.prune_backups_older_than(days as i64)?
+    } else {
+        bm.prune_backups(keep.unwrap_or(10))?
+    };
     println!("Pruned {} backups.", count);
     Ok(())
 }

@@ -50,6 +50,7 @@ The following features are tested and working correctly:
 2. **Medium**: Negation with all address types
 3. **Medium**: Relative ranges in streaming mode
 4. **Low**: ERE/BRE mode edge-case improvements
+5. **Low**: Streaming `q` currently uses specialized address handling. It works correctly, but can be migrated to the shared `address_matches_current` helper in a cleanup pass for consistency.
 
 ## See Also
 

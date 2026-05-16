@@ -4,6 +4,8 @@
 mod common;
 
 use common::sedx;
+use predicates::prelude::*;
+use tempfile::TempDir;
 
 #[test]
 fn default_is_pcre_dollar_backrefs() {
@@ -14,6 +16,52 @@ fn default_is_pcre_dollar_backrefs() {
         .assert()
         .success()
         .stdout("barfoo\n");
+}
+
+#[test]
+fn pcre_specific_substitution_warns_when_configured() {
+    let home = TempDir::new().unwrap();
+    let config_dir = home.path().join(".sedx");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    std::fs::write(
+        config_dir.join("config.toml"),
+        r#"
+[compatibility]
+show_warnings = true
+"#,
+    )
+    .unwrap();
+
+    common::sedx_isolated(home.path())
+        .arg(r"s/\d+/NUM/")
+        .write_stdin("123\n")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "Warning: PCRE-specific regex syntax",
+        ));
+}
+
+#[test]
+fn pcre_specific_substitution_warning_respects_config() {
+    let home = TempDir::new().unwrap();
+    let config_dir = home.path().join(".sedx");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    std::fs::write(
+        config_dir.join("config.toml"),
+        r#"
+[compatibility]
+show_warnings = false
+"#,
+    )
+    .unwrap();
+
+    common::sedx_isolated(home.path())
+        .arg(r"s/\d+/NUM/")
+        .write_stdin("123\n")
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
 }
 
 #[test]

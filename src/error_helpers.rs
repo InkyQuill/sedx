@@ -1,7 +1,7 @@
 //! Error helper functions for creating actionable error messages
 
-use std::path::Path;
 use std::io;
+use std::path::Path;
 
 /// Check if an IO error is a permission denied error
 pub fn is_permission_denied(err: &io::Error) -> bool {
@@ -15,7 +15,8 @@ pub fn is_not_found(err: &io::Error) -> bool {
 
 /// Create an enhanced error message for file permission issues
 pub fn permission_error(path: &Path, operation: &str) -> String {
-    let parent_dir = path.parent()
+    let parent_dir = path
+        .parent()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| ".".to_string());
 
@@ -49,40 +50,13 @@ pub fn not_found_error(path: &Path, context: &str) -> String {
     )
 }
 
-/// Create an enhanced error message for directory creation failures
-pub fn dir_create_error(path: &Path, underlying_err: &io::Error) -> String {
-    let base = format!("Failed to create directory: '{}'", path.display());
-
-    if is_permission_denied(underlying_err) {
-        format!(
-            "{}\n\n\
-             Cause: Permission denied\n\n\
-             Possible fixes:\n\
-             1. Ensure parent directory exists: ls -la '{}'\n\
-             2. Check write permissions on parent directory\n\
-             3. Try creating manually: mkdir -p '{}'\n\
-             4. Use --backup-dir to specify a different location",
-            base,
-            path.parent().map(|p| p.display().to_string()).unwrap_or_else(|| ".".to_string()),
-            path.display()
-        )
-    } else if is_not_found(underlying_err) {
-        format!(
-            "{}\n\n\
-             Cause: Parent directory does not exist\n\n\
-             Possible fixes:\n\
-             1. Create parent directory first: mkdir -p '{}'\n\
-             2. Use an absolute path for the backup directory",
-            base,
-            path.parent().map(|p| p.display().to_string()).unwrap_or_else(|| ".".to_string())
-        )
+pub fn file_error(path: &Path, operation: &str, err: &io::Error) -> String {
+    if is_permission_denied(err) {
+        permission_error(path, operation)
+    } else if is_not_found(err) {
+        not_found_error(path, operation)
     } else {
-        format!(
-            "{}\n\n\
-             Underlying error: {}",
-            base,
-            underlying_err
-        )
+        format!("Error when {} '{}': {}", operation, path.display(), err)
     }
 }
 

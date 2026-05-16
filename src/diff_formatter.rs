@@ -5,6 +5,73 @@ use std::io::IsTerminal;
 pub struct DiffFormatter;
 
 impl DiffFormatter {
+    pub fn format_json(diffs: &[FileDiff], expression: &str) -> serde_json::Result<String> {
+        let files: Vec<_> = diffs
+            .iter()
+            .map(|diff| {
+                let changes: Vec<_> = diff
+                    .changes
+                    .iter()
+                    .map(|change| {
+                        serde_json::json!({
+                            "line_number": change.line_number,
+                            "change_type": Self::change_type_json(&change.change_type),
+                            "content": change.content,
+                            "old_content": change.old_content,
+                        })
+                    })
+                    .collect();
+
+                serde_json::json!({
+                    "path": diff.file_path,
+                    "is_streaming": diff.is_streaming,
+                    "printed_lines": diff.printed_lines,
+                    "changes": changes,
+                    "summary": Self::summary_json(diff),
+                })
+            })
+            .collect();
+
+        serde_json::to_string_pretty(&serde_json::json!({
+            "expression": expression,
+            "files": files,
+        }))
+    }
+
+    fn change_type_json(change_type: &ChangeType) -> &'static str {
+        match change_type {
+            ChangeType::Unchanged => "unchanged",
+            ChangeType::Modified => "modified",
+            ChangeType::Added => "added",
+            ChangeType::Deleted => "deleted",
+        }
+    }
+
+    fn summary_json(diff: &FileDiff) -> serde_json::Value {
+        let modified = diff
+            .changes
+            .iter()
+            .filter(|change| change.change_type == ChangeType::Modified)
+            .count();
+        let added = diff
+            .changes
+            .iter()
+            .filter(|change| change.change_type == ChangeType::Added)
+            .count();
+        let deleted = diff
+            .changes
+            .iter()
+            .filter(|change| change.change_type == ChangeType::Deleted)
+            .count();
+
+        serde_json::json!({
+            "total": modified + added + deleted,
+            "modified": modified,
+            "added": added,
+            "deleted": deleted,
+        })
+    }
+
     /// Auto-detect if we should use colors
     fn should_use_color() -> bool {
         // Disable color in tests to ensure consistent output

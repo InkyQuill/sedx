@@ -1,8 +1,8 @@
 use crate::cli::RegexFlavor;
 use crate::command::{Address, Command};
 use crate::file_processor::common::{
-    ChangeType, FileDiff, LineChange, MixedRangeKey, MixedRangeState, PatternRangeState,
-    SubstitutionEngine, preserve_perms_after,
+    AddressContext, ChangeType, FileDiff, LineChange, MixedRangeKey, MixedRangeState,
+    PatternRangeState, SubstitutionEngine, matches_address, preserve_perms_after,
 };
 use anyhow::{Context, Result};
 use regex::Regex;
@@ -123,6 +123,7 @@ impl StreamProcessor {
     ) -> Result<FileDiff> {
         let mut line_num = 0;
         let mut changes: Vec<LineChange> = Vec::new();
+        let mut printed_lines: Vec<String> = Vec::new();
         let commands = self.commands.clone(); // Clone once per stream
 
         let mut lines = reader.lines().peekable();
@@ -136,11 +137,15 @@ impl StreamProcessor {
             self.current_is_last_line = lines.peek().is_none();
 
             let mut processed_line = line.clone();
+            let mut current_original_line = line.clone();
             let mut line_changed = false;
             let mut skip_line = false;
             let mut print_line = false;
             let mut append_text: Option<String> = None;
             let mut should_quit_after_line = false;
+            let mut terminate_after_line = false;
+            let mut suppress_default_output = false;
+            let mut change_replacement_emitted = false;
 
             for (cmd_index, cmd) in commands.iter().enumerate() {
                 match cmd {
@@ -203,8 +208,8 @@ impl StreamProcessor {
                             print_line = true;
                         }
                     }
-                    Command::Insert { text, address } => match address {
-                        Address::LineNumber(n) if *n == line_num => {
+                    Command::Insert { text, address } => {
+                        if self.address_matches_current(address, &processed_line) {
                             writeln!(writer, "{}", text)
                                 .with_context(|| "Failed to write inserted line")?;
                             changes.push(LineChange {
@@ -214,36 +219,141 @@ impl StreamProcessor {
                                 old_content: None,
                             });
                         }
-                        _ => {}
-                    },
-                    Command::Append { text, address } => match address {
-                        Address::LineNumber(n) if *n == line_num => {
+                    }
+                    Command::Append { text, address } => {
+                        if self.address_matches_current(address, &processed_line) {
                             append_text = Some(text.clone());
                         }
-                        _ => {}
-                    },
-                    Command::Change { text, range } => match (&range.0, &range.1) {
-                        (Address::LineNumber(s), Address::LineNumber(e)) if s == e => {
-                            if line_num == *s {
-                                processed_line = text.clone();
-                                line_changed = true;
+                    }
+                    Command::Change { text, range } => {
+                        let should_apply = self.should_apply_command_with_range(
+                            &processed_line,
+                            &(range.0.clone(), range.1.clone()),
+                            cmd_index,
+                        )?;
+                        if should_apply {
+                            let reached_end =
+                                self.address_matches_current(&range.1, &processed_line);
+                            if reached_end {
+                                writeln!(writer, "{}", text)
+                                    .with_context(|| "Failed to write changed line")?;
+                                change_replacement_emitted = true;
+                                changes.push(LineChange {
+                                    line_number: line_num,
+                                    change_type: ChangeType::Modified,
+                                    content: text.clone(),
+                                    old_content: Some(current_original_line.clone()),
+                                });
+                            }
+                            skip_line = true;
+                        }
+                    }
+                    Command::Quit { address } => {
+                        if address.as_ref().is_none_or(|address| {
+                            self.address_matches_current(address, &processed_line)
+                        }) {
+                            should_quit_after_line = true;
+                        }
+                    }
+                    Command::Next { range } => {
+                        let should_apply = match &range {
+                            None => true,
+                            Some((start, end)) => self.should_apply_command_with_range(
+                                &processed_line,
+                                &(start.clone(), end.clone()),
+                                cmd_index,
+                            )?,
+                        };
+                        if should_apply {
+                            if !self.no_default_output {
+                                writeln!(writer, "{}", processed_line)
+                                    .with_context(|| "Failed to write next output line")?;
+                            }
+                            match lines.next() {
+                                Some(next_result) => {
+                                    let next_line = next_result.with_context(|| {
+                                        format!("Failed to read line from {}", source_name)
+                                    })?;
+                                    line_num += 1;
+                                    self.current_line = line_num;
+                                    self.current_is_last_line = lines.peek().is_none();
+                                    current_original_line = next_line.clone();
+                                    processed_line = next_line;
+                                    line_changed = false;
+                                    append_text = None;
+                                }
+                                None => {
+                                    suppress_default_output = true;
+                                    terminate_after_line = true;
+                                    break;
+                                }
                             }
                         }
-                        _ => {}
-                    },
-                    Command::Quit { address } => {
-                        match address {
-                            None => break 'outer,
-                            Some(Address::LineNumber(n)) if *n == line_num => {
-                                should_quit_after_line = true;
+                    }
+                    Command::NextAppend { range } => {
+                        let should_apply = match &range {
+                            None => true,
+                            Some((start, end)) => self.should_apply_command_with_range(
+                                &processed_line,
+                                &(start.clone(), end.clone()),
+                                cmd_index,
+                            )?,
+                        };
+                        if should_apply {
+                            match lines.next() {
+                                Some(next_result) => {
+                                    let next_line = next_result.with_context(|| {
+                                        format!("Failed to read line from {}", source_name)
+                                    })?;
+                                    line_num += 1;
+                                    self.current_line = line_num;
+                                    self.current_is_last_line = lines.peek().is_none();
+                                    current_original_line.push('\n');
+                                    current_original_line.push_str(&next_line);
+                                    processed_line.push('\n');
+                                    processed_line.push_str(&next_line);
+                                }
+                                None => {
+                                    terminate_after_line = true;
+                                    break;
+                                }
                             }
-                            Some(Address::LastLine) if self.current_is_last_line => {
-                                should_quit_after_line = true;
-                            }
-                            _ => {
-                                // Fallback not possible in middle of reader loop easily
-                                // Just continue for now
-                            }
+                        }
+                    }
+                    Command::PrintFirstLine { range } => {
+                        let should_apply = match &range {
+                            None => true,
+                            Some((start, end)) => self.should_apply_command_with_range(
+                                &processed_line,
+                                &(start.clone(), end.clone()),
+                                cmd_index,
+                            )?,
+                        };
+                        if should_apply {
+                            let first_line =
+                                processed_line.lines().next().unwrap_or("").to_string();
+                            println!("{}", first_line);
+                            printed_lines.push(first_line);
+                        }
+                    }
+                    Command::PrintLineNumber { range } => {
+                        let should_apply = range.as_ref().is_none_or(|address| {
+                            self.address_matches_current(address, &processed_line)
+                        });
+                        if should_apply {
+                            let line_number = self.current_line.to_string();
+                            println!("{}", line_number);
+                            printed_lines.push(line_number);
+                        }
+                    }
+                    Command::PrintFilename { range } => {
+                        let should_apply = range.as_ref().is_none_or(|address| {
+                            self.address_matches_current(address, &processed_line)
+                        });
+                        if should_apply {
+                            let filename = source_name.to_string();
+                            println!("{}", filename);
+                            printed_lines.push(filename);
                         }
                     }
                     Command::Hold { range } => {
@@ -318,6 +428,15 @@ impl StreamProcessor {
                             line_changed = true;
                         }
                     }
+                    Command::ClearPatternSpace { range } => {
+                        let should_apply = range.as_ref().is_none_or(|address| {
+                            self.address_matches_current(address, &processed_line)
+                        });
+                        if should_apply {
+                            line_changed = line_changed || !processed_line.is_empty();
+                            processed_line.clear();
+                        }
+                    }
                     Command::Group {
                         range,
                         commands: group_commands,
@@ -389,6 +508,166 @@ impl StreamProcessor {
                                         )?;
                                         if should_print {
                                             print_line = true;
+                                        }
+                                    }
+                                    Command::Next { range } => {
+                                        let should_apply = match &range {
+                                            None => true,
+                                            Some((start, end)) => self
+                                                .should_apply_command_with_range(
+                                                    &processed_line,
+                                                    &(start.clone(), end.clone()),
+                                                    cmd_index,
+                                                )?,
+                                        };
+                                        if should_apply {
+                                            if !self.no_default_output {
+                                                writeln!(writer, "{}", processed_line)
+                                                    .with_context(
+                                                        || "Failed to write next output line",
+                                                    )?;
+                                            }
+                                            match lines.next() {
+                                                Some(next_result) => {
+                                                    let next_line =
+                                                        next_result.with_context(|| {
+                                                            format!(
+                                                                "Failed to read line from {}",
+                                                                source_name
+                                                            )
+                                                        })?;
+                                                    line_num += 1;
+                                                    self.current_line = line_num;
+                                                    self.current_is_last_line =
+                                                        lines.peek().is_none();
+                                                    current_original_line = next_line.clone();
+                                                    processed_line = next_line;
+                                                    line_changed = false;
+                                                    append_text = None;
+                                                }
+                                                None => {
+                                                    suppress_default_output = true;
+                                                    terminate_after_line = true;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Command::NextAppend { range } => {
+                                        let should_apply = match &range {
+                                            None => true,
+                                            Some((start, end)) => self
+                                                .should_apply_command_with_range(
+                                                    &processed_line,
+                                                    &(start.clone(), end.clone()),
+                                                    cmd_index,
+                                                )?,
+                                        };
+                                        if should_apply {
+                                            match lines.next() {
+                                                Some(next_result) => {
+                                                    let next_line =
+                                                        next_result.with_context(|| {
+                                                            format!(
+                                                                "Failed to read line from {}",
+                                                                source_name
+                                                            )
+                                                        })?;
+                                                    line_num += 1;
+                                                    self.current_line = line_num;
+                                                    self.current_is_last_line =
+                                                        lines.peek().is_none();
+                                                    processed_line.push('\n');
+                                                    processed_line.push_str(&next_line);
+                                                }
+                                                None => {
+                                                    terminate_after_line = true;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Command::PrintFirstLine { range } => {
+                                        let should_apply = match &range {
+                                            None => true,
+                                            Some((start, end)) => self
+                                                .should_apply_command_with_range(
+                                                    &processed_line,
+                                                    &(start.clone(), end.clone()),
+                                                    cmd_index,
+                                                )?,
+                                        };
+                                        if should_apply {
+                                            let first_line = processed_line
+                                                .lines()
+                                                .next()
+                                                .unwrap_or("")
+                                                .to_string();
+                                            println!("{}", first_line);
+                                            printed_lines.push(first_line);
+                                        }
+                                    }
+                                    Command::PrintLineNumber { range } => {
+                                        let should_apply = range.as_ref().is_none_or(|address| {
+                                            self.address_matches_current(address, &processed_line)
+                                        });
+                                        if should_apply {
+                                            let line_number = self.current_line.to_string();
+                                            println!("{}", line_number);
+                                            printed_lines.push(line_number);
+                                        }
+                                    }
+                                    Command::PrintFilename { range } => {
+                                        let should_apply = range.as_ref().is_none_or(|address| {
+                                            self.address_matches_current(address, &processed_line)
+                                        });
+                                        if should_apply {
+                                            let filename = source_name.to_string();
+                                            println!("{}", filename);
+                                            printed_lines.push(filename);
+                                        }
+                                    }
+                                    Command::Insert { text, address } => {
+                                        if self.address_matches_current(address, &processed_line) {
+                                            writeln!(writer, "{}", text)
+                                                .with_context(|| "Failed to write inserted line")?;
+                                            changes.push(LineChange {
+                                                line_number: line_num,
+                                                change_type: ChangeType::Added,
+                                                content: text.clone(),
+                                                old_content: None,
+                                            });
+                                        }
+                                    }
+                                    Command::Append { text, address } => {
+                                        if self.address_matches_current(address, &processed_line) {
+                                            append_text = Some(text.clone());
+                                        }
+                                    }
+                                    Command::Change { text, range } => {
+                                        let should_apply = self.should_apply_command_with_range(
+                                            &processed_line,
+                                            &(range.0.clone(), range.1.clone()),
+                                            cmd_index,
+                                        )?;
+                                        if should_apply {
+                                            let reached_end = self
+                                                .address_matches_current(&range.1, &processed_line);
+                                            if reached_end {
+                                                writeln!(writer, "{}", text).with_context(
+                                                    || "Failed to write changed line",
+                                                )?;
+                                                change_replacement_emitted = true;
+                                                changes.push(LineChange {
+                                                    line_number: line_num,
+                                                    change_type: ChangeType::Modified,
+                                                    content: text.clone(),
+                                                    old_content: Some(
+                                                        current_original_line.clone(),
+                                                    ),
+                                                });
+                                            }
+                                            skip_line = true;
                                         }
                                     }
                                     Command::Hold { range } => {
@@ -487,19 +766,22 @@ impl StreamProcessor {
 
             if print_line {
                 println!("{}", processed_line);
+                printed_lines.push(processed_line.clone());
             }
 
             if skip_line {
-                changes.push(LineChange {
-                    line_number: line_num,
-                    change_type: ChangeType::Deleted,
-                    content: line.clone(),
-                    old_content: None,
-                });
+                if !change_replacement_emitted {
+                    changes.push(LineChange {
+                        line_number: line_num,
+                        change_type: ChangeType::Deleted,
+                        content: current_original_line.clone(),
+                        old_content: None,
+                    });
+                }
                 continue;
             }
 
-            if !self.no_default_output {
+            if !self.no_default_output && !suppress_default_output {
                 writeln!(writer, "{}", processed_line)
                     .with_context(|| "Failed to write to writer")?;
             }
@@ -518,7 +800,11 @@ impl StreamProcessor {
                     line_number: line_num,
                     change_type,
                     content: processed_line,
-                    old_content: if line_changed { Some(line) } else { None },
+                    old_content: if line_changed {
+                        Some(current_original_line)
+                    } else {
+                        None
+                    },
                 });
                 self.context_lines_to_read = self.context_size;
             } else if self.context_lines_to_read > 0 {
@@ -555,6 +841,11 @@ impl StreamProcessor {
                 self.flush_buffer_to_changes(&mut changes);
                 break 'outer;
             }
+
+            if terminate_after_line {
+                self.flush_buffer_to_changes(&mut changes);
+                break 'outer;
+            }
         }
 
         self.flush_buffer_to_changes(&mut changes);
@@ -564,7 +855,7 @@ impl StreamProcessor {
             file_path: source_name.to_string(),
             changes,
             all_lines: Vec::new(),
-            printed_lines: Vec::new(),
+            printed_lines,
             is_streaming: true,
         })
     }
@@ -714,6 +1005,18 @@ impl StreamProcessor {
         } else {
             (self.current_line - start).is_multiple_of(step)
         }
+    }
+
+    fn address_matches_current(&self, address: &Address, line: &str) -> bool {
+        matches_address(
+            address,
+            &AddressContext {
+                line,
+                line_number: self.current_line,
+                total_lines: None,
+                is_last_line: self.current_is_last_line,
+            },
+        )
     }
 
     fn should_apply_command_with_range(
