@@ -157,6 +157,16 @@ fn escaped_pipe_delimiter_in_pattern_is_literal() {
 }
 
 #[test]
+fn bre_escaped_pipe_delimiter_in_pattern_is_literal() {
+    sedx()
+        .args(["-B", r"s|a\|b|X|"])
+        .write_stdin("a|b\na\nb\n")
+        .assert()
+        .success()
+        .stdout("X\na\nb\n");
+}
+
+#[test]
 fn escaped_pipe_delimiter_in_replacement_is_literal() {
     sedx()
         .arg(r"s|foo|a\|b|")

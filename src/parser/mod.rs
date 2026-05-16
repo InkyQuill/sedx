@@ -55,11 +55,13 @@ impl Parser {
     }
 
     fn convert_pattern(&self, pattern: &str) -> String {
-        match self.regex_flavor {
+        let pattern = match self.regex_flavor {
             RegexFlavor::BRE => crate::bre_converter::convert_bre_to_pcre(pattern),
             RegexFlavor::ERE => crate::ere_converter::convert_ere_to_pcre_pattern(pattern),
             RegexFlavor::PCRE => pattern.to_string(),
-        }
+        };
+
+        substitution::restore_escaped_pattern_delimiters(&pattern)
     }
 
     fn convert_replacement(&self, replacement: &str) -> String {
@@ -226,6 +228,7 @@ pub(crate) fn find_structural_group_close(expr: &str, open_pos: usize) -> Option
     let mut current_expr = String::new();
     let mut brace_depth = 0usize;
     let mut tracking_group = false;
+    let mut unterminated_substitution_group_close: Option<usize> = None;
     let mut pattern_delimiter: Option<char> = None;
     let mut substitution: Option<SubstitutionSplitState> = None;
     let mut escaped = false;
@@ -243,6 +246,10 @@ pub(crate) fn find_structural_group_close(expr: &str, open_pos: usize) -> Option
             if c == '\\' {
                 state.escaped = true;
                 continue;
+            }
+
+            if c == '}' && tracking_group && brace_depth == 1 {
+                unterminated_substitution_group_close = Some(pos);
             }
 
             if c == state.delimiter {
@@ -333,7 +340,7 @@ pub(crate) fn find_structural_group_close(expr: &str, open_pos: usize) -> Option
         }
     }
 
-    None
+    unterminated_substitution_group_close
 }
 
 pub fn parse_single_command(cmd: &str) -> Result<Command> {

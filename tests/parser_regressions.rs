@@ -142,6 +142,18 @@ fn group_parser_ignores_literal_closing_brace_in_substitution_replacement() {
 }
 
 #[test]
+fn malformed_substitution_inside_group_reports_substitution_error() {
+    common::sedx()
+        .arg(r"{s/foo/bar};p}")
+        .write_stdin("foo\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "missing closing delimiter: missing third '/' delimiter after replacement",
+        ));
+}
+
+#[test]
 fn custom_delimiter_address_can_gate_branch_command() {
     common::sedx()
         .arg(r"\#alpha#b done; :done")

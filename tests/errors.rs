@@ -31,6 +31,19 @@ fn unknown_substitution_flag_exits_nonzero_with_hint() {
 }
 
 #[test]
+fn duplicate_numeric_substitution_flag_exits_nonzero_with_hint() {
+    sedx()
+        .arg("s/a/X/2g3")
+        .write_stdin("a a a\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Failed to parse expression"))
+        .stderr(predicate::str::contains(
+            "duplicate numeric substitution flag",
+        ));
+}
+
+#[test]
 fn missing_input_file_emits_warning_to_stderr() {
     // Current behavior (codified, not asserted as correct): missing files
     // produce a stderr warning and exit 0 with "No changes would be made."

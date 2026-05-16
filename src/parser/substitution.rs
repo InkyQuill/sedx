@@ -4,6 +4,30 @@ use crate::parser::commands;
 use crate::parser::errors::format_parse_error;
 use anyhow::{Result, anyhow};
 
+pub(crate) const ESCAPED_PATTERN_DELIMITER_MARKER: char = '\u{1f}';
+
+pub(crate) fn restore_escaped_pattern_delimiters(pattern: &str) -> String {
+    let mut restored = String::with_capacity(pattern.len());
+    let mut chars = pattern.chars();
+
+    while let Some(c) = chars.next() {
+        if c == ESCAPED_PATTERN_DELIMITER_MARKER {
+            if let Some(delimiter) = chars.next() {
+                if delimiter == '|' {
+                    restored.push('\\');
+                }
+                restored.push(delimiter);
+            } else {
+                restored.push(c);
+            }
+        } else {
+            restored.push(c);
+        }
+    }
+
+    restored
+}
+
 /// Fold a raw sed-flag character sequence into a SubstitutionFlags value.
 pub fn fold_substitution_flags(
     cmd: &str,
@@ -20,6 +44,21 @@ pub fn fold_substitution_flags(
             'p' => out.print = true,
             'i' | 'I' => out.case_insensitive = true,
             '0'..='9' => {
+                if out.nth.is_some() {
+                    return Err(anyhow!(
+                        "{}",
+                        format_parse_error(
+                            cmd,
+                            Some(
+                                flags_pos
+                                    + flags[..index].iter().map(|c| c.len_utf8()).sum::<usize>()
+                            ),
+                            "duplicate numeric substitution flag",
+                            Some("Use only one numeric occurrence flag, for example: s/foo/bar/2g"),
+                        )
+                    ));
+                }
+
                 let mut nth = 0;
                 while index < flags.len() && flags[index].is_ascii_digit() {
                     nth = nth * 10 + (flags[index] as usize - '0' as usize);
@@ -77,7 +116,7 @@ fn scan_substitution_section(
             let next = rest[next_index..].chars().next()?;
             if next == delimiter {
                 if preserve_escaped_delimiter {
-                    section.push('\\');
+                    section.push(ESCAPED_PATTERN_DELIMITER_MARKER);
                     section.push(delimiter);
                 } else {
                     section.push(delimiter);
