@@ -290,7 +290,7 @@ show_warnings = true             # Show compatibility warnings
 [processing]
 context_lines = 2                # Diff context (max: 10)
 max_memory_mb = 100              # Streaming threshold
-streaming = true                 # Enable auto-detection
+streaming = false                # Force streaming when true
 ```
 
 ### diff_formatter.rs - Output Formatting
@@ -324,9 +324,10 @@ streaming = true                 # Enable auto-detection
    For BRE: "\(foo\)" -> convert to "(foo)" -> Regex::new("(foo)")
 
 4. File Processing Decision
-   File size: 50MB < 100MB threshold
-   Commands are streamable: true
-   -> Use streaming mode (prefer streaming for consistency)
+    File size: 50MB < 100MB threshold
+    Commands are streamable: true
+   Config streaming = false
+   -> Use in-memory mode (below threshold)
 
 5. Apply Commands
    For each line:

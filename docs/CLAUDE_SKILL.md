@@ -329,5 +329,5 @@ show_warnings = true
 [processing]
 context_lines = 2           # Default diff context
 max_memory_mb = 100         # Streaming threshold
-streaming = true
+streaming = false
 ```

@@ -93,10 +93,10 @@ Use custom directory for backups instead of \fI~/.sedx/backups/\fP.
 .SS Streaming Options
 .TP
 \fB--streaming\fR
-Enable streaming mode for large files (auto-detects at 100MB).
+Force streaming mode for compatible file-mode edits.
 .TP
 \fB--no-streaming\fR
-Disable auto-detection and force in-memory processing.
+Disable threshold-based streaming and force in-memory processing.
 .SS Expression Options
 .TP
 \fB-e\fR \fIEXPR\fR, \fB--expression\fR=\fIEXPR\fR
@@ -672,6 +672,8 @@ Streaming threshold configurable via:
 \fB~/.sedx/config.toml\fP: \fBmax_memory_mb\fP setting
 .IP \(bu 2
 \fB--no-streaming\fP flag to disable
+.IP \(bu 2
+\fB--streaming\fP flag or \fBstreaming = true\fP setting to force streaming for compatible edits
 .RE
 .SH CONFIGURATION
 SedX stores configuration in \fI~/.sedx/config.toml\fP:
@@ -690,7 +692,7 @@ show_warnings = true             # Show compatibility warnings
 [processing]
 context_lines = 2                # Diff context (max: 10)
 max_memory_mb = 100              # Streaming threshold
-streaming = true                 # Enable auto-detection
+streaming = false                # Force streaming when true
 .RE
 .PP
 Edit with: \fBsedx config\fP

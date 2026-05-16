@@ -351,7 +351,7 @@ show_warnings = true                  # Show compatibility warnings
 [processing]
 context_lines = 2                    # Default diff context lines
 max_memory_mb = 100                  # Streaming threshold (file size)
-streaming = true                     # Enable streaming mode
+streaming = false                    # Force streaming when true
 ```
 
 ```bash
@@ -380,8 +380,8 @@ sedx config --show
 | `--no-backup` | Skip backup (requires `--force`) |
 | `--force` | Force dangerous operations |
 | `--backup-dir <DIR>` | Custom backup directory |
-| `--streaming` | Enable streaming mode |
-| `--no-streaming` | Disable streaming mode |
+| `--streaming` | Force streaming mode for compatible file-mode edits |
+| `--no-streaming` | Disable threshold-based streaming |
 | `-h, --help` | Print help |
 | `-V, --version` | Print version |
 

@@ -215,7 +215,7 @@ show_warnings = true
 [processing]
 context_lines = 2
 max_memory_mb = 100
-streaming = true
+streaming = false
 ```
 
 ---

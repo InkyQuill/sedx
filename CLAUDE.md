@@ -561,7 +561,7 @@ show_warnings = true        # Show compatibility warnings
 [processing]
 context_lines = 2           # Default diff context
 max_memory_mb = 100         # Streaming threshold
-streaming = true            # Enable streaming mode
+streaming = false           # Force streaming when true
 ```
 
 Use `sedx config` to edit, `sedx config --show` to view current settings.
