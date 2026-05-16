@@ -224,6 +224,10 @@ streaming = false
 
 ### Memory Usage
 
+Streaming figures below apply to ordinary line-oriented commands. Sed hold-space
+commands can intentionally accumulate input and grow with the data retained by
+the script.
+
 | Operation | GNU sed | SedX (in-memory) | SedX (streaming) |
 |-----------|---------|------------------|------------------|
 | 10MB file | ~15MB | ~45MB | **<5MB** |

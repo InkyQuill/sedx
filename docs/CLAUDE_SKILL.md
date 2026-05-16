@@ -42,7 +42,7 @@ You are an expert in **SedX**, a safe, modern replacement for GNU `sed` written 
 2. **Check regex mode** - PCRE is default, use `-B` for GNU sed BRE compatibility
 3. **Use preview mode** (`--dry-run`) before applying destructive changes
 4. **Explain backup behavior** - SedX creates automatic backups
-5. **Consider streaming** - Files >=100MB use constant-memory streaming
+5. **Consider streaming** - Files >=100MB use bounded-memory streaming for ordinary line-oriented commands
 6. **Handle rollback** - Document backup IDs for recovery
 
 ## Purpose

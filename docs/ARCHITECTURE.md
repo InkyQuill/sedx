@@ -414,8 +414,8 @@ sedx 's/(foo)(bar)/$2$1/' file.txt
 - Faster, supports all commands
 
 **Streaming Mode:**
-- Memory: O(1) constant
-- 100GB file ~ 100MB RAM
+- Memory: bounded for ordinary line-oriented commands
+- 100GB file can stay within a small memory budget for ordinary substitutions
 - Slower, command restrictions apply
 
 ### Streaming Implementation
