@@ -47,6 +47,8 @@ pub fn parse_label(cmd: &str) -> Result<Command> {
     })
 }
 
+// Retained for public library API compatibility; binary dispatch uses known positions.
+#[allow(dead_code)]
 pub fn parse_branch(cmd: &str) -> Result<Command> {
     let pos = find_flow_command_pos(cmd, 'b')?;
     parse_branch_at(cmd, pos)
@@ -59,6 +61,8 @@ pub fn parse_branch_at(cmd: &str, pos: usize) -> Result<Command> {
     Ok(Command::Branch { label, range })
 }
 
+// Retained for public library API compatibility; binary dispatch uses known positions.
+#[allow(dead_code)]
 pub fn parse_test(cmd: &str) -> Result<Command> {
     let pos = find_flow_command_pos(cmd, 't')?;
     parse_test_at(cmd, pos)
@@ -71,6 +75,8 @@ pub fn parse_test_at(cmd: &str, pos: usize) -> Result<Command> {
     Ok(Command::Test { label, range })
 }
 
+// Retained for public library API compatibility; binary dispatch uses known positions.
+#[allow(dead_code)]
 pub fn parse_test_false(cmd: &str) -> Result<Command> {
     let pos = find_flow_command_pos(cmd, 'T')?;
     parse_test_false_at(cmd, pos)
@@ -92,6 +98,8 @@ fn parse_optional_label(label_part: &str) -> Option<String> {
     }
 }
 
+// Supports compatibility wrappers; binary dispatch avoids rediscovering this position.
+#[allow(dead_code)]
 fn find_flow_command_pos(cmd: &str, command: char) -> Result<usize> {
     let (pos, found) = commands::find_command_char(cmd)
         .ok_or_else(|| anyhow!("flow command missing '{}'", command))?;
