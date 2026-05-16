@@ -75,6 +75,28 @@ fn slash_delimited_pattern_range_can_gate_slash_delimited_substitution() {
 }
 
 #[test]
+fn custom_delimiter_address_with_semicolon_can_gate_substitution() {
+    common::sedx()
+        .arg(r"\#a;b#s/foo/c;d/")
+        .write_stdin("a;b foo\n")
+        .assert()
+        .success()
+        .stdout("a;b c;d\n")
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
+fn grouped_custom_delimiter_address_with_brace_can_gate_substitution() {
+    common::sedx()
+        .arg(r"{\#addr\{x#s/foo/a;b/}")
+        .write_stdin("addr{x foo\n")
+        .assert()
+        .success()
+        .stdout("addr{x a;b\n")
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
 fn grouped_custom_delimiter_range_with_comma_in_start_pattern_prints_range() {
     common::sedx()
         .args(["-n", r"\#a,b#,\#c#{p}"])
@@ -138,6 +160,17 @@ fn group_parser_ignores_literal_closing_brace_in_substitution_replacement() {
         .assert()
         .success()
         .stdout("}\n}\n")
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
+fn group_parser_ignores_literal_closing_brace_in_substitution_pattern() {
+    common::sedx()
+        .args(["-n", r"{s/foo}bar/X/;p}"])
+        .write_stdin("foo}bar\nfoo\n")
+        .assert()
+        .success()
+        .stdout("X\nfoo\n")
         .stderr(predicate::str::is_empty());
 }
 

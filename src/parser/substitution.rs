@@ -59,9 +59,31 @@ pub fn fold_substitution_flags(
                     ));
                 }
 
-                let mut nth = 0;
+                let mut nth = 0usize;
                 while index < flags.len() && flags[index].is_ascii_digit() {
-                    nth = nth * 10 + (flags[index] as usize - '0' as usize);
+                    let digit = flags[index] as usize - '0' as usize;
+                    nth = nth
+                        .checked_mul(10)
+                        .and_then(|value| value.checked_add(digit))
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "{}",
+                                format_parse_error(
+                                    cmd,
+                                    Some(
+                                        flags_pos
+                                            + flags[..index]
+                                                .iter()
+                                                .map(|c| c.len_utf8())
+                                                .sum::<usize>()
+                                    ),
+                                    "numeric substitution flag is too large",
+                                    Some(
+                                        "Use a numeric occurrence flag that fits in this platform's pointer size"
+                                    ),
+                                )
+                            )
+                        })?;
                     index += 1;
                 }
                 out.nth = Some(nth);

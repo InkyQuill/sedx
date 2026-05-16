@@ -210,9 +210,7 @@ fn is_substitution_delimiter(c: char) -> bool {
 }
 
 fn is_substitution_command_start(current_expr: &str, delimiter: char) -> bool {
-    let command_prefix_start = current_expr
-        .rfind(['{', ';'])
-        .map_or(0, |separator| separator + 1);
+    let command_prefix_start = command_prefix_start_after_structural_separator(current_expr);
     let command_prefix = &current_expr[command_prefix_start..];
 
     let mut candidate = String::with_capacity(command_prefix.len() + 2);
@@ -222,6 +220,53 @@ fn is_substitution_command_start(current_expr: &str, delimiter: char) -> bool {
 
     commands::find_command_char(&candidate)
         .is_some_and(|(pos, command)| command == 's' && pos == command_prefix.len())
+}
+
+fn command_prefix_start_after_structural_separator(current_expr: &str) -> usize {
+    let mut command_prefix_start = 0;
+    let mut pattern_delimiter: Option<char> = None;
+    let mut escaped = false;
+
+    let mut chars = current_expr.char_indices().peekable();
+    while let Some((pos, c)) = chars.next() {
+        if let Some(delimiter) = pattern_delimiter {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+
+            if c == '\\' {
+                escaped = true;
+                continue;
+            }
+
+            if c == delimiter {
+                pattern_delimiter = None;
+            }
+
+            continue;
+        }
+
+        if can_start_pattern_address(&current_expr[..pos]) {
+            if c == '/' {
+                pattern_delimiter = Some('/');
+                continue;
+            }
+
+            if c == '\\' {
+                if let Some((_, delimiter)) = chars.next() {
+                    pattern_delimiter = Some(delimiter);
+                    continue;
+                }
+            }
+        }
+
+        if matches!(c, '{' | ';') {
+            command_prefix_start = pos + c.len_utf8();
+        }
+    }
+
+    command_prefix_start
 }
 
 pub(crate) fn find_structural_group_close(expr: &str, open_pos: usize) -> Option<usize> {

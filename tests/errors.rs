@@ -44,6 +44,19 @@ fn duplicate_numeric_substitution_flag_exits_nonzero_with_hint() {
 }
 
 #[test]
+fn overflowing_numeric_substitution_flag_exits_nonzero_with_hint() {
+    sedx()
+        .arg("s/a/X/999999999999999999999999999999999999999999999999999")
+        .write_stdin("a\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Failed to parse expression"))
+        .stderr(predicate::str::contains(
+            "numeric substitution flag is too large",
+        ));
+}
+
+#[test]
 fn missing_input_file_emits_warning_to_stderr() {
     // Current behavior (codified, not asserted as correct): missing files
     // produce a stderr warning and exit 0 with "No changes would be made."
