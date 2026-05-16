@@ -314,17 +314,22 @@ impl SubstitutionEngine {
                     }
                 }
             } else if c == '$' {
-                // Handle backreferences: $1, $2, ${name}
+                // Handle backreferences: $1, $2, ${name}, and sed-compatible $&.
                 let mut reference = String::from('$');
-                while let Some(&next_c) = chars.peek() {
-                    if next_c.is_ascii_digit() || next_c == '{' {
-                        reference.push(next_c);
-                        chars.next();
-                        if next_c == '}' {
+                if chars.peek() == Some(&'&') {
+                    chars.next();
+                    reference.push('0');
+                } else {
+                    while let Some(&next_c) = chars.peek() {
+                        if next_c.is_ascii_digit() || next_c == '{' {
+                            reference.push(next_c);
+                            chars.next();
+                            if next_c == '}' {
+                                break;
+                            }
+                        } else {
                             break;
                         }
-                    } else {
-                        break;
                     }
                 }
                 result.push_str(&reference);

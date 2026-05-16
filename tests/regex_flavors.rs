@@ -122,6 +122,26 @@ fn substitution_zero_occurrence_replaces_all_matches() {
 }
 
 #[test]
+fn direct_dollar_ampersand_expands_whole_match() {
+    sedx()
+        .arg(r"s/foobar/[$&]/")
+        .write_stdin("foobar\n")
+        .assert()
+        .success()
+        .stdout("[foobar]\n");
+}
+
+#[test]
+fn direct_dollar_ampersand_expands_whole_match_for_nth_substitution() {
+    sedx()
+        .arg(r"s/(foo)(bar)/[$&]/2")
+        .write_stdin("foobar foobar\n")
+        .assert()
+        .success()
+        .stdout("foobar [foobar]\n");
+}
+
+#[test]
 fn bre_replacement_newline_produces_actual_newline() {
     sedx()
         .args(["-B", r"s/foo/bar\nbaz/"])
