@@ -1,5 +1,5 @@
 use crate::command::Command;
-use crate::parser::address::parse_address;
+use crate::parser::address::parse_optional_range;
 use crate::parser::errors::format_parse_error;
 use crate::parser::parse_single_command;
 use anyhow::{Result, anyhow};
@@ -56,25 +56,7 @@ pub fn parse_group(cmd: &str) -> Result<Command> {
     // Extract commands inside the braces
     let commands_str = &cmd[brace_start..close_brace].trim();
 
-    // Parse the range if present
-    let range = if addr_part.is_empty() {
-        None
-    } else if addr_part.contains(',') {
-        // Range: start,end{...}
-        let parts: Vec<&str> = addr_part.splitn(2, ',').collect();
-        if parts.len() == 2 {
-            Some((
-                parse_address(parts[0].trim())?,
-                parse_address(parts[1].trim())?,
-            ))
-        } else {
-            None
-        }
-    } else {
-        // Single address: addr{...}
-        let addr = parse_address(addr_part)?;
-        Some((addr.clone(), addr))
-    };
+    let range = parse_optional_range(addr_part)?;
 
     // Parse commands inside the group (separated by semicolons)
     let mut commands = Vec::new();

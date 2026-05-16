@@ -64,6 +64,17 @@ fn custom_delimiter_range_with_comma_in_start_pattern_prints_range() {
 }
 
 #[test]
+fn grouped_custom_delimiter_range_with_comma_in_start_pattern_prints_range() {
+    common::sedx()
+        .args(["-n", r"\#a,b#,\#c#{p}"])
+        .write_stdin("before\na,b\nc\nafter\n")
+        .assert()
+        .success()
+        .stdout("a,b\nc\n")
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
 fn custom_delimiter_address_can_gate_branch_command() {
     common::sedx()
         .arg(r"\#alpha#b done; :done")
