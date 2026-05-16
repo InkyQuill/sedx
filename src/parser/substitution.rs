@@ -1,5 +1,6 @@
 use crate::command::{Command, SubstitutionFlags};
 use crate::parser::address::parse_optional_range;
+use crate::parser::commands;
 use crate::parser::errors::format_parse_error;
 use anyhow::{Result, anyhow};
 
@@ -22,23 +23,7 @@ pub fn fold_substitution_flags(flags: &[char]) -> SubstitutionFlags {
 }
 
 pub fn parse_substitution(cmd: &str) -> Result<Command> {
-    // Find the 's' that starts the substitution command
-    // It's the first 's' followed by a delimiter (/, #, :, etc.)
-    let bytes = cmd.as_bytes();
-    let mut s_pos = None;
-
-    for (i, &byte) in bytes.iter().enumerate() {
-        if byte == b's' && i + 1 < bytes.len() {
-            let next_byte = bytes[i + 1];
-            // Check if next char is a valid delimiter
-            if next_byte == b'/' || next_byte == b'#' || next_byte == b':' || next_byte == b'|' {
-                s_pos = Some(i);
-                break;
-            }
-        }
-    }
-
-    let s_pos = s_pos.ok_or_else(|| {
+    let (s_pos, command) = commands::find_command_char(cmd).ok_or_else(|| {
         anyhow!(
             "{}",
             format_parse_error(
@@ -49,6 +34,19 @@ pub fn parse_substitution(cmd: &str) -> Result<Command> {
             )
         )
     })?;
+    if command != 's' {
+        return Err(anyhow!(
+            "{}",
+            format_parse_error(
+                cmd,
+                Some(s_pos),
+                &format!("expected substitution command but found '{}'", command),
+                Some(
+                    "Substitution format: s<delimiter>pattern<delimiter>replacement<delimiter>[flags]\nExample: s/foo/bar/ or /pattern/s/foo/bar/"
+                )
+            )
+        ));
+    }
 
     // Everything before 's' is the address/range
     let address_part = &cmd[..s_pos];

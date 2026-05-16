@@ -64,6 +64,17 @@ fn custom_delimiter_range_with_comma_in_start_pattern_prints_range() {
 }
 
 #[test]
+fn slash_delimited_pattern_range_can_gate_slash_delimited_substitution() {
+    common::sedx()
+        .arg(r"/A/,/B/s/^/x:/")
+        .write_stdin("before\nA\nmid\nB\nafter\n")
+        .assert()
+        .success()
+        .stdout("before\nx:A\nx:mid\nx:B\nafter\n")
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
 fn grouped_custom_delimiter_range_with_comma_in_start_pattern_prints_range() {
     common::sedx()
         .args(["-n", r"\#a,b#,\#c#{p}"])

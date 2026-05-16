@@ -365,9 +365,7 @@ fn forced_streaming_duplicate_pattern_ranges_do_not_share_state() {
 #[test]
 fn streaming_group_inner_pattern_ranges_have_independent_state() {
     let parser = Parser::new(RegexFlavor::PCRE);
-    let commands = parser
-        .parse(r"{ \#A#,\#B#s/^/x:/; \#C#,\#D#s/^/y:/ }")
-        .unwrap();
+    let commands = parser.parse(r"{ /A/,/B/s/^/x:/; /C/,/D/s/^/y:/ }").unwrap();
     let mut processor = StreamProcessor::new(commands);
     let mut output = Vec::new();
 

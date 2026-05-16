@@ -37,31 +37,7 @@ pub fn is_inside_pattern_address(cmd: &str, pos: usize) -> bool {
         i += 1;
     }
 
-    // If we are still waiting for a closer, we are inside a pattern address.
-    if current_opener.is_some() {
-        return true;
-    }
-
-    // Phase 2 covers the substitution replacement region (e.g. the `r` in
-    // `s/foo/bar/`), where Phase 1 exits in the `None` state because the
-    // pattern sub-region already closed. Discriminator: whitespace before the
-    // next slash indicates a filename argument, not a paired closing delimiter.
-    let has_slash_before = (0..pos)
-        .rev()
-        .any(|j| bytes[j] == b'/' && (j == 0 || bytes[j - 1] != b'\\'));
-    if !has_slash_before {
-        return false;
-    }
-    for &byte in bytes.iter().skip(pos + 1) {
-        if byte.is_ascii_whitespace() {
-            break;
-        }
-        if byte == b'/' {
-            return true;
-        }
-    }
-
-    false
+    current_opener.is_some()
 }
 
 pub fn parse_read_file(cmd: &str) -> Result<Command> {
