@@ -30,16 +30,19 @@ fn write_file_command_rejects_absolute_path() {
 fn write_file_command_rejects_parent_traversal() {
     let home = TempDir::new().unwrap();
     let dir = home.path();
-    let input = write_file(dir, "input.txt", "alpha\n");
+    let work = dir.join("work");
+    std::fs::create_dir(&work).unwrap();
+    let input = write_file(&work, "input.txt", "alpha\n");
 
     sedx_isolated(dir)
+        .current_dir(&work)
         .args(["--no-backup", "--force", "w ../outside.txt", input.to_str().unwrap()])
         .assert()
         .failure()
         .stderr(predicate::str::contains("unsafe file I/O path"))
         .stderr(predicate::str::contains("parent traversal is not allowed"));
 
-    assert!(!dir.parent().unwrap().join("outside.txt").exists());
+    assert!(!dir.join("outside.txt").exists());
 }
 
 #[test]
@@ -47,9 +50,10 @@ fn read_file_command_rejects_absolute_path() {
     let home = TempDir::new().unwrap();
     let dir = home.path();
     let input = write_file(dir, "input.txt", "alpha\n");
+    let secret = write_file(dir, "secret.txt", "secret\n");
 
     sedx_isolated(dir)
-        .args(["--dry-run", "r /etc/passwd", input.to_str().unwrap()])
+        .args(["--dry-run", &format!("r {}", secret.display()), input.to_str().unwrap()])
         .assert()
         .failure()
         .stderr(predicate::str::contains("unsafe file I/O path"));
