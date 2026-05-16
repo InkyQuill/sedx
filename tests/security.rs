@@ -69,6 +69,40 @@ fn read_file_command_rejects_absolute_path() {
 }
 
 #[test]
+fn forced_streaming_rejects_read_file_command() {
+    let home = TempDir::new().unwrap();
+    let dir = home.path();
+    let input = write_file(dir, "input.txt", "alpha\nbravo\n");
+    write_file(dir, "extra.txt", "extra\n");
+
+    sedx_isolated(dir)
+        .current_dir(dir)
+        .args(["--streaming", "2r extra.txt", input.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "not supported in forced streaming mode",
+        ));
+}
+
+#[test]
+fn forced_streaming_rejects_grouped_read_file_command() {
+    let home = TempDir::new().unwrap();
+    let dir = home.path();
+    let input = write_file(dir, "input.txt", "alpha\nbravo\n");
+    write_file(dir, "extra.txt", "extra\n");
+
+    sedx_isolated(dir)
+        .current_dir(dir)
+        .args(["--streaming", "{2r extra.txt}", input.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "not supported in forced streaming mode",
+        ));
+}
+
+#[test]
 fn backup_restore_rejects_tampered_original_path() {
     let home = TempDir::new().unwrap();
     let dir = home.path();

@@ -750,9 +750,18 @@ impl StreamProcessor {
                                             line_changed = true;
                                         }
                                     }
-                                    _ => {
-                                        // Ignore other commands in streaming group for now
+                                    Command::ReadFile { filename, .. }
+                                    | Command::ReadLine { filename, .. }
+                                    | Command::WriteFile { filename, .. }
+                                    | Command::WriteFirstLine { filename, .. } => {
+                                        let safe_path =
+                                            crate::path_policy::validate_script_file_operand(
+                                                filename,
+                                            )?;
+                                        crate::path_policy::ensure_not_symlink(&safe_path)?;
+                                        bail_unsupported_streaming_command(group_cmd)?;
                                     }
+                                    _ => bail_unsupported_streaming_command(group_cmd)?,
                                 }
                             }
                         }
@@ -875,6 +884,40 @@ impl StreamProcessor {
             printed_lines,
             is_streaming: true,
         })
+    }
+
+    fn command_name(command: &Command) -> &'static str {
+        match command {
+            Command::Substitution { .. } => "s",
+            Command::Delete { .. } => "d",
+            Command::Print { .. } => "p",
+            Command::Quit { .. } => "q",
+            Command::QuitWithoutPrint { .. } => "Q",
+            Command::Insert { .. } => "i",
+            Command::Append { .. } => "a",
+            Command::Change { .. } => "c",
+            Command::Group { .. } => "{}",
+            Command::Hold { .. } => "h",
+            Command::HoldAppend { .. } => "H",
+            Command::Get { .. } => "g",
+            Command::GetAppend { .. } => "G",
+            Command::Exchange { .. } => "x",
+            Command::Next { .. } => "n",
+            Command::NextAppend { .. } => "N",
+            Command::PrintFirstLine { .. } => "P",
+            Command::DeleteFirstLine { .. } => "D",
+            Command::Label { .. } => ":",
+            Command::Branch { .. } => "b",
+            Command::Test { .. } => "t",
+            Command::TestFalse { .. } => "T",
+            Command::ReadFile { .. } => "r",
+            Command::WriteFile { .. } => "w",
+            Command::ReadLine { .. } => "R",
+            Command::WriteFirstLine { .. } => "W",
+            Command::PrintLineNumber { .. } => "=",
+            Command::PrintFilename { .. } => "F",
+            Command::ClearPatternSpace { .. } => "z",
+        }
     }
 
     fn check_pattern_range(&mut self, line: &str, start_pat: &str, end_pat: &str) -> Result<bool> {
@@ -1076,6 +1119,13 @@ impl StreamProcessor {
             _ => Ok(false),
         }
     }
+}
+
+fn bail_unsupported_streaming_command(command: &Command) -> Result<()> {
+    anyhow::bail!(
+        "command '{}' is not supported in forced streaming mode",
+        StreamProcessor::command_name(command)
+    );
 }
 
 #[cfg(test)]

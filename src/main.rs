@@ -170,6 +170,14 @@ fn execute_command(
 
     let can_modify_files = commands_can_modify_files(&commands);
     let supports_streaming = can_use_streaming(&commands);
+    if streaming {
+        if let Some(command) = unsupported_streaming_command(&commands) {
+            anyhow::bail!(
+                "command '{}' is not supported in forced streaming mode",
+                command
+            );
+        }
+    }
 
     let mut file_paths = Vec::new();
     for f in files {
@@ -418,6 +426,49 @@ fn can_use_streaming(commands: &[Command]) -> bool {
         }
     }
     true
+}
+
+fn unsupported_streaming_command(commands: &[Command]) -> Option<&'static str> {
+    for cmd in commands {
+        match cmd {
+            Command::Substitution { .. }
+            | Command::Delete { .. }
+            | Command::Print { .. }
+            | Command::Quit { .. }
+            | Command::Hold { .. }
+            | Command::HoldAppend { .. }
+            | Command::Get { .. }
+            | Command::GetAppend { .. }
+            | Command::Exchange { .. }
+            | Command::Next { .. }
+            | Command::NextAppend { .. }
+            | Command::PrintFirstLine { .. }
+            | Command::PrintLineNumber { .. }
+            | Command::PrintFilename { .. }
+            | Command::ClearPatternSpace { .. }
+            | Command::Insert { .. }
+            | Command::Append { .. }
+            | Command::Change { .. } => {}
+            Command::Group {
+                commands: inner, ..
+            } => {
+                if let Some(command) = unsupported_streaming_command(inner) {
+                    return Some(command);
+                }
+            }
+            Command::ReadFile { .. } => return Some("r"),
+            Command::ReadLine { .. } => return Some("R"),
+            Command::WriteFile { .. } => return Some("w"),
+            Command::WriteFirstLine { .. } => return Some("W"),
+            Command::QuitWithoutPrint { .. } => return Some("Q"),
+            Command::DeleteFirstLine { .. } => return Some("D"),
+            Command::Label { .. } => return Some(":"),
+            Command::Branch { .. } => return Some("b"),
+            Command::Test { .. } => return Some("t"),
+            Command::TestFalse { .. } => return Some("T"),
+        }
+    }
+    None
 }
 
 fn commands_can_modify_files(commands: &[Command]) -> bool {
