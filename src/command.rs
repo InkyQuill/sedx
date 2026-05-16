@@ -180,6 +180,10 @@ pub enum Address {
 
     /// Step addressing (e.g., 1~2 for every 2nd line from line 1)
     Step { start: usize, step: usize },
+
+    /// Internal marker for commands parsed with one address rather than an
+    /// explicit comma range.
+    Single(Box<Address>),
 }
 
 #[cfg(test)]
@@ -209,6 +213,7 @@ mod tests {
             offset: 5,
         };
         let step_addr = Address::Step { start: 1, step: 2 };
+        let single_addr = Address::Single(Box::new(Address::LineNumber(7)));
 
         // All should compile and be valid
         assert!(matches!(line_addr, Address::LineNumber(42)));
@@ -218,6 +223,7 @@ mod tests {
         assert!(matches!(negated_addr, Address::Negated(_)));
         assert!(matches!(relative_addr, Address::Relative { .. }));
         assert!(matches!(step_addr, Address::Step { .. }));
+        assert!(matches!(single_addr, Address::Single(_)));
     }
 
     #[test]

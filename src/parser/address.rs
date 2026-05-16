@@ -52,7 +52,7 @@ pub fn parse_optional_range(addr_part: &str) -> Result<Option<(Address, Address)
 
     // Single address
     let addr = parse_address(addr_part)?;
-    Ok(Some((addr.clone(), addr)))
+    Ok(Some((addr.clone(), Address::Single(Box::new(addr)))))
 }
 
 fn find_range_separator(addr_part: &str) -> Option<usize> {

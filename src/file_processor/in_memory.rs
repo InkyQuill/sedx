@@ -584,10 +584,17 @@ impl FileProcessor {
         start: &Address,
         end: &Address,
     ) -> bool {
+        if let Address::Single(address) = end {
+            return self.address_matches_cycle(address, state);
+        }
+
         match (start, end) {
             (Address::LineNumber(1), Address::LastLine) => true,
             (Address::LineNumber(start_line), Address::LineNumber(end_line)) => {
                 if start_line == end_line {
+                    return state.line_num == *start_line;
+                }
+                if start_line > end_line {
                     return state.line_num == *start_line;
                 }
                 let key = (command_index, *start_line, *end_line);
@@ -607,10 +614,6 @@ impl FileProcessor {
                 *in_range
             }
             (Address::Pattern(start_pat), Address::Pattern(end_pat)) => {
-                if start_pat == end_pat {
-                    return self.address_matches_cycle(start, state);
-                }
-
                 let start_match = self.address_matches_cycle(start, state);
                 let end_match = self.address_matches_cycle(end, state);
                 let key = (command_index, start_pat.clone(), end_pat.clone());

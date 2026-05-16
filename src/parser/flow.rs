@@ -147,7 +147,7 @@ mod tests {
                 label: Some("done".to_string()),
                 range: Some((
                     Address::Pattern("b".to_string()),
-                    Address::Pattern("b".to_string()),
+                    Address::Single(Box::new(Address::Pattern("b".to_string()))),
                 )),
             }
         );
@@ -161,7 +161,7 @@ mod tests {
                 label: Some("done".to_string()),
                 range: Some((
                     Address::Pattern("t".to_string()),
-                    Address::Pattern("t".to_string()),
+                    Address::Single(Box::new(Address::Pattern("t".to_string()))),
                 )),
             }
         );
@@ -175,7 +175,7 @@ mod tests {
                 label: Some("done".to_string()),
                 range: Some((
                     Address::Pattern("T".to_string()),
-                    Address::Pattern("T".to_string()),
+                    Address::Single(Box::new(Address::Pattern("T".to_string()))),
                 )),
             }
         );

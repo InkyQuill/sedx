@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::{read_file, sedx_isolated, write_file};
+use common::{read_file, sedx, sedx_isolated, write_file};
 use sedx::cli::RegexFlavor;
 use sedx::file_processor::StreamProcessor;
 use sedx::parser::Parser;
@@ -336,6 +336,36 @@ fn streaming_change_pattern_range_collapses_to_single_replacement() {
         String::from_utf8(output).unwrap(),
         "before\nREPLACED\nafter\n"
     );
+}
+
+#[test]
+fn forced_streaming_duplicate_pattern_ranges_do_not_share_state() {
+    sedx()
+        .args(["--streaming", "-n", "/START/,/END/p; /START/,/END/p"])
+        .write_stdin("AAA\nSTART\nBBB\nEND\nCCC\n")
+        .assert()
+        .success()
+        .stdout("START\nSTART\nBBB\nBBB\nEND\nEND\n");
+}
+
+#[test]
+fn forced_streaming_same_pattern_range_uses_normal_range_state() {
+    sedx()
+        .args(["--streaming", "-n", "/MARK/,/MARK/p"])
+        .write_stdin("before\nMARK\nmiddle\nMARK\nafter\n")
+        .assert()
+        .success()
+        .stdout("MARK\nmiddle\nMARK\n");
+}
+
+#[test]
+fn forced_streaming_reversed_line_range_matches_only_start_line() {
+    sedx()
+        .args(["--streaming", "-n", "4,2p"])
+        .write_stdin("one\ntwo\nthree\nfour\nfive\n")
+        .assert()
+        .success()
+        .stdout("four\n");
 }
 
 #[cfg(unix)]

@@ -56,6 +56,7 @@ pub fn matches_address(address: &Address, context: &AddressContext<'_>) -> bool 
         Address::Step { start, step } => {
             context.line_number >= *start && (context.line_number - *start).is_multiple_of(*step)
         }
+        Address::Single(inner) => matches_address(inner, context),
     }
 }
 

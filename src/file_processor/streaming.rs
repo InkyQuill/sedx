@@ -23,8 +23,8 @@ pub struct StreamProcessor {
     context_size: usize,
     // State for reading context after a change
     context_lines_to_read: usize,
-    // Pattern range states: (start_pattern, end_pattern) -> state
-    pattern_range_states: HashMap<(String, String), PatternRangeState>,
+    // Pattern range states: (command_index, start_pattern, end_pattern) -> state
+    pattern_range_states: HashMap<(usize, String, String), PatternRangeState>,
     // Mixed range states for tracking complex ranges
     mixed_range_states: HashMap<MixedRangeKey, MixedRangeState>,
     // Dry run mode: if true, don't persist changes to disk
@@ -922,8 +922,14 @@ impl StreamProcessor {
         }
     }
 
-    fn check_pattern_range(&mut self, line: &str, start_pat: &str, end_pat: &str) -> Result<bool> {
-        let key = (start_pat.to_string(), end_pat.to_string());
+    fn check_pattern_range(
+        &mut self,
+        line: &str,
+        start_pat: &str,
+        end_pat: &str,
+        command_index: usize,
+    ) -> Result<bool> {
+        let key = (command_index, start_pat.to_string(), end_pat.to_string());
         let state = self
             .pattern_range_states
             .entry(key.clone())
@@ -1090,13 +1096,9 @@ impl StreamProcessor {
         use Address::*;
 
         match (&range.0, &range.1) {
-            (Pattern(start_pat), Pattern(end_pat)) if start_pat == end_pat => {
-                let re = Regex::new(start_pat)
-                    .with_context(|| format!("Invalid regex pattern: {}", start_pat))?;
-                Ok(re.is_match(line))
-            }
+            (_, Single(address)) => Ok(self.address_matches_current(address, line)),
             (Pattern(start_pat), Pattern(end_pat)) => {
-                self.check_pattern_range(line, start_pat, end_pat)
+                self.check_pattern_range(line, start_pat, end_pat, command_index)
             }
             (Pattern(start_pat), LineNumber(end_line)) => {
                 self.check_mixed_pattern_to_line(line, start_pat, *end_line, command_index)
@@ -1107,6 +1109,7 @@ impl StreamProcessor {
             (Pattern(start_pat), Relative { base: _, offset }) => {
                 self.check_relative_range(line, start_pat, *offset, command_index)
             }
+            (LineNumber(start), LineNumber(end)) if start > end => Ok(self.current_line == *start),
             (LineNumber(start), LineNumber(end)) => {
                 Ok(self.current_line >= *start && self.current_line <= *end)
             }

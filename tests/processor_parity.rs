@@ -44,11 +44,21 @@ fn duplicate_line_ranges_do_not_share_in_memory_state() {
 }
 
 #[test]
-fn same_pattern_range_keeps_single_line_in_memory_behavior() {
+fn same_pattern_range_uses_normal_in_memory_range_state() {
     sedx()
         .args(["-n", "--no-streaming", "/MARK/,/MARK/p"])
         .write_stdin("before\nMARK\nmiddle\nMARK\nafter\n")
         .assert()
         .success()
-        .stdout("MARK\nMARK\n");
+        .stdout("MARK\nmiddle\nMARK\n");
+}
+
+#[test]
+fn reversed_line_range_matches_only_start_line_in_memory() {
+    sedx()
+        .args(["-n", "--no-streaming", "4,2p"])
+        .write_stdin("one\ntwo\nthree\nfour\nfive\n")
+        .assert()
+        .success()
+        .stdout("four\n");
 }
