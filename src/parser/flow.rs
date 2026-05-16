@@ -46,80 +46,35 @@ pub fn parse_label(cmd: &str) -> Result<Command> {
     })
 }
 
-pub fn parse_branch(cmd: &str) -> Result<Command> {
-    let cmd = cmd.trim();
-    let b_pos = cmd
-        .find('b')
-        .ok_or_else(|| anyhow!("Branch command missing 'b'"))?;
-
-    let address_part = &cmd[..b_pos];
-    let rest_part = &cmd[b_pos..];
-
-    let range = parse_optional_range(address_part)?;
-
-    let label_part = &rest_part[1..];
-    let label = if label_part.trim().is_empty() {
-        None
-    } else {
-        let label_name = label_part.trim();
-        if !label_name.is_empty() {
-            Some(label_name.to_string())
-        } else {
-            None
-        }
-    };
-
+pub fn parse_branch_at(cmd: &str, pos: usize) -> Result<Command> {
+    let addr_part = &cmd[..pos];
+    let label_part = &cmd[pos + 1..];
+    let range = parse_optional_range(addr_part)?;
+    let label = parse_optional_label(label_part);
     Ok(Command::Branch { label, range })
 }
 
-pub fn parse_test(cmd: &str) -> Result<Command> {
-    let cmd = cmd.trim();
-    let t_pos = cmd
-        .find('t')
-        .ok_or_else(|| anyhow!("Test command missing 't'"))?;
-
-    let address_part = &cmd[..t_pos];
-    let rest_part = &cmd[t_pos..];
-
-    let range = parse_optional_range(address_part)?;
-
-    let label_part = &rest_part[1..];
-    let label = if label_part.trim().is_empty() {
-        None
-    } else {
-        let label_name = label_part.trim();
-        if !label_name.is_empty() {
-            Some(label_name.to_string())
-        } else {
-            None
-        }
-    };
-
+pub fn parse_test_at(cmd: &str, pos: usize) -> Result<Command> {
+    let addr_part = &cmd[..pos];
+    let label_part = &cmd[pos + 1..];
+    let range = parse_optional_range(addr_part)?;
+    let label = parse_optional_label(label_part);
     Ok(Command::Test { label, range })
 }
 
-pub fn parse_test_false(cmd: &str) -> Result<Command> {
-    let cmd = cmd.trim();
-    let t_pos = cmd
-        .find('T')
-        .ok_or_else(|| anyhow!("Test false command missing 'T'"))?;
+pub fn parse_test_false_at(cmd: &str, pos: usize) -> Result<Command> {
+    let addr_part = &cmd[..pos];
+    let label_part = &cmd[pos + 1..];
+    let range = parse_optional_range(addr_part)?;
+    let label = parse_optional_label(label_part);
+    Ok(Command::TestFalse { label, range })
+}
 
-    let address_part = &cmd[..t_pos];
-    let rest_part = &cmd[t_pos..];
-
-    let range = parse_optional_range(address_part)?;
-
-    let label_part = &rest_part[1..];
-    let label = if label_part.trim().is_empty() {
+fn parse_optional_label(label_part: &str) -> Option<String> {
+    let label_name = label_part.trim();
+    if label_name.is_empty() {
         None
     } else {
-        let label_name = label_part.trim();
-        if !label_name.is_empty() {
-            Some(label_name.to_string())
-        } else {
-            None
-        }
-    };
-
-    Ok(Command::TestFalse { label, range })
+        Some(label_name.to_string())
+    }
 }

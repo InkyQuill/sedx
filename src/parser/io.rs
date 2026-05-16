@@ -1,4 +1,4 @@
-use crate::command::Command;
+use crate::command::{Address, Command};
 use crate::parser::address::parse_address;
 use crate::parser::errors::format_parse_error;
 use anyhow::{Result, anyhow, bail};
@@ -16,8 +16,12 @@ pub fn is_inside_pattern_address(cmd: &str, pos: usize) -> bool {
         let byte = bytes[i];
         match current_opener {
             None => {
-                if byte == b'/' || byte == b'\\' {
+                if byte == b'/' {
                     current_opener = Some(byte);
+                } else if byte == b'\\' && i + 1 < limit {
+                    current_opener = Some(bytes[i + 1]);
+                    i += 2;
+                    continue;
                 }
             }
             Some(opener) => {
@@ -73,7 +77,7 @@ pub fn parse_read_file(cmd: &str) -> Result<Command> {
     let range = if address_part.trim().is_empty() {
         None
     } else {
-        Some(parse_address(address_part.trim())?)
+        Some(parse_io_address(address_part.trim())?)
     };
 
     let filename_part = &rest_part[1..];
@@ -111,7 +115,7 @@ pub fn parse_write_file(cmd: &str) -> Result<Command> {
     let range = if address_part.trim().is_empty() {
         None
     } else {
-        Some(parse_address(address_part.trim())?)
+        Some(parse_io_address(address_part.trim())?)
     };
 
     let filename_part = &rest_part[1..];
@@ -149,7 +153,7 @@ pub fn parse_read_line(cmd: &str) -> Result<Command> {
     let range = if address_part.trim().is_empty() {
         None
     } else {
-        Some(parse_address(address_part.trim())?)
+        Some(parse_io_address(address_part.trim())?)
     };
 
     let filename_part = &rest_part[1..];
@@ -187,7 +191,7 @@ pub fn parse_write_first_line(cmd: &str) -> Result<Command> {
     let range = if address_part.trim().is_empty() {
         None
     } else {
-        Some(parse_address(address_part.trim())?)
+        Some(parse_io_address(address_part.trim())?)
     };
 
     let filename_part = &rest_part[1..];
@@ -210,4 +214,42 @@ pub fn parse_write_first_line(cmd: &str) -> Result<Command> {
         filename: filename.to_string(),
         range,
     })
+}
+
+fn parse_io_address(address_part: &str) -> Result<Address> {
+    if let Some(pattern) = parse_custom_delimiter_address(address_part) {
+        return Ok(Address::Pattern(pattern));
+    }
+
+    parse_address(address_part)
+}
+
+fn parse_custom_delimiter_address(address_part: &str) -> Option<String> {
+    let bytes = address_part.as_bytes();
+    if bytes.len() < 3 || bytes.first() != Some(&b'\\') {
+        return None;
+    }
+
+    let delimiter = bytes[1] as char;
+    let pattern_start = 2;
+    let mut escaped = false;
+
+    for (offset, ch) in address_part[pattern_start..].char_indices() {
+        let pos = pattern_start + offset;
+        if escaped {
+            escaped = false;
+            continue;
+        }
+
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+
+        if ch == delimiter && pos + ch.len_utf8() == address_part.len() {
+            return Some(address_part[pattern_start..pos].to_string());
+        }
+    }
+
+    None
 }
