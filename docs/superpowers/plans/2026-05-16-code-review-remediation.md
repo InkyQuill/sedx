@@ -1312,7 +1312,7 @@ git commit -m "docs: record review remediation policy"
 **Files:**
 - No code changes expected.
 
-- [ ] **Step 1: Run formatting check**
+- [x] **Step 1: Run formatting check**
 
 ```bash
 cargo fmt --all -- --check
@@ -1320,7 +1320,7 @@ cargo fmt --all -- --check
 
 Expected: no output and exit 0.
 
-- [ ] **Step 2: Run clippy**
+- [x] **Step 2: Run clippy**
 
 ```bash
 cargo clippy --all-targets --all-features --locked -- -D warnings
@@ -1328,7 +1328,7 @@ cargo clippy --all-targets --all-features --locked -- -D warnings
 
 Expected: no warnings.
 
-- [ ] **Step 3: Run full tests**
+- [x] **Step 3: Run full tests**
 
 ```bash
 cargo test --all-targets --all-features --locked --no-fail-fast
@@ -1336,7 +1336,7 @@ cargo test --all-targets --all-features --locked --no-fail-fast
 
 Expected: all tests pass. Ignored large streaming test may remain ignored.
 
-- [ ] **Step 4: Run docs**
+- [x] **Step 4: Run docs**
 
 ```bash
 cargo doc --no-deps --all-features --locked
@@ -1344,7 +1344,7 @@ cargo doc --no-deps --all-features --locked
 
 Expected: docs build successfully.
 
-- [ ] **Step 5: Inspect working tree**
+- [x] **Step 5: Inspect working tree**
 
 ```bash
 git status --short
@@ -1352,7 +1352,7 @@ git status --short
 
 Expected: empty output.
 
-- [ ] **Step 6: Produce final remediation summary**
+- [x] **Step 6: Produce final remediation summary**
 
 Write a concise summary with:
 
