@@ -147,6 +147,46 @@ fn escaped_delimiter_in_replacement_is_literal() {
 }
 
 #[test]
+fn escaped_pipe_delimiter_in_pattern_is_literal() {
+    sedx()
+        .arg(r"s|a\|b|X|")
+        .write_stdin("a|b\na\nb\n")
+        .assert()
+        .success()
+        .stdout("X\na\nb\n");
+}
+
+#[test]
+fn escaped_pipe_delimiter_in_replacement_is_literal() {
+    sedx()
+        .arg(r"s|foo|a\|b|")
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("a|b\n");
+}
+
+#[test]
+fn semicolon_inside_substitution_pattern_does_not_split_command() {
+    sedx()
+        .arg("s/a;b/X/")
+        .write_stdin("a;b\n")
+        .assert()
+        .success()
+        .stdout("X\n");
+}
+
+#[test]
+fn semicolon_inside_substitution_replacement_does_not_split_command() {
+    sedx()
+        .arg("s/foo/a;b/")
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("a;b\n");
+}
+
+#[test]
 fn ere_replacement_double_dollar_before_ampersand_is_literal_dollars_then_match() {
     sedx()
         .args(["-E", r"s/foo/[$$&]/"])

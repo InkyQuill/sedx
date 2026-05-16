@@ -76,10 +76,34 @@ pub fn parse_sed_expression(expr: &str) -> Result<Vec<Command>> {
     let mut current_expr = String::new();
     let mut brace_depth = 0usize;
     let mut pattern_delimiter: Option<char> = None;
+    let mut substitution: Option<SubstitutionSplitState> = None;
     let mut escaped = false;
 
     let mut chars = expr.chars().peekable();
     while let Some(c) = chars.next() {
+        if let Some(state) = &mut substitution {
+            current_expr.push(c);
+
+            if state.escaped {
+                state.escaped = false;
+                continue;
+            }
+
+            if c == '\\' {
+                state.escaped = true;
+                continue;
+            }
+
+            if c == state.delimiter {
+                state.closed_sections += 1;
+                if state.closed_sections == 2 {
+                    substitution = None;
+                }
+            }
+
+            continue;
+        }
+
         if let Some(delimiter) = pattern_delimiter {
             current_expr.push(c);
 
@@ -112,6 +136,24 @@ pub fn parse_sed_expression(expr: &str) -> Result<Vec<Command>> {
                     pattern_delimiter = Some(delimiter);
                     current_expr.push(c);
                     current_expr.push(delimiter);
+                    continue;
+                }
+            }
+        }
+
+        if c == 's' {
+            if let Some(&delimiter) = chars.peek() {
+                if is_substitution_delimiter(delimiter)
+                    && is_substitution_command_start(&current_expr, delimiter)
+                {
+                    current_expr.push(c);
+                    current_expr.push(delimiter);
+                    chars.next();
+                    substitution = Some(SubstitutionSplitState {
+                        delimiter,
+                        closed_sections: 0,
+                        escaped: false,
+                    });
                     continue;
                 }
             }
@@ -154,15 +196,65 @@ fn can_start_pattern_address(current_expr: &str) -> bool {
     )
 }
 
+#[derive(Debug)]
+struct SubstitutionSplitState {
+    delimiter: char,
+    closed_sections: u8,
+    escaped: bool,
+}
+
+fn is_substitution_delimiter(c: char) -> bool {
+    matches!(c, '/' | '#' | ':' | '|')
+}
+
+fn is_substitution_command_start(current_expr: &str, delimiter: char) -> bool {
+    let command_prefix_start = current_expr
+        .rfind(['{', ';'])
+        .map_or(0, |separator| separator + 1);
+    let command_prefix = &current_expr[command_prefix_start..];
+
+    let mut candidate = String::with_capacity(command_prefix.len() + 2);
+    candidate.push_str(command_prefix);
+    candidate.push('s');
+    candidate.push(delimiter);
+
+    commands::find_command_char(&candidate)
+        .is_some_and(|(pos, command)| command == 's' && pos == command_prefix.len())
+}
+
 pub(crate) fn find_structural_group_close(expr: &str, open_pos: usize) -> Option<usize> {
     let mut current_expr = String::new();
     let mut brace_depth = 0usize;
     let mut tracking_group = false;
     let mut pattern_delimiter: Option<char> = None;
+    let mut substitution: Option<SubstitutionSplitState> = None;
     let mut escaped = false;
 
     let mut chars = expr.char_indices().peekable();
     while let Some((pos, c)) = chars.next() {
+        if let Some(state) = &mut substitution {
+            current_expr.push(c);
+
+            if state.escaped {
+                state.escaped = false;
+                continue;
+            }
+
+            if c == '\\' {
+                state.escaped = true;
+                continue;
+            }
+
+            if c == state.delimiter {
+                state.closed_sections += 1;
+                if state.closed_sections == 2 {
+                    substitution = None;
+                }
+            }
+
+            continue;
+        }
+
         if let Some(delimiter) = pattern_delimiter {
             current_expr.push(c);
 
@@ -195,6 +287,24 @@ pub(crate) fn find_structural_group_close(expr: &str, open_pos: usize) -> Option
                     pattern_delimiter = Some(delimiter);
                     current_expr.push(c);
                     current_expr.push(delimiter);
+                    continue;
+                }
+            }
+        }
+
+        if c == 's' {
+            if let Some((_, delimiter)) = chars.peek().copied() {
+                if is_substitution_delimiter(delimiter)
+                    && is_substitution_command_start(&current_expr, delimiter)
+                {
+                    current_expr.push(c);
+                    current_expr.push(delimiter);
+                    chars.next();
+                    substitution = Some(SubstitutionSplitState {
+                        delimiter,
+                        closed_sections: 0,
+                        escaped: false,
+                    });
                     continue;
                 }
             }

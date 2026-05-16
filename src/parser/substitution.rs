@@ -5,9 +5,14 @@ use crate::parser::errors::format_parse_error;
 use anyhow::{Result, anyhow};
 
 /// Fold a raw sed-flag character sequence into a SubstitutionFlags value.
-pub fn fold_substitution_flags(flags: &[char]) -> SubstitutionFlags {
+pub fn fold_substitution_flags(
+    cmd: &str,
+    flags: &str,
+    flags_pos: usize,
+) -> Result<SubstitutionFlags> {
     let mut out = SubstitutionFlags::default();
     let mut index = 0;
+    let flags: Vec<char> = flags.chars().collect();
 
     while index < flags.len() {
         match flags[index] {
@@ -17,23 +22,38 @@ pub fn fold_substitution_flags(flags: &[char]) -> SubstitutionFlags {
             '0'..='9' => {
                 let mut nth = 0;
                 while index < flags.len() && flags[index].is_ascii_digit() {
-                    nth = nth * 10 + flags[index].to_digit(10).unwrap() as usize;
+                    nth = nth * 10 + (flags[index] as usize - '0' as usize);
                     index += 1;
                 }
                 out.nth = Some(nth);
                 continue;
             }
-            _ => {} // Ignore unknown flags
+            unknown => {
+                return Err(anyhow!(
+                    "{}",
+                    format_parse_error(
+                        cmd,
+                        Some(
+                            flags_pos + flags[..index].iter().map(|c| c.len_utf8()).sum::<usize>()
+                        ),
+                        &format!("unknown substitution flag '{}'", unknown),
+                        Some(
+                            "Valid substitution flags are: g, p, i, I, or digits for the nth match"
+                        ),
+                    )
+                ));
+            }
         }
         index += 1;
     }
-    out
+    Ok(out)
 }
 
 fn scan_substitution_section(
     rest: &str,
     start: usize,
     delimiter: char,
+    preserve_escaped_delimiter: bool,
 ) -> Option<(String, usize, usize)> {
     let mut section = String::new();
     let mut index = start;
@@ -56,7 +76,12 @@ fn scan_substitution_section(
 
             let next = rest[next_index..].chars().next()?;
             if next == delimiter {
-                section.push(delimiter);
+                if preserve_escaped_delimiter {
+                    section.push('\\');
+                    section.push(delimiter);
+                } else {
+                    section.push(delimiter);
+                }
             } else {
                 section.push('\\');
                 section.push(next);
@@ -117,7 +142,7 @@ pub fn parse_substitution(cmd: &str) -> Result<Command> {
 
     let pattern_start = delimiter.len_utf8();
     let Some((pattern, _, replacement_start)) =
-        scan_substitution_section(rest, pattern_start, delimiter)
+        scan_substitution_section(rest, pattern_start, delimiter, true)
     else {
         return Err(anyhow!(
             "{}",
@@ -136,7 +161,7 @@ pub fn parse_substitution(cmd: &str) -> Result<Command> {
     };
 
     let Some((replacement, _, flags_start)) =
-        scan_substitution_section(rest, replacement_start, delimiter)
+        scan_substitution_section(rest, replacement_start, delimiter, false)
     else {
         return Err(anyhow!(
             "{}",
@@ -157,8 +182,7 @@ pub fn parse_substitution(cmd: &str) -> Result<Command> {
     let flags_part = &rest[flags_start..];
 
     // Parse flags
-    let flags_vec: Vec<char> = flags_part.chars().collect();
-    let flags = fold_substitution_flags(&flags_vec);
+    let flags = fold_substitution_flags(cmd, flags_part, s_pos + 1 + flags_start)?;
 
     // Parse address range
     let range = parse_optional_range(address_part)?;

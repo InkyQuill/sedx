@@ -20,6 +20,17 @@ fn unparseable_expression_exits_nonzero_with_hint() {
 }
 
 #[test]
+fn unknown_substitution_flag_exits_nonzero_with_hint() {
+    sedx()
+        .arg("s/foo/bar/q")
+        .write_stdin("foo\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Failed to parse expression"))
+        .stderr(predicate::str::contains("unknown substitution flag 'q'"));
+}
+
+#[test]
 fn missing_input_file_emits_warning_to_stderr() {
     // Current behavior (codified, not asserted as correct): missing files
     // produce a stderr warning and exit 0 with "No changes would be made."
