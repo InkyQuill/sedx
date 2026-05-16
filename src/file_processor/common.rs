@@ -2,7 +2,7 @@ use crate::cli::RegexFlavor;
 use crate::command::Address;
 use crate::command::SubstitutionFlags;
 use crate::regex_error::compile_regex_with_context;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use regex::Regex;
 use std::fs;
 use std::path::Path;
@@ -57,6 +57,19 @@ pub fn matches_address(address: &Address, context: &AddressContext<'_>) -> bool 
             context.line_number >= *start && (context.line_number - *start).is_multiple_of(*step)
         }
         Address::Single(inner) => matches_address(inner, context),
+    }
+}
+
+pub fn try_matches_address(address: &Address, context: &AddressContext<'_>) -> Result<bool> {
+    match address {
+        Address::Pattern(pattern) => {
+            let re = Regex::new(pattern)
+                .with_context(|| format!("Invalid regex pattern: {}", pattern))?;
+            Ok(re.is_match(context.line))
+        }
+        Address::Negated(inner) => Ok(!try_matches_address(inner, context)?),
+        Address::Single(inner) => try_matches_address(inner, context),
+        _ => Ok(matches_address(address, context)),
     }
 }
 

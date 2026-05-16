@@ -2,7 +2,7 @@ use crate::cli::RegexFlavor;
 use crate::command::{Address, Command};
 use crate::file_processor::common::{
     AddressContext, ChangeType, CommandKey, FileDiff, LineChange, MixedRangeKey, MixedRangeState,
-    PatternRangeState, SubstitutionEngine, matches_address, preserve_perms_after,
+    PatternRangeState, SubstitutionEngine, preserve_perms_after, try_matches_address,
 };
 use anyhow::{Context, Result};
 use regex::Regex;
@@ -228,7 +228,7 @@ impl StreamProcessor {
                         }
                     }
                     Command::Insert { text, address } => {
-                        if self.address_matches_current(address, &processed_line) {
+                        if self.address_matches_current(address, &processed_line)? {
                             writeln!(writer, "{}", text)
                                 .with_context(|| "Failed to write inserted line")?;
                             changes.push(LineChange {
@@ -240,7 +240,7 @@ impl StreamProcessor {
                         }
                     }
                     Command::Append { text, address } => {
-                        if self.address_matches_current(address, &processed_line) {
+                        if self.address_matches_current(address, &processed_line)? {
                             append_text = Some(text.clone());
                         }
                     }
@@ -252,7 +252,7 @@ impl StreamProcessor {
                         )?;
                         if should_apply {
                             let reached_end =
-                                self.address_matches_current(&range.1, &processed_line);
+                                self.address_matches_current(&range.1, &processed_line)?;
                             if reached_end {
                                 writeln!(writer, "{}", text)
                                     .with_context(|| "Failed to write changed line")?;
@@ -268,9 +268,9 @@ impl StreamProcessor {
                         }
                     }
                     Command::Quit { address } => {
-                        if address.as_ref().is_none_or(|address| {
-                            self.address_matches_current(address, &processed_line)
-                        }) {
+                        if self
+                            .optional_address_matches_current(address.as_ref(), &processed_line)?
+                        {
                             should_quit_after_line = true;
                         }
                     }
@@ -356,9 +356,8 @@ impl StreamProcessor {
                         }
                     }
                     Command::PrintLineNumber { range } => {
-                        let should_apply = range.as_ref().is_none_or(|address| {
-                            self.address_matches_current(address, &processed_line)
-                        });
+                        let should_apply =
+                            self.optional_address_matches_current(range.as_ref(), &processed_line)?;
                         if should_apply {
                             let line_number = self.current_line.to_string();
                             println!("{}", line_number);
@@ -366,9 +365,8 @@ impl StreamProcessor {
                         }
                     }
                     Command::PrintFilename { range } => {
-                        let should_apply = range.as_ref().is_none_or(|address| {
-                            self.address_matches_current(address, &processed_line)
-                        });
+                        let should_apply =
+                            self.optional_address_matches_current(range.as_ref(), &processed_line)?;
                         if should_apply {
                             let filename = source_name.to_string();
                             println!("{}", filename);
@@ -448,9 +446,8 @@ impl StreamProcessor {
                         }
                     }
                     Command::ClearPatternSpace { range } => {
-                        let should_apply = range.as_ref().is_none_or(|address| {
-                            self.address_matches_current(address, &processed_line)
-                        });
+                        let should_apply =
+                            self.optional_address_matches_current(range.as_ref(), &processed_line)?;
                         if should_apply {
                             line_changed = line_changed || !processed_line.is_empty();
                             processed_line.clear();
@@ -683,9 +680,9 @@ impl StreamProcessor {
                     }
                 }
                 Command::Quit { address } => {
-                    if address.as_ref().is_none_or(|address| {
-                        self.address_matches_current(address, state.processed_line)
-                    }) {
+                    if self
+                        .optional_address_matches_current(address.as_ref(), state.processed_line)?
+                    {
                         *state.should_quit_after_line = true;
                     }
                 }
@@ -775,9 +772,8 @@ impl StreamProcessor {
                     }
                 }
                 Command::PrintLineNumber { range } => {
-                    let should_apply = range.as_ref().is_none_or(|address| {
-                        self.address_matches_current(address, state.processed_line)
-                    });
+                    let should_apply = self
+                        .optional_address_matches_current(range.as_ref(), state.processed_line)?;
                     if should_apply {
                         let line_number = self.current_line.to_string();
                         println!("{}", line_number);
@@ -785,9 +781,8 @@ impl StreamProcessor {
                     }
                 }
                 Command::PrintFilename { range } => {
-                    let should_apply = range.as_ref().is_none_or(|address| {
-                        self.address_matches_current(address, state.processed_line)
-                    });
+                    let should_apply = self
+                        .optional_address_matches_current(range.as_ref(), state.processed_line)?;
                     if should_apply {
                         let filename = source_name.to_string();
                         println!("{}", filename);
@@ -795,7 +790,7 @@ impl StreamProcessor {
                     }
                 }
                 Command::Insert { text, address } => {
-                    if self.address_matches_current(address, state.processed_line) {
+                    if self.address_matches_current(address, state.processed_line)? {
                         writeln!(writer, "{}", text)
                             .with_context(|| "Failed to write inserted line")?;
                         state.changes.push(LineChange {
@@ -807,7 +802,7 @@ impl StreamProcessor {
                     }
                 }
                 Command::Append { text, address } => {
-                    if self.address_matches_current(address, state.processed_line) {
+                    if self.address_matches_current(address, state.processed_line)? {
                         *state.append_text = Some(text.clone());
                     }
                 }
@@ -819,7 +814,7 @@ impl StreamProcessor {
                     )?;
                     if should_apply {
                         let reached_end =
-                            self.address_matches_current(&range.1, state.processed_line);
+                            self.address_matches_current(&range.1, state.processed_line)?;
                         if reached_end {
                             writeln!(writer, "{}", text)
                                 .with_context(|| "Failed to write changed line")?;
@@ -907,9 +902,8 @@ impl StreamProcessor {
                     }
                 }
                 Command::ClearPatternSpace { range } => {
-                    let should_apply = range.as_ref().is_none_or(|address| {
-                        self.address_matches_current(address, state.processed_line)
-                    });
+                    let should_apply = self
+                        .optional_address_matches_current(range.as_ref(), state.processed_line)?;
                     if should_apply {
                         *state.line_changed =
                             *state.line_changed || !state.processed_line.is_empty();
@@ -1152,8 +1146,8 @@ impl StreamProcessor {
         }
     }
 
-    fn address_matches_current(&self, address: &Address, line: &str) -> bool {
-        matches_address(
+    fn address_matches_current(&self, address: &Address, line: &str) -> Result<bool> {
+        try_matches_address(
             address,
             &AddressContext {
                 line,
@@ -1162,6 +1156,17 @@ impl StreamProcessor {
                 is_last_line: self.current_is_last_line,
             },
         )
+    }
+
+    fn optional_address_matches_current(
+        &self,
+        address: Option<&Address>,
+        line: &str,
+    ) -> Result<bool> {
+        match address {
+            Some(address) => self.address_matches_current(address, line),
+            None => Ok(true),
+        }
     }
 
     fn should_apply_command_with_range(
@@ -1173,7 +1178,7 @@ impl StreamProcessor {
         use Address::*;
 
         match (&range.0, &range.1) {
-            (_, Single(address)) => Ok(self.address_matches_current(address, line)),
+            (_, Single(address)) => self.address_matches_current(address, line),
             (Pattern(start_pat), Pattern(end_pat)) => {
                 self.check_pattern_range(line, start_pat, end_pat, command_key)
             }

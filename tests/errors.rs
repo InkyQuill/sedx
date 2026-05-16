@@ -86,3 +86,13 @@ fn unreadable_input_file_surfaces_permission_error() {
             .or(predicate::str::contains("denied")),
     );
 }
+
+#[test]
+fn invalid_pattern_address_surfaces_regex_error() {
+    common::sedx()
+        .arg("/[unterminated/s/foo/bar/")
+        .write_stdin("foo\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Invalid regex pattern"));
+}
