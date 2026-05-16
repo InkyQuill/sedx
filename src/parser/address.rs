@@ -129,6 +129,11 @@ pub fn parse_address(addr: &str) -> Result<Address> {
         return Ok(Address::LineNumber(num));
     }
 
+    // Pattern with a custom delimiter: \#pattern#, \|pattern|, etc.
+    if let Some(pattern) = parse_custom_delimiter_pattern(addr) {
+        return Ok(Address::Pattern(pattern));
+    }
+
     // Pattern: /pattern/
     if addr.starts_with('/') && addr.ends_with('/') {
         let pattern = &addr[1..addr.len() - 1];
@@ -176,4 +181,35 @@ pub fn parse_address(addr: &str) -> Result<Address> {
             ),
         )
     ))
+}
+
+fn parse_custom_delimiter_pattern(addr: &str) -> Option<String> {
+    let rest = addr.strip_prefix('\\')?;
+    let mut chars = rest.chars();
+    let delimiter = chars.next()?;
+    let pattern_start = '\\'.len_utf8() + delimiter.len_utf8();
+
+    if addr.len() <= pattern_start {
+        return None;
+    }
+
+    let mut escaped = false;
+    for (offset, ch) in addr[pattern_start..].char_indices() {
+        let pos = pattern_start + offset;
+        if escaped {
+            escaped = false;
+            continue;
+        }
+
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+
+        if ch == delimiter && pos + ch.len_utf8() == addr.len() {
+            return Some(addr[pattern_start..pos].to_string());
+        }
+    }
+
+    None
 }

@@ -47,24 +47,21 @@ pub fn parse_label(cmd: &str) -> Result<Command> {
 }
 
 pub fn parse_branch_at(cmd: &str, pos: usize) -> Result<Command> {
-    let addr_part = &cmd[..pos];
-    let label_part = &cmd[pos + 1..];
+    let (addr_part, label_part) = split_flow_command_at(cmd, pos, 'b')?;
     let range = parse_optional_range(addr_part)?;
     let label = parse_optional_label(label_part);
     Ok(Command::Branch { label, range })
 }
 
 pub fn parse_test_at(cmd: &str, pos: usize) -> Result<Command> {
-    let addr_part = &cmd[..pos];
-    let label_part = &cmd[pos + 1..];
+    let (addr_part, label_part) = split_flow_command_at(cmd, pos, 't')?;
     let range = parse_optional_range(addr_part)?;
     let label = parse_optional_label(label_part);
     Ok(Command::Test { label, range })
 }
 
 pub fn parse_test_false_at(cmd: &str, pos: usize) -> Result<Command> {
-    let addr_part = &cmd[..pos];
-    let label_part = &cmd[pos + 1..];
+    let (addr_part, label_part) = split_flow_command_at(cmd, pos, 'T')?;
     let range = parse_optional_range(addr_part)?;
     let label = parse_optional_label(label_part);
     Ok(Command::TestFalse { label, range })
@@ -76,5 +73,45 @@ fn parse_optional_label(label_part: &str) -> Option<String> {
         None
     } else {
         Some(label_name.to_string())
+    }
+}
+
+fn split_flow_command_at(cmd: &str, pos: usize, command: char) -> Result<(&str, &str)> {
+    let addr_part = cmd
+        .get(..pos)
+        .ok_or_else(|| anyhow!("invalid flow command position {}", pos))?;
+    let command_part = cmd
+        .get(pos..)
+        .ok_or_else(|| anyhow!("invalid flow command position {}", pos))?;
+
+    let label_part = command_part
+        .strip_prefix(command)
+        .ok_or_else(|| anyhow!("expected '{}' command at position {}", command, pos))?;
+
+    Ok((addr_part, label_part))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_branch_at, parse_test_at, parse_test_false_at};
+
+    #[test]
+    fn branch_parser_rejects_end_position_without_panicking() {
+        assert!(parse_branch_at("1b", 2).is_err());
+    }
+
+    #[test]
+    fn branch_parser_rejects_non_boundary_position_without_panicking() {
+        assert!(parse_branch_at("é b", 1).is_err());
+    }
+
+    #[test]
+    fn test_parser_rejects_wrong_command_position_without_panicking() {
+        assert!(parse_test_at("1b label", 1).is_err());
+    }
+
+    #[test]
+    fn test_false_parser_rejects_out_of_range_position_without_panicking() {
+        assert!(parse_test_false_at("1T label", 99).is_err());
     }
 }
