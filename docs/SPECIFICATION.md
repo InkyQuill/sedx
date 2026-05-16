@@ -119,8 +119,15 @@ All BRE patterns are automatically converted to PCRE before compilation:
 - `\+` → `+`
 - `\?` → `?`
 - `\|` → `|`
-- `\1` → `$1` (in replacement)
-- `\&` → `$&` (in replacement)
+
+BRE replacements use sed replacement semantics before conversion to the Rust
+regex engine:
+- Bare `&` expands to the whole match.
+- Escaped `\&` produces a literal `&`.
+- `\0` expands to the whole match.
+- `\1` through `\9` expand to capture groups.
+- Bare `$` is literal text and is escaped internally so it does not become a
+  Rust regex replacement reference.
 
 **Example:**
 ```bash
@@ -150,6 +157,11 @@ $ sedx -B 's/\(foo\)\(bar\)/\2\1/' file.txt  # "foobar" → "barfoo"
 ERE patterns are already PCRE-compatible in syntax, but backreferences in replacements are converted:
 - `\1` → `$1` (in replacement)
 - Pattern syntax: `()`, `{}`, `+`, `?`, `|` all pass through unchanged
+
+ERE replacements use the same sed replacement semantics as BRE replacements:
+bare `&` expands to the whole match, escaped `\&` is a literal ampersand,
+`\0` expands to the whole match, `\1` through `\9` expand to capture groups,
+and bare `$` is literal text.
 
 **Example:**
 ```bash
@@ -936,10 +948,26 @@ sedx 's/pattern/replacement/[flags]' file.txt
 ```
 
 **Characteristics:**
-- Uses delimiter (typically `/`)
+- Uses any non-newline delimiter (typically `/`)
 - Explicit flags: `g` for global, `i` for case-insensitive, etc.
 - Modern backreferences in PCRE mode: `$1`, `$2` (or sed-style `\1`, `\2` in BRE/ERE modes)
 - Compatible with GNU sed syntax
+
+The delimiter is the character immediately after `s`. Any non-newline
+character is accepted, so `s/foo/bar/`, `s#foo#bar#`, `s.foo.bar.`, and
+`s@foo@bar@` are all valid. A delimiter that appears inside the pattern or
+replacement is written with a leading backslash. That delimiter-origin escape
+is treated as literal delimiter text:
+
+```bash
+sedx 's.a\.b.X.'   # Matches literal "a.b", not "acb"
+sedx 's&foo&a\&b&' # Replaces with literal "a&b"
+sedx 's$foo$a\$1$' # Replaces with literal "a$1"
+```
+
+Command split characters inside substitutions, such as `;`, are part of the
+pattern or replacement and do not split the command until the substitution's
+closing delimiter has been read.
 
 **Examples:**
 ```bash
@@ -1046,6 +1074,21 @@ sedx -B 's/\(foo\)\(bar\)/\2\1/' file.txt  # "foobar" → "barfoo"
 ```bash
 sedx -E 's/(foo)(bar)/\2\1/' file.txt  # "foobar" → "barfoo"
 ```
+
+In BRE and ERE replacement strings, sed-style whole-match and capture
+references are converted before execution:
+
+| Replacement text | Meaning in BRE/ERE |
+|------------------|--------------------|
+| `&` | Entire match |
+| `\&` | Literal ampersand |
+| `\0` | Entire match |
+| `\1` through `\9` | Capture group |
+| `$` | Literal dollar text |
+
+Delimiter-origin escapes are applied before these replacement rules. For
+example, with `$` as the delimiter, `s$foo$a\$1$` produces literal `a$1`; the
+escaped delimiter dollar is not a capture reference prefix.
 
 ---
 

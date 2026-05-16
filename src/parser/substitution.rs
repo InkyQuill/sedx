@@ -6,26 +6,68 @@ use anyhow::{Result, anyhow};
 
 pub(crate) const ESCAPED_PATTERN_DELIMITER_MARKER: char = '\u{1f}';
 
-pub(crate) fn restore_escaped_pattern_delimiters(pattern: &str, escape_pipe: bool) -> String {
-    let mut restored = String::with_capacity(pattern.len());
-    let mut chars = pattern.chars();
+pub(crate) fn convert_pattern_preserving_escaped_delimiters<F>(
+    pattern: &str,
+    escape_pipe: bool,
+    convert_segment: F,
+) -> String
+where
+    F: Fn(&str) -> String,
+{
+    convert_preserving_escaped_delimiters(pattern, &convert_segment, |delimiter| {
+        if delimiter == '|' && !escape_pipe {
+            delimiter.to_string()
+        } else {
+            regex::escape(&delimiter.to_string())
+        }
+    })
+}
+
+pub(crate) fn convert_replacement_preserving_escaped_delimiters<F>(
+    replacement: &str,
+    convert_segment: F,
+) -> String
+where
+    F: Fn(&str) -> String,
+{
+    convert_preserving_escaped_delimiters(replacement, &convert_segment, |delimiter| {
+        if delimiter == '$' {
+            "$$".to_string()
+        } else {
+            delimiter.to_string()
+        }
+    })
+}
+
+fn convert_preserving_escaped_delimiters<F, R>(
+    input: &str,
+    convert_segment: &F,
+    restore_delimiter: R,
+) -> String
+where
+    F: Fn(&str) -> String,
+    R: Fn(char) -> String,
+{
+    let mut converted = String::with_capacity(input.len());
+    let mut segment = String::new();
+    let mut chars = input.chars();
 
     while let Some(c) = chars.next() {
         if c == ESCAPED_PATTERN_DELIMITER_MARKER {
             if let Some(delimiter) = chars.next() {
-                if delimiter == '|' && escape_pipe {
-                    restored.push('\\');
-                }
-                restored.push(delimiter);
+                converted.push_str(&convert_segment(&segment));
+                segment.clear();
+                converted.push_str(&restore_delimiter(delimiter));
             } else {
-                restored.push(c);
+                segment.push(c);
             }
         } else {
-            restored.push(c);
+            segment.push(c);
         }
     }
 
-    restored
+    converted.push_str(&convert_segment(&segment));
+    converted
 }
 
 /// Fold a raw sed-flag character sequence into a SubstitutionFlags value.
@@ -166,7 +208,7 @@ pub fn parse_substitution(cmd: &str) -> Result<Command> {
                 cmd,
                 None,
                 "'s' command not followed by a valid delimiter",
-                Some("Substitution format: s<delimiter>pattern<delimiter>replacement<delimiter>[flags]\nDelimiters: / (slash), # (hash), : (colon), | (pipe)\nExample: s/foo/bar/ or s#old#new#g"),
+                Some("Substitution format: s<delimiter>pattern<delimiter>replacement<delimiter>[flags]\nThe delimiter may be any non-newline character.\nExample: s/foo/bar/ or s.old.new.g"),
             )
         )
     })?;
@@ -178,7 +220,7 @@ pub fn parse_substitution(cmd: &str) -> Result<Command> {
                 Some(s_pos),
                 &format!("expected substitution command but found '{}'", command),
                 Some(
-                    "Substitution format: s<delimiter>pattern<delimiter>replacement<delimiter>[flags]\nExample: s/foo/bar/ or /pattern/s/foo/bar/"
+                    "Substitution format: s<delimiter>pattern<delimiter>replacement<delimiter>[flags]\nThe delimiter may be any non-newline character.\nExample: s/foo/bar/ or /pattern/s.old.new."
                 )
             )
         ));
@@ -196,10 +238,21 @@ pub fn parse_substitution(cmd: &str) -> Result<Command> {
                 cmd,
                 Some(s_pos + 1),
                 "missing delimiter after 's'",
-                Some("Expected format: s<delimiter>pattern<delimiter>replacement<delimiter>[flags]\nExample: s/foo/bar/ or s#old#new#g"),
+                Some("Expected format: s<delimiter>pattern<delimiter>replacement<delimiter>[flags]\nThe delimiter may be any non-newline character.\nExample: s/foo/bar/ or s.old.new.g"),
             )
         )
     })?;
+    if delimiter == '\n' {
+        return Err(anyhow!(
+            "{}",
+            format_parse_error(
+                cmd,
+                Some(s_pos + 1),
+                "invalid substitution delimiter: newline",
+                Some("Use any non-newline character as the substitution delimiter."),
+            )
+        ));
+    }
 
     let pattern_start = delimiter.len_utf8();
     let Some((pattern, _, replacement_start)) =
@@ -222,7 +275,7 @@ pub fn parse_substitution(cmd: &str) -> Result<Command> {
     };
 
     let Some((replacement, _, flags_start)) =
-        scan_substitution_section(rest, replacement_start, delimiter, false)
+        scan_substitution_section(rest, replacement_start, delimiter, true)
     else {
         return Err(anyhow!(
             "{}",

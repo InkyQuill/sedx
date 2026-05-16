@@ -187,6 +187,16 @@ fn escaped_delimiter_in_pattern_is_literal() {
 }
 
 #[test]
+fn escaped_regex_metachar_delimiter_in_pattern_is_literal() {
+    sedx()
+        .arg(r"s.a\.b.X.")
+        .write_stdin("a.b\nacb\n")
+        .assert()
+        .success()
+        .stdout("X\nacb\n");
+}
+
+#[test]
 fn escaped_delimiter_in_replacement_is_literal() {
     sedx()
         .arg(r"s/foo/a\/b/")
@@ -194,6 +204,26 @@ fn escaped_delimiter_in_replacement_is_literal() {
         .assert()
         .success()
         .stdout("a/b\n");
+}
+
+#[test]
+fn escaped_ampersand_delimiter_in_replacement_is_literal() {
+    sedx()
+        .arg(r"s&foo&a\&b&")
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("a&b\n");
+}
+
+#[test]
+fn escaped_dollar_delimiter_in_replacement_is_literal() {
+    sedx()
+        .arg(r"s$foo$a\$1$")
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("a$1\n");
 }
 
 #[test]
@@ -274,6 +304,16 @@ fn semicolon_inside_arbitrary_delimiter_substitution_pattern_does_not_split_comm
         .assert()
         .success()
         .stdout("X\n");
+}
+
+#[test]
+fn command_split_char_inside_arbitrary_delimiter_substitution_replacement_does_not_split_command() {
+    sedx()
+        .arg("s@foo@a;b@")
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("a;b\n");
 }
 
 #[test]

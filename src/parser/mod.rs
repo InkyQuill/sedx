@@ -55,24 +55,25 @@ impl Parser {
     }
 
     fn convert_pattern(&self, pattern: &str) -> String {
-        let pattern = match self.regex_flavor {
-            RegexFlavor::BRE => crate::bre_converter::convert_bre_to_pcre(pattern),
-            RegexFlavor::ERE => crate::ere_converter::convert_ere_to_pcre_pattern(pattern),
-            RegexFlavor::PCRE => pattern.to_string(),
-        };
-
-        substitution::restore_escaped_pattern_delimiters(
-            &pattern,
+        substitution::convert_pattern_preserving_escaped_delimiters(
+            pattern,
             matches!(self.regex_flavor, RegexFlavor::BRE),
+            |segment| match self.regex_flavor {
+                RegexFlavor::BRE => crate::bre_converter::convert_bre_to_pcre(segment),
+                RegexFlavor::ERE => crate::ere_converter::convert_ere_to_pcre_pattern(segment),
+                RegexFlavor::PCRE => segment.to_string(),
+            },
         )
     }
 
     fn convert_replacement(&self, replacement: &str) -> String {
-        match self.regex_flavor {
-            RegexFlavor::ERE => crate::ere_converter::convert_ere_backreferences(replacement),
-            RegexFlavor::BRE => crate::bre_converter::convert_sed_backreferences(replacement),
-            RegexFlavor::PCRE => crate::bre_converter::convert_pcre_replacement(replacement),
-        }
+        substitution::convert_replacement_preserving_escaped_delimiters(replacement, |segment| {
+            match self.regex_flavor {
+                RegexFlavor::ERE => crate::ere_converter::convert_ere_backreferences(segment),
+                RegexFlavor::BRE => crate::bre_converter::convert_sed_backreferences(segment),
+                RegexFlavor::PCRE => crate::bre_converter::convert_pcre_replacement(segment),
+            }
+        })
     }
 }
 
