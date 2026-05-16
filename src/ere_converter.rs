@@ -5,7 +5,7 @@
 //!
 //! ERE is already very close to PCRE. The main difference is backreferences:
 //! - ERE/sed -E uses \1, \2, \3... in replacements
-//! - PCRE/Rust regex uses $1, $2, $3... in replacements
+//! - PCRE/Rust regex uses ${1}, ${2}, ${3}... in converted replacements
 //!
 //! For patterns, ERE syntax is already PCRE-compatible.
 
@@ -18,8 +18,9 @@
 /// - No conversion needed for pattern syntax
 ///
 /// For **replacements**, backreferences need conversion:
-/// - `\0`..`\9` → `$0`..`$9` - Backreference conversion
-/// - `\&` → `$0` - Match reference
+/// - `\0`..`\9` → `${0}`..`${9}` - Backreference conversion
+/// - `&` → `${0}` - Match reference
+/// - `\&` → `&` - Literal ampersand
 /// - `\\` remains `\\` - Escape processing happens after conversion
 ///
 pub fn convert_ere_to_pcre_pattern(pattern: &str) -> String {
@@ -32,8 +33,9 @@ pub fn convert_ere_to_pcre_pattern(pattern: &str) -> String {
 ///
 /// # Conversion Rules
 ///
-/// - `\1`..`\9` → `$1`..`$9` - Backreference conversion
-/// - `\&` → `$0` - Match reference
+/// - `\1`..`\9` → `${1}`..`${9}` - Backreference conversion
+/// - `&` → `${0}` - Match reference
+/// - `\&` → `&` - Literal ampersand
 /// - `\\` remains `\\` - Escape processing happens after conversion
 ///
 /// This is identical to BRE backreference conversion since both BRE and ERE
@@ -62,13 +64,13 @@ mod tests {
 
     #[test]
     fn test_convert_ere_backreferences() {
-        assert_eq!(convert_ere_backreferences(r#"\1"#), "$1");
-        assert_eq!(convert_ere_backreferences(r#"\0"#), "$0");
-        assert_eq!(convert_ere_backreferences(r#"\2\1"#), "$2$1");
-        assert_eq!(convert_ere_backreferences(r#"&"#), "$0");
+        assert_eq!(convert_ere_backreferences(r#"\1"#), "${1}");
+        assert_eq!(convert_ere_backreferences(r#"\0"#), "${0}");
+        assert_eq!(convert_ere_backreferences(r#"\2\1"#), "${2}${1}");
+        assert_eq!(convert_ere_backreferences(r#"&"#), "${0}");
         assert_eq!(convert_ere_backreferences(r#"\&"#), "&");
         assert_eq!(convert_ere_backreferences(r#"\\"#), r#"\\"#);
-        assert_eq!(convert_ere_backreferences(r#"foo\1bar"#), "foo$1bar");
+        assert_eq!(convert_ere_backreferences(r#"foo\1bar"#), "foo${1}bar");
     }
 
     #[test]
@@ -81,16 +83,16 @@ mod tests {
     #[test]
     fn test_complex_ere_replacement() {
         // ERE: \1\2\3
-        // PCRE: $1$2$3
+        // PCRE: ${1}${2}${3}
         let ere_replacement = r#"\1\2\3"#;
         let pcre_replacement = convert_ere_backreferences(ere_replacement);
-        assert_eq!(pcre_replacement, r#"$1$2$3"#);
+        assert_eq!(pcre_replacement, r#"${1}${2}${3}"#);
     }
 
     #[test]
     fn test_mixed_replacement() {
         // ERE backreferences are converted; bare dollars remain literal.
-        assert_eq!(convert_ere_backreferences(r#"foo\1bar$2"#), "foo$1bar$$2");
+        assert_eq!(convert_ere_backreferences(r#"foo\1bar$2"#), "foo${1}bar$$2");
     }
 
     #[test]
@@ -204,66 +206,69 @@ mod tests {
     #[test]
     fn test_all_backreferences_single() {
         // Test all single digit backreferences
-        assert_eq!(convert_ere_backreferences(r#"\1"#), "$1");
-        assert_eq!(convert_ere_backreferences(r#"\0"#), "$0");
-        assert_eq!(convert_ere_backreferences(r#"\2"#), "$2");
-        assert_eq!(convert_ere_backreferences(r#"\3"#), "$3");
-        assert_eq!(convert_ere_backreferences(r#"\4"#), "$4");
-        assert_eq!(convert_ere_backreferences(r#"\5"#), "$5");
-        assert_eq!(convert_ere_backreferences(r#"\6"#), "$6");
-        assert_eq!(convert_ere_backreferences(r#"\7"#), "$7");
-        assert_eq!(convert_ere_backreferences(r#"\8"#), "$8");
-        assert_eq!(convert_ere_backreferences(r#"\9"#), "$9");
+        assert_eq!(convert_ere_backreferences(r#"\1"#), "${1}");
+        assert_eq!(convert_ere_backreferences(r#"\0"#), "${0}");
+        assert_eq!(convert_ere_backreferences(r#"\2"#), "${2}");
+        assert_eq!(convert_ere_backreferences(r#"\3"#), "${3}");
+        assert_eq!(convert_ere_backreferences(r#"\4"#), "${4}");
+        assert_eq!(convert_ere_backreferences(r#"\5"#), "${5}");
+        assert_eq!(convert_ere_backreferences(r#"\6"#), "${6}");
+        assert_eq!(convert_ere_backreferences(r#"\7"#), "${7}");
+        assert_eq!(convert_ere_backreferences(r#"\8"#), "${8}");
+        assert_eq!(convert_ere_backreferences(r#"\9"#), "${9}");
     }
 
     #[test]
     fn test_multiple_backreferences_various() {
         // Multiple backreferences in various combinations
-        assert_eq!(convert_ere_backreferences(r#"\1\2\3"#), "$1$2$3");
-        assert_eq!(convert_ere_backreferences(r#"\0\1"#), "$0$1");
-        assert_eq!(convert_ere_backreferences(r#"\3\2\1"#), "$3$2$1");
+        assert_eq!(convert_ere_backreferences(r#"\1\2\3"#), "${1}${2}${3}");
+        assert_eq!(convert_ere_backreferences(r#"\0\1"#), "${0}${1}");
+        assert_eq!(convert_ere_backreferences(r#"\3\2\1"#), "${3}${2}${1}");
         assert_eq!(
             convert_ere_backreferences(r#"\9\8\7\6\5\4\3\2\1"#),
-            "$9$8$7$6$5$4$3$2$1"
+            "${9}${8}${7}${6}${5}${4}${3}${2}${1}"
         );
-        assert_eq!(convert_ere_backreferences(r#"\1\1\1"#), "$1$1$1");
+        assert_eq!(convert_ere_backreferences(r#"\1\1\1"#), "${1}${1}${1}");
     }
 
     #[test]
     fn test_backreferences_with_text() {
         // Backreferences interspersed with text
-        assert_eq!(convert_ere_backreferences(r#"foo\1bar"#), "foo$1bar");
+        assert_eq!(convert_ere_backreferences(r#"foo\1bar"#), "foo${1}bar");
         assert_eq!(
             convert_ere_backreferences(r#"start\1middle\2end"#),
-            "start$1middle$2end"
+            "start${1}middle${2}end"
         );
         assert_eq!(
             convert_ere_backreferences(r#"Result: \1, \2, \3"#),
-            "Result: $1, $2, $3"
+            "Result: ${1}, ${2}, ${3}"
         );
         assert_eq!(
             convert_ere_backreferences(r#"prefix_\1_suffix"#),
-            "prefix_$1_suffix"
+            "prefix_${1}_suffix"
         );
     }
 
     #[test]
     fn test_match_reference_various() {
-        assert_eq!(convert_ere_backreferences(r#"&"#), "$0");
+        assert_eq!(convert_ere_backreferences(r#"&"#), "${0}");
         assert_eq!(convert_ere_backreferences(r#"\&"#), "&");
-        assert_eq!(convert_ere_backreferences(r#"foo&bar"#), "foo$0bar");
+        assert_eq!(convert_ere_backreferences(r#"foo&bar"#), "foo${0}bar");
         assert_eq!(convert_ere_backreferences(r#"foo\&bar"#), "foo&bar");
-        assert_eq!(convert_ere_backreferences(r#"&&"#), "$0$0");
-        assert_eq!(convert_ere_backreferences(r#"start:&:end"#), "start:$0:end");
-        assert_eq!(convert_ere_backreferences(r#"\1&\2"#), "$1$0$2");
+        assert_eq!(convert_ere_backreferences(r#"&&"#), "${0}${0}");
+        assert_eq!(
+            convert_ere_backreferences(r#"start:&:end"#),
+            "start:${0}:end"
+        );
+        assert_eq!(convert_ere_backreferences(r#"\1&\2"#), "${1}${0}${2}");
     }
 
     #[test]
     fn test_mixed_backreferences_pcre_format() {
         // ERE backreferences are converted; bare dollars remain literal.
-        assert_eq!(convert_ere_backreferences(r#"foo\1bar$2"#), "foo$1bar$$2");
-        assert_eq!(convert_ere_backreferences(r#"$1\2$3\4"#), "$$1$2$$3$4");
-        assert_eq!(convert_ere_backreferences(r#"\1$1\2$2"#), "$1$$1$2$$2");
+        assert_eq!(convert_ere_backreferences(r#"foo\1bar$2"#), "foo${1}bar$$2");
+        assert_eq!(convert_ere_backreferences(r#"$1\2$3\4"#), "$$1${2}$$3${4}");
+        assert_eq!(convert_ere_backreferences(r#"\1$1\2$2"#), "${1}$$1${2}$$2");
     }
 
     #[test]
@@ -274,7 +279,7 @@ mod tests {
         assert_eq!(convert_ere_backreferences(r#"\n"#), "\\n");
         assert_eq!(convert_ere_backreferences(r#"\t"#), "\\t");
         assert_eq!(convert_ere_backreferences(r#"\\\n"#), r#"\\\n"#);
-        assert_eq!(convert_ere_backreferences(r#"\\\\\1"#), r#"\\\\$1"#);
+        assert_eq!(convert_ere_backreferences(r#"\\\\\1"#), r#"\\\\${1}"#);
     }
 
     #[test]
@@ -291,8 +296,8 @@ mod tests {
         // Trailing backslash in replacement
         assert_eq!(convert_ere_backreferences(r#"foo\"#), r#"foo\"#);
         assert_eq!(convert_ere_backreferences(r#"\"#), r#"\"#);
-        assert_eq!(convert_ere_backreferences(r#"\1\"#), r#"$1\"#);
-        assert_eq!(convert_ere_backreferences(r#"&\"#), r#"$0\"#);
+        assert_eq!(convert_ere_backreferences(r#"\1\"#), r#"${1}\"#);
+        assert_eq!(convert_ere_backreferences(r#"&\"#), r#"${0}\"#);
         assert_eq!(convert_ere_backreferences(r#"\&\"#), r#"&\"#);
     }
 
@@ -301,22 +306,22 @@ mod tests {
         // ERE/sed treats `$` literally, including PCRE-looking sequences.
         assert_eq!(convert_ere_backreferences("$1"), "$$1");
         assert_eq!(convert_ere_backreferences("$1$2$3"), "$$1$$2$$3");
-        assert_eq!(convert_ere_backreferences("$&"), "$$$0");
+        assert_eq!(convert_ere_backreferences("$&"), "$$${0}");
         assert_eq!(convert_ere_backreferences("foo$1bar$2"), "foo$$1bar$$2");
     }
 
     #[test]
     fn test_complex_replacement_patterns() {
         // Complex real-world replacement patterns
-        assert_eq!(convert_ere_backreferences(r#"\1:\2"#), "$1:$2");
-        assert_eq!(convert_ere_backreferences(r#"[\1] [\2]"#), "[$1] [$2]");
+        assert_eq!(convert_ere_backreferences(r#"\1:\2"#), "${1}:${2}");
+        assert_eq!(convert_ere_backreferences(r#"[\1] [\2]"#), "[${1}] [${2}]");
         assert_eq!(
             convert_ere_backreferences(r#""\1" -> "\2""#),
-            r#""$1" -> "$2""#
+            r#""${1}" -> "${2}""#
         );
         assert_eq!(
             convert_ere_backreferences(r#"function(\1, \2)"#),
-            "function($1, $2)"
+            "function(${1}, ${2})"
         );
     }
 
@@ -328,8 +333,11 @@ mod tests {
         assert_eq!(convert_ere_to_pcre_pattern("test_测试"), "test_测试");
 
         // Unicode in replacements
-        assert_eq!(convert_ere_backreferences(r#"résumé\1"#), "résumé$1");
-        assert_eq!(convert_ere_backreferences(r#"\1日本語\2"#), "$1日本語$2");
+        assert_eq!(convert_ere_backreferences(r#"résumé\1"#), "résumé${1}");
+        assert_eq!(
+            convert_ere_backreferences(r#"\1日本語\2"#),
+            "${1}日本語${2}"
+        );
     }
 
     #[test]

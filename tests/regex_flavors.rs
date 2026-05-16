@@ -19,6 +19,36 @@ fn default_is_pcre_dollar_backrefs() {
 }
 
 #[test]
+fn default_backslash_backref_before_letters_is_unambiguous() {
+    sedx()
+        .arg(r"s/(foo)/\1bar/")
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("foobar\n");
+}
+
+#[test]
+fn direct_pcre_dollar_backref_before_letters_uses_regex_reference_syntax() {
+    sedx()
+        .arg(r"s/(foo)/$1bar/")
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("\n");
+}
+
+#[test]
+fn direct_pcre_braced_backref_before_letters_is_unambiguous() {
+    sedx()
+        .arg(r"s/(foo)/${1}bar/")
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("foobar\n");
+}
+
+#[test]
 fn pcre_specific_substitution_warns_when_configured() {
     let home = TempDir::new().unwrap();
     let config_dir = home.path().join(".sedx");
@@ -74,6 +104,26 @@ fn ere_flag_accepts_backslash_backrefs_in_replacement() {
         .assert()
         .success()
         .stdout("barfoo\n");
+}
+
+#[test]
+fn ere_backslash_backref_before_letters_is_unambiguous() {
+    sedx()
+        .args(["-E", r"s/(foo)/\1bar/"])
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("foobar\n");
+}
+
+#[test]
+fn ere_backslash_backref_before_digit_is_unambiguous() {
+    sedx()
+        .args(["-E", r"s/(foo)/\10/"])
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("foo0\n");
 }
 
 #[test]
@@ -245,6 +295,16 @@ fn bre_flag_requires_escaped_groups_and_quantifiers() {
         .assert()
         .success()
         .stdout("barfoo\n");
+}
+
+#[test]
+fn bre_backslash_backref_before_underscore_is_unambiguous() {
+    sedx()
+        .args(["-B", r"s/\(foo\)/\1_bar/"])
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("foo_bar\n");
 }
 
 #[test]
