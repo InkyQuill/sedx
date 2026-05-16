@@ -12,13 +12,13 @@ pub mod diff_formatter;
 pub mod disk_space;
 pub mod ere_converter;
 pub mod file_processor;
+pub mod logger;
 pub mod parser;
 pub mod regex_error;
-pub mod sed_parser;
 
 // Re-export commonly used types for convenience
 pub use backup_manager::{BackupManager, BackupMetadata, FileBackup};
 pub use cli::RegexFlavor;
 pub use command::{Address, Command, SubstitutionFlags};
-pub use file_processor::{ChangeType, FileProcessor, LineChange, StreamProcessor};
+pub use file_processor::{ChangeType, FileDiff, FileProcessor, LineChange, StreamProcessor};
 pub use parser::Parser;

@@ -7,7 +7,9 @@
 use std::fs;
 use tempfile::TempDir;
 
-use sedx::{BackupManager, Command, FileProcessor, Parser, RegexFlavor, StreamProcessor};
+use sedx::{
+    BackupManager, ChangeType, Command, FileProcessor, Parser, RegexFlavor, StreamProcessor,
+};
 
 // Import proptest macro
 use proptest::prelude::*;
@@ -36,20 +38,20 @@ proptest! {
         let commands = parser.parse(&expr).unwrap();
 
         // Apply once
-        let mut processor1 = FileProcessor::new(commands.clone());
+        let mut processor1 = FileProcessor::with_regex_flavor(commands.clone(), RegexFlavor::PCRE);
         let result1 = processor1.process_file_with_context(&file_path).unwrap();
         let output1: String = result1.all_lines
             .iter()
-            .map(|(_, content, _)| content.clone())
+            .map(|(_, content, _): &(usize, String, ChangeType)| content.clone())
             .collect::<Vec<_>>()
             .join("\n");
 
         // Apply twice (on same original input)
-        let mut processor2 = FileProcessor::new(commands.clone());
+        let mut processor2 = FileProcessor::with_regex_flavor(commands.clone(), RegexFlavor::PCRE);
         let result2 = processor2.process_file_with_context(&file_path).unwrap();
         let output2: String = result2.all_lines
             .iter()
-            .map(|(_, content, _)| content.clone())
+            .map(|(_, content, _): &(usize, String, ChangeType)| content.clone())
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -81,11 +83,11 @@ proptest! {
         let parser = Parser::new(RegexFlavor::PCRE);
         let commands = parser.parse("s/foo/QUUX_REPLACED/g").unwrap();
 
-        let mut processor = FileProcessor::new(commands);
+        let mut processor = FileProcessor::with_regex_flavor(commands, RegexFlavor::PCRE);
         let result = processor.process_file_with_context(&file_path).unwrap();
         let output: String = result.all_lines
             .iter()
-            .map(|(_, content, _)| content.clone())
+            .map(|(_, content, _): &(usize, String, ChangeType)| content.clone())
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -110,7 +112,7 @@ proptest! {
         let parser = Parser::new(RegexFlavor::PCRE);
         let commands = parser.parse("2,4d").unwrap();
 
-        let mut processor = FileProcessor::new(commands);
+        let mut processor = FileProcessor::with_regex_flavor(commands, RegexFlavor::PCRE);
         let result = processor.process_file_with_context(&file_path).unwrap();
         let final_line_count = result.all_lines.len();
 
@@ -140,11 +142,12 @@ proptest! {
 
         // In-memory processing (on copy, since streaming modifies original)
         fs::write(&copy_path, lines.join("\n")).unwrap();
-        let mut memory_processor = FileProcessor::new(commands.clone());
+        let mut memory_processor = FileProcessor::with_regex_flavor(commands.clone(), RegexFlavor::PCRE);
         let memory_result = memory_processor.process_file_with_context(&copy_path).unwrap();
         let memory_output: String = memory_result.all_lines
             .iter()
-            .map(|(_, content, _)| content.clone())
+            .filter(|(_, _, ct)| *ct != ChangeType::Deleted)
+            .map(|(_, content, _): &(usize, String, ChangeType)| content.clone())
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -164,7 +167,6 @@ proptest! {
     /// NOTE: Currently ignored due to bug in delete command - batch mode and streaming mode
     /// produce different results for certain line ranges.
     #[test]
-    #[ignore]
     fn prop_streaming_matches_memory_delete(
         lines in prop::collection::vec("[a-z]{1,30}", 1..100)
     ) {
@@ -178,11 +180,12 @@ proptest! {
 
         // In-memory processing (on copy)
         fs::write(&copy_path, lines.join("\n")).unwrap();
-        let mut memory_processor = FileProcessor::new(commands.clone());
+        let mut memory_processor = FileProcessor::with_regex_flavor(commands.clone(), RegexFlavor::PCRE);
         let memory_result = memory_processor.process_file_with_context(&copy_path).unwrap();
         let memory_output: String = memory_result.all_lines
             .iter()
-            .map(|(_, content, _)| content.clone())
+            .filter(|(_, _, ct)| *ct != ChangeType::Deleted)
+            .map(|(_, content, _): &(usize, String, ChangeType)| content.clone())
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -212,11 +215,11 @@ proptest! {
 
         // In-memory processing (on copy)
         fs::write(&copy_path, lines.join("\n")).unwrap();
-        let mut memory_processor = FileProcessor::new(commands.clone());
+        let mut memory_processor = FileProcessor::with_regex_flavor(commands.clone(), RegexFlavor::PCRE);
         let memory_result = memory_processor.process_file_with_context(&copy_path).unwrap();
         let memory_output: Vec<String> = memory_result.all_lines
             .iter()
-            .map(|(_, content, _)| content.clone())
+            .map(|(_, content, _): &(usize, String, ChangeType)| content.clone())
             .collect();
 
         // Streaming processing (writes to file_path directly)
@@ -354,20 +357,20 @@ proptest! {
         let commands = parser.parse("s/o/0/g").unwrap();
 
         // Process with dry-run (doesn't modify file)
-        let mut dry_run_processor = FileProcessor::new(commands.clone());
+        let mut dry_run_processor = FileProcessor::with_regex_flavor(commands.clone(), RegexFlavor::PCRE);
         let dry_run_result = dry_run_processor.process_file_with_context(&original_file).unwrap();
         let dry_run_output: String = dry_run_result.all_lines
             .iter()
-            .map(|(_, content, _)| content.clone())
+            .map(|(_, content, _): &(usize, String, ChangeType)| content.clone())
             .collect::<Vec<_>>()
             .join("\n");
 
         // Process with execute (doesn't actually modify, but simulates)
-        let mut execute_processor = FileProcessor::new(commands.clone());
+        let mut execute_processor = FileProcessor::with_regex_flavor(commands.clone(), RegexFlavor::PCRE);
         let execute_result = execute_processor.process_file_with_context(&execute_file).unwrap();
         let execute_output: String = execute_result.all_lines
             .iter()
-            .map(|(_, content, _)| content.clone())
+            .map(|(_, content, _): &(usize, String, ChangeType)| content.clone())
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -396,11 +399,11 @@ proptest! {
         let commands = parser.parse("3,7d").unwrap();
 
         // Dry run
-        let mut dry_run_processor = FileProcessor::new(commands.clone());
+        let mut dry_run_processor = FileProcessor::with_regex_flavor(commands.clone(), RegexFlavor::PCRE);
         let dry_run_result = dry_run_processor.process_file_with_context(&dry_run_file).unwrap();
 
         // Execute
-        let mut execute_processor = FileProcessor::new(commands.clone());
+        let mut execute_processor = FileProcessor::with_regex_flavor(commands.clone(), RegexFlavor::PCRE);
         let execute_result = execute_processor.process_file_with_context(&execute_file).unwrap();
 
         // Both should produce same output
@@ -432,22 +435,22 @@ proptest! {
         let commands = parser.parse("s/a/x/g").unwrap();
 
         // Apply once
-        let mut processor1 = FileProcessor::new(commands.clone());
+        let mut processor1 = FileProcessor::with_regex_flavor(commands.clone(), RegexFlavor::PCRE);
         let result1 = processor1.process_file_with_context(&file_path).unwrap();
         let output1: String = result1.all_lines
             .iter()
-            .map(|(_, content, _)| content.clone())
+            .map(|(_, content, _): &(usize, String, ChangeType)| content.clone())
             .collect::<Vec<_>>()
             .join("\n");
 
         // Apply twice (by writing output and processing again)
         let temp2 = temp_dir.path().join("test2.txt");
         fs::write(&temp2, &output1).unwrap();
-        let mut processor2 = FileProcessor::new(commands.clone());
+        let mut processor2 = FileProcessor::with_regex_flavor(commands.clone(), RegexFlavor::PCRE);
         let result2 = processor2.process_file_with_context(&temp2).unwrap();
         let output2: String = result2.all_lines
             .iter()
-            .map(|(_, content, _)| content.clone())
+            .map(|(_, content, _): &(usize, String, ChangeType)| content.clone())
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -468,11 +471,11 @@ proptest! {
         // Pattern "z" won't match text containing only [a-m]
         let commands = parser.parse("s/z/Z/g").unwrap();
 
-        let mut processor = FileProcessor::new(commands.clone());
+        let mut processor = FileProcessor::with_regex_flavor(commands.clone(), RegexFlavor::PCRE);
         let result = processor.process_file_with_context(&file_path).unwrap();
         let output: String = result.all_lines
             .iter()
-            .map(|(_, content, _)| content.clone())
+            .map(|(_, content, _): &(usize, String, ChangeType)| content.clone())
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -499,7 +502,7 @@ proptest! {
         let expr = "s/a/b/".to_string(); // Simple, valid expression
         let commands = parser.parse(&expr).unwrap();
 
-        let mut processor = FileProcessor::new(commands);
+        let mut processor = FileProcessor::with_regex_flavor(commands, RegexFlavor::PCRE);
         let result = processor.process_file_with_context(&file_path).unwrap();
 
         // Empty input produces empty output
@@ -520,7 +523,7 @@ proptest! {
         let parser = Parser::new(RegexFlavor::PCRE);
         let commands = parser.parse("s/a/z/g").unwrap();
 
-        let mut processor = FileProcessor::new(commands);
+        let mut processor = FileProcessor::with_regex_flavor(commands, RegexFlavor::PCRE);
         let result = processor.process_file_with_context(&file_path).unwrap();
 
         // Line count should stay the same for simple substitutions
@@ -591,12 +594,12 @@ fn test_simple_substitution_works() {
     let parser = Parser::new(RegexFlavor::PCRE);
     let commands = parser.parse("s/foo/baz/g").unwrap();
 
-    let mut processor = FileProcessor::new(commands);
+    let mut processor = FileProcessor::with_regex_flavor(commands, RegexFlavor::PCRE);
     let result = processor.process_file_with_context(&file_path).unwrap();
     let output: String = result
         .all_lines
         .iter()
-        .map(|(_, content, _)| content.clone())
+        .map(|(_, content, _): &(usize, String, ChangeType)| content.clone())
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -604,11 +607,8 @@ fn test_simple_substitution_works() {
 }
 
 #[test]
-#[ignore]
 fn test_delete_command_works() {
-    // NOTE: Ignored due to bug in delete command (batch mode).
-    // Current behavior: deletes lines 2-4 but then re-adds lines 3-4 at the end.
-    // Expected: ["line1", "line5"], Actual: ["line1", "line5", "line3", "line4", "line5"]
+    // Expected: ["line1", "line5"]
     let temp_dir = TempDir::new().unwrap();
     let file_path = temp_dir.path().join("test.txt");
     fs::write(&file_path, "line1\nline2\nline3\nline4\nline5").unwrap();
@@ -616,12 +616,13 @@ fn test_delete_command_works() {
     let parser = Parser::new(RegexFlavor::PCRE);
     let commands = parser.parse("2,4d").unwrap();
 
-    let mut processor = FileProcessor::new(commands);
+    let mut processor = FileProcessor::with_regex_flavor(commands, RegexFlavor::PCRE);
     let result = processor.process_file_with_context(&file_path).unwrap();
     let output: Vec<String> = result
         .all_lines
         .iter()
-        .map(|(_, content, _)| content.clone())
+        .filter(|(_, _, ct)| *ct != ChangeType::Deleted)
+        .map(|(_, content, _): &(usize, String, ChangeType)| content.clone())
         .collect();
 
     // Expected: lines 2-4 deleted, leaving line1 and line5
@@ -642,12 +643,12 @@ fn test_streaming_matches_memory_complex() {
     let commands = parser.parse("s/foo/FOO/g").unwrap();
 
     // In-memory (on copy)
-    let mut memory_proc = FileProcessor::new(commands.clone());
+    let mut memory_proc = FileProcessor::with_regex_flavor(commands.clone(), RegexFlavor::PCRE);
     let memory_result = memory_proc.process_file_with_context(&copy_path).unwrap();
     let memory_lines: Vec<String> = memory_result
         .all_lines
         .iter()
-        .map(|(_, content, _)| content.clone())
+        .map(|(_, content, _): &(usize, String, ChangeType)| content.clone())
         .collect();
 
     // Streaming (writes to file_path)

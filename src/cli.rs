@@ -80,9 +80,7 @@ struct Cli {
 
     /// Dry run mode (preview changes without applying)
     #[arg(short = 'd', long, alias = "dry-run")]
-    #[arg(
-        help = "Preview changes without modifying files\nThis is the default behavior. Use --execute to apply changes."
-    )]
+    #[arg(help = "Preview changes without modifying files.")]
     dry_run: bool,
 
     /// Interactive mode (ask before applying changes)
@@ -491,6 +489,7 @@ pub fn parse_args() -> Result<Args> {
                 interactive: cli.interactive,
                 context,
                 streaming,
+                no_streaming: cli.no_streaming,
                 regex_flavor,
                 no_backup: cli.no_backup,
                 backup_dir: cli.backup_dir,
@@ -521,6 +520,7 @@ pub enum Args {
         interactive: bool,
         context: usize,
         streaming: bool,
+        no_streaming: bool,
         regex_flavor: RegexFlavor,
         no_backup: bool,
         backup_dir: Option<String>,

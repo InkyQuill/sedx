@@ -1,7 +1,7 @@
 # SedX Examples
 
 **Last Updated:** 2025-02-25
-**Version:** 0.2.6
+**Version:** 1.2.0
 
 This guide provides 50+ practical examples of using SedX for common tasks in system administration, software development, and data processing.
 

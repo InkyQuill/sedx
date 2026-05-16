@@ -1,7 +1,7 @@
 # SedX Migration Guide
 
 **Last Updated:** 2025-02-25
-**Version:** 0.2.6
+**Version:** 1.2.0
 
 This guide helps you migrate from GNU sed to SedX. It covers regex syntax differences, command compatibility, and common migration patterns.
 

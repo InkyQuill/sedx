@@ -7,6 +7,11 @@ pub struct DiffFormatter;
 impl DiffFormatter {
     /// Auto-detect if we should use colors
     fn should_use_color() -> bool {
+        // Disable color in tests to ensure consistent output
+        if cfg!(test) {
+            return false;
+        }
+
         // Check NO_COLOR env var (https://no-color.org/)
         if std::env::var("NO_COLOR").is_ok() {
             return false;

@@ -46,3 +46,7 @@ test_*.sed
 .worktrees/
 .security-key
 logs/security/
+
+# MemPalace per-project files (issue #185)
+mempalace.yaml
+entities.json

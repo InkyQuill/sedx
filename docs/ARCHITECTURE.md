@@ -33,11 +33,6 @@ User Input (CLI)
 +------------------+
        |
        v
-+--------------------------+
-|  capability.rs           |  Check if streaming is supported
-+--------------------------+
-       |
-       v
     +-------+-------+
     |               |
     v               v
@@ -138,11 +133,14 @@ User Input -> Parser -> Flavor Detection -> Converter -> PCRE Pattern -> Regex E
 - `ere_converter.rs` - Converts ERE backreferences to PCRE format
 - PCRE patterns pass through unchanged
 
-### capability.rs - Streaming Capability Checks
+### Streaming Capability Checks
 
 **Responsibilities:**
 - Determine if a command set can execute in streaming mode
 - Identify commands requiring full file buffering
+
+This logic currently lives in the binary routing layer rather than a separate
+`capability.rs` module.
 
 **Non-Streamable Commands:**
 - Multi-line pattern space operations (`n`, `N`, `P`, `D`)

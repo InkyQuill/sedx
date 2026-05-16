@@ -1,14 +1,14 @@
 //! Unified Command System (UCS)
 //!
-//! This module defines the unified command representation that supports
-//! both traditional sed syntax and sd-like simple find/replace syntax.
+//! This module defines the unified command representation for supported sed
+//! syntax.
 
 use serde::{Deserialize, Serialize};
 
-/// Unified command representation that supports both sed and sd syntaxes
+/// Unified command representation for sed operations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Command {
-    /// Text substitution (sed: s/pattern/replacement/flags, sd: pattern replacement)
+    /// Text substitution (sed: s/pattern/replacement/flags)
     Substitution {
         pattern: String,
         replacement: String,
@@ -76,7 +76,7 @@ pub enum Command {
     /// Label definition (Phase 5): :label - defines a branch target
     Label { name: String },
 
-    /// Branch (Phase 5): b [label] - unconditional branch to label
+    /// Branch (Phase 5): b \[label\] - unconditional branch to label
     /// If no label specified, branches to end of script
     /// Can have optional address/range: addr b or addr1,addr2 b label
     Branch {
@@ -84,7 +84,7 @@ pub enum Command {
         range: Option<(Address, Address)>,
     },
 
-    /// Test branch (Phase 5): t [label] - branch if substitution made
+    /// Test branch (Phase 5): t \[label\] - branch if substitution made
     /// Branches to label if a substitution was made since last input
     /// Can have optional address/range: addr t or addr1,addr2 t label
     Test {
@@ -92,7 +92,7 @@ pub enum Command {
         range: Option<(Address, Address)>,
     },
 
-    /// Test false branch (Phase 5): T [label] - branch if NO substitution
+    /// Test false branch (Phase 5): T \[label\] - branch if NO substitution
     /// Branches to label if NO substitution was made since last input
     /// Can have optional address/range: addr T or addr1,addr2 T label
     TestFalse {
@@ -141,10 +141,10 @@ pub enum Command {
     ClearPatternSpace { range: Option<Address> },
 }
 
-/// Substitution flags (unified across sed and sd)
+/// Substitution flags.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct SubstitutionFlags {
-    /// g - all occurrences (sed: off by default, sd: on by default)
+    /// g - all occurrences (off by default)
     pub global: bool,
 
     /// p - print substituted lines

@@ -1,7 +1,7 @@
 # SedX User Guide
 
 **Last Updated:** 2025-02-25
-**Version:** 0.2.6
+**Version:** 1.2.0
 
 **SedX** is a safe, modern replacement for GNU `sed` with automatic backups, preview mode, and rollback functionality. This guide covers installation, basic usage, and core features.
 
@@ -71,7 +71,7 @@ sudo cp sedx /usr/local/bin/
 
 ```bash
 $ sedx --version
-sedx 0.2.6
+sedx 1.2.0
 
 Copyright (c) 2025 InkyQuill
 License: MIT

@@ -134,6 +134,7 @@ impl BackupManager {
     }
 
     /// Get the backup directory path
+    #[allow(dead_code)]
     pub fn backups_dir(&self) -> &Path {
         &self.backups_dir
     }

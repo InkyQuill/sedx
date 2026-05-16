@@ -1,8 +1,12 @@
 # SedX System Specification
 
 **Version:** 1.0.0 (Target)
-**Current Version:** 0.2.6-alpha (neo branch)
+**Current Version:** Historical 0.2.6-alpha draft; the crate is now 1.2.0.
 **Last Updated:** 2026-01-10
+
+> This document is a design archive and still contains older CLI assumptions
+> such as dry-run-by-default and `--execute`. For current user-facing behavior,
+> use `README.md`, `docs/USER_GUIDE.md`, and `sedx --help`.
 
 ---
 

@@ -125,10 +125,6 @@ fn quit_without_print_stops_without_emitting_current_line() {
         .stdout("a\n");
 }
 
-// NOTE: i\ / a\ / c\ silently no-op in stdin mode in the current sedx binary
-// (pre-existing behavior, out of scope for this migration). Use file mode so
-// the command is actually exercised.
-
 #[test]
 fn insert_before_line() {
     use tempfile::TempDir;
@@ -139,6 +135,16 @@ fn insert_before_line() {
         .assert()
         .success();
     assert_eq!(common::read_file(&file), "a\nINSERTED\nb\nc\n");
+}
+
+#[test]
+fn stdin_insert_before_line() {
+    common::sedx()
+        .arg(r"2i\INSERTED")
+        .write_stdin("a\nb\nc\n")
+        .assert()
+        .success()
+        .stdout("a\nINSERTED\nb\nc\n");
 }
 
 #[test]
@@ -154,6 +160,16 @@ fn append_after_line() {
 }
 
 #[test]
+fn stdin_append_after_line() {
+    common::sedx()
+        .arg(r"2a\APPENDED")
+        .write_stdin("a\nb\nc\n")
+        .assert()
+        .success()
+        .stdout("a\nb\nAPPENDED\nc\n");
+}
+
+#[test]
 fn change_single_line() {
     use tempfile::TempDir;
     let home = TempDir::new().unwrap();
@@ -163,6 +179,16 @@ fn change_single_line() {
         .assert()
         .success();
     assert_eq!(common::read_file(&file), "a\nREPLACED\nc\n");
+}
+
+#[test]
+fn stdin_change_single_line() {
+    common::sedx()
+        .arg(r"2c\REPLACED")
+        .write_stdin("a\nb\nc\n")
+        .assert()
+        .success()
+        .stdout("a\nREPLACED\nc\n");
 }
 
 #[test]
@@ -176,6 +202,16 @@ fn change_range_collapses_to_single_line() {
         .assert()
         .success();
     assert_eq!(common::read_file(&file), "a\nREPLACED\nd\n");
+}
+
+#[test]
+fn stdin_change_range_collapses_to_single_line() {
+    common::sedx()
+        .arg(r"2,3c\REPLACED")
+        .write_stdin("a\nb\nc\nd\n")
+        .assert()
+        .success()
+        .stdout("a\nREPLACED\nd\n");
 }
 
 #[test]
@@ -320,15 +356,31 @@ fn read_file_appends_contents_after_address() {
     let home = TempDir::new().unwrap();
     let data = common::write_file(home.path(), "extra.txt", "X1\nX2\n");
 
-    // r/R work correctly in stdin mode; in file mode sedx has a pre-existing
-    // bug where the read content prints to stdout but the input file is not
-    // modified. Out-of-scope to fix here — we exercise the working path.
     common::sedx()
         .arg(format!("2r {}", data.to_str().unwrap()))
         .write_stdin("a\nb\nc\n")
         .assert()
         .success()
         .stdout("a\nb\nX1\nX2\nc\n");
+}
+
+#[test]
+fn file_mode_read_file_appends_contents_after_address() {
+    use tempfile::TempDir;
+    let home = TempDir::new().unwrap();
+    let dir = home.path();
+    let input = common::write_file(dir, "in.txt", "a\nb\nc\n");
+    let data = common::write_file(dir, "extra.txt", "X1\nX2\n");
+
+    common::sedx_isolated(dir)
+        .args([
+            &format!("2r {}", data.to_str().unwrap()),
+            input.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    assert_eq!(common::read_file(&input), "a\nb\nX1\nX2\nc\n");
 }
 
 #[test]
@@ -353,14 +405,31 @@ fn read_line_reads_one_line_per_match() {
     let home = TempDir::new().unwrap();
     let data = common::write_file(home.path(), "data.txt", "Z1\nZ2\nZ3\n");
 
-    // Same rationale as read_file test: stdin mode exercises the command;
-    // file mode has a pre-existing sedx bug that's out of scope to fix.
     common::sedx()
         .arg(format!("R {}", data.to_str().unwrap()))
         .write_stdin("a\nb\nc\n")
         .assert()
         .success()
         .stdout("a\nZ1\nb\nZ2\nc\nZ3\n");
+}
+
+#[test]
+fn file_mode_read_line_reads_one_line_per_match() {
+    use tempfile::TempDir;
+    let home = TempDir::new().unwrap();
+    let dir = home.path();
+    let input = common::write_file(dir, "in.txt", "a\nb\nc\n");
+    let data = common::write_file(dir, "data.txt", "Z1\nZ2\nZ3\n");
+
+    common::sedx_isolated(dir)
+        .args([
+            &format!("R {}", data.to_str().unwrap()),
+            input.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    assert_eq!(common::read_file(&input), "a\nZ1\nb\nZ2\nc\nZ3\n");
 }
 
 #[test]

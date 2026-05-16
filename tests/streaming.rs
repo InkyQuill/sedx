@@ -4,6 +4,10 @@
 mod common;
 
 use common::{read_file, sedx_isolated, write_file};
+use sedx::cli::RegexFlavor;
+use sedx::file_processor::StreamProcessor;
+use sedx::parser::Parser;
+use std::io::Cursor;
 use tempfile::TempDir;
 
 #[test]
@@ -34,6 +38,51 @@ fn forced_streaming_small_file_matches_in_memory() {
     // same way would satisfy only the equality above).
     assert!(!mem_out.contains("foo"));
     assert_eq!(mem_out.matches("bar").count(), 1000);
+}
+
+#[test]
+fn no_streaming_handles_small_non_streamable_commands() {
+    let home = TempDir::new().unwrap();
+    let dir = home.path();
+    let file = write_file(dir, "change.txt", "alpha\nbravo\ncharlie\n");
+
+    sedx_isolated(dir)
+        .args(["--no-streaming", r"/bravo/c\BRAVO", file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    assert_eq!(read_file(&file), "alpha\nBRAVO\ncharlie\n");
+}
+
+#[test]
+fn forced_streaming_last_line_delete_removes_only_final_line() {
+    let home = TempDir::new().unwrap();
+    let dir = home.path();
+    let file = write_file(dir, "last-delete.txt", "alpha\nbravo\ncharlie\n");
+
+    sedx_isolated(dir)
+        .args(["--streaming", "$d", file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    assert_eq!(read_file(&file), "alpha\nbravo\n");
+}
+
+#[test]
+fn streaming_last_line_quit_outputs_all_lines() {
+    let parser = Parser::new(RegexFlavor::PCRE);
+    let commands = parser.parse("$q").unwrap();
+    let mut processor = StreamProcessor::new(commands);
+    let mut output = Vec::new();
+
+    processor
+        .process_reader_to_writer(Cursor::new("alpha\nbravo\ncharlie\n"), &mut output, "stdin")
+        .unwrap();
+
+    assert_eq!(
+        String::from_utf8(output).unwrap(),
+        "alpha\nbravo\ncharlie\n"
+    );
 }
 
 #[cfg(unix)]

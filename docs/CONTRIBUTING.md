@@ -103,7 +103,6 @@ sedx/
 │   ├── sed_parser.rs      # Legacy sed expression parser
 │   ├── bre_converter.rs   # BRE to PCRE conversion
 │   ├── ere_converter.rs   # ERE backreference conversion
-│   ├── capability.rs      # Streaming capability checks
 │   ├── file_processor.rs  # In-memory and streaming processors
 │   ├── backup_manager.rs  # Backup creation and restoration
 │   ├── config.rs          # Configuration file management
@@ -142,7 +141,6 @@ sedx/
 | `sed_parser.rs` | Legacy parser | `parse_sed_expression()`, `SedCommand` |
 | `bre_converter.rs` | BRE conversion | `convert_bre_to_pcre()`, `convert_sed_backreferences()` |
 | `ere_converter.rs` | ERE conversion | `convert_ere_to_pcre_pattern()`, `convert_ere_backreferences()` |
-| `capability.rs` | Streaming checks | `can_stream()`, `is_range_streamable()` |
 | `file_processor.rs` | File processing | `FileProcessor`, `StreamProcessor`, `CycleState` |
 | `backup_manager.rs` | Backup system | `BackupManager`, `BackupMetadata` |
 | `config.rs` | Configuration | `Config`, `load_config()`, `validate_config()` |
@@ -355,7 +353,7 @@ fn apply_command_to_cycle(&mut self, cmd: &Command, state: &mut CycleState) -> R
 ```
 
 **4. Add streaming support** (if applicable):
-   - Update `capability.rs::can_stream()`
+   - Update command routing in `main.rs`
    - Add handler in `StreamProcessor::process_streaming_internal()`
 
 **5. Add tests:**
