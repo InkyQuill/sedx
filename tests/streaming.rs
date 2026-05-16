@@ -100,6 +100,20 @@ fn streaming_clear_pattern_space_emits_empty_pattern_spaces() {
 }
 
 #[test]
+fn streaming_grouped_clear_pattern_space_emits_empty_pattern_spaces() {
+    let parser = Parser::new(RegexFlavor::PCRE);
+    let commands = parser.parse("{ z }").unwrap();
+    let mut processor = StreamProcessor::new(commands);
+    let mut output = Vec::new();
+
+    processor
+        .process_reader_to_writer(Cursor::new("alpha\nbravo\ncharlie\n"), &mut output, "stdin")
+        .unwrap();
+
+    assert_eq!(String::from_utf8(output).unwrap(), "\n\n\n");
+}
+
+#[test]
 fn streaming_pattern_address_insert_append_and_change() {
     let parser = Parser::new(RegexFlavor::PCRE);
     let input = "alpha\nbravo\ncharlie\n";
@@ -352,6 +366,20 @@ fn forced_streaming_duplicate_pattern_ranges_do_not_share_state() {
 fn forced_streaming_grouped_duplicate_pattern_ranges_do_not_share_state() {
     sedx()
         .args(["--streaming", "-n", "{ /START/,/END/p; /START/,/END/p }"])
+        .write_stdin("AAA\nSTART\nBBB\nEND\nCCC\n")
+        .assert()
+        .success()
+        .stdout("START\nSTART\nBBB\nBBB\nEND\nEND\n");
+}
+
+#[test]
+fn forced_streaming_nested_grouped_duplicate_pattern_ranges_do_not_share_state() {
+    sedx()
+        .args([
+            "--streaming",
+            "-n",
+            "{ { /START/,/END/p; /START/,/END/p } }",
+        ])
         .write_stdin("AAA\nSTART\nBBB\nEND\nCCC\n")
         .assert()
         .success()
