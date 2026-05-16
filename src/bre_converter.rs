@@ -19,10 +19,9 @@
 /// - `\\` → `\` - Convert double backslash to single
 pub fn convert_bre_to_pcre(pattern: &str) -> String {
     let mut result = String::new();
-    let mut chars = pattern.chars().peekable();
     let mut escape_next = false;
 
-    while let Some(c) = chars.next() {
+    for c in pattern.chars() {
         if escape_next {
             match c {
                 '(' | ')' | '{' | '}' => {
@@ -46,11 +45,6 @@ pub fn convert_bre_to_pcre(pattern: &str) -> String {
                     // Match backreference: \& → $&
                     result.push('$');
                     result.push('&');
-                }
-                'n' if chars.peek().is_none() => {
-                    // \ n at end is literal newline, not escape
-                    result.push('\\');
-                    result.push(c);
                 }
                 _ => {
                     // Unknown escape sequence, keep as-is
@@ -106,8 +100,9 @@ pub fn convert_sed_backreferences(replacement: &str) -> String {
                     // Double backslash → single
                     result.push('\\');
                 }
+                // Replacement escape sequences such as \n are interpreted by SubstitutionEngine.
+                // The converter only rewrites sed backreferences into regex crate syntax.
                 'n' => {
-                    // Newline escape
                     result.push('\\');
                     result.push('n');
                 }

@@ -110,3 +110,33 @@ fn escaped_paren_is_group_in_bre_and_literal_in_pcre() {
         .success()
         .stdout("foo\n");
 }
+
+#[test]
+fn substitution_zero_occurrence_replaces_all_matches() {
+    sedx()
+        .arg("s/foo/bar/0")
+        .write_stdin("foo foo\n")
+        .assert()
+        .success()
+        .stdout("bar bar\n");
+}
+
+#[test]
+fn bre_replacement_newline_produces_actual_newline() {
+    sedx()
+        .args(["-B", r"s/foo/bar\nbaz/"])
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("bar\nbaz\n");
+}
+
+#[test]
+fn ere_replacement_newline_produces_actual_newline() {
+    sedx()
+        .args(["-E", r"s/foo/bar\nbaz/"])
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("bar\nbaz\n");
+}

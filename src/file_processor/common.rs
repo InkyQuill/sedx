@@ -210,7 +210,10 @@ impl SubstitutionEngine {
         let re = compile_regex_with_context(pattern, self.regex_flavor, case_insensitive)?;
 
         match nth_occurrence {
-            Some(n) if n > 0 => {
+            Some(0) => Ok(re
+                .replace_all(line, processed_replacement.as_str())
+                .to_string()),
+            Some(n) => {
                 // Replace only the Nth occurrence
                 let mut result = line.to_string();
                 let mut count = 0;
@@ -228,7 +231,6 @@ impl SubstitutionEngine {
                 }
                 Ok(result)
             }
-            Some(_) => Ok(line.to_string()), // 0 means no substitution
             None => {
                 // Standard behavior
                 if global {
