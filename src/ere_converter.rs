@@ -18,7 +18,7 @@
 /// - No conversion needed for pattern syntax
 ///
 /// For **replacements**, backreferences need conversion:
-/// - `\1`..`\9` → `$1`..`$9` - Backreference conversion
+/// - `\0`..`\9` → `$0`..`$9` - Backreference conversion
 /// - `\&` → `$0` - Match reference
 /// - `\\` remains `\\` - Escape processing happens after conversion
 ///
@@ -63,6 +63,7 @@ mod tests {
     #[test]
     fn test_convert_ere_backreferences() {
         assert_eq!(convert_ere_backreferences(r#"\1"#), "$1");
+        assert_eq!(convert_ere_backreferences(r#"\0"#), "$0");
         assert_eq!(convert_ere_backreferences(r#"\2\1"#), "$2$1");
         assert_eq!(convert_ere_backreferences(r#"&"#), "$0");
         assert_eq!(convert_ere_backreferences(r#"\&"#), "&");
@@ -204,6 +205,7 @@ mod tests {
     fn test_all_backreferences_single() {
         // Test all single digit backreferences
         assert_eq!(convert_ere_backreferences(r#"\1"#), "$1");
+        assert_eq!(convert_ere_backreferences(r#"\0"#), "$0");
         assert_eq!(convert_ere_backreferences(r#"\2"#), "$2");
         assert_eq!(convert_ere_backreferences(r#"\3"#), "$3");
         assert_eq!(convert_ere_backreferences(r#"\4"#), "$4");
@@ -218,6 +220,7 @@ mod tests {
     fn test_multiple_backreferences_various() {
         // Multiple backreferences in various combinations
         assert_eq!(convert_ere_backreferences(r#"\1\2\3"#), "$1$2$3");
+        assert_eq!(convert_ere_backreferences(r#"\0\1"#), "$0$1");
         assert_eq!(convert_ere_backreferences(r#"\3\2\1"#), "$3$2$1");
         assert_eq!(
             convert_ere_backreferences(r#"\9\8\7\6\5\4\3\2\1"#),

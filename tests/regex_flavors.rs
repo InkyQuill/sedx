@@ -87,6 +87,16 @@ fn ere_bare_ampersand_expands_whole_match() {
 }
 
 #[test]
+fn ere_zero_backreference_expands_whole_match() {
+    sedx()
+        .args(["-E", r"s/(foo)/[\0]/"])
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("[foo]\n");
+}
+
+#[test]
 fn ere_escaped_ampersand_is_literal() {
     sedx()
         .args(["-E", r"s/foo/[\&]/"])
@@ -117,6 +127,26 @@ fn ere_replacement_double_dollar_is_literal() {
 }
 
 #[test]
+fn escaped_delimiter_in_pattern_is_literal() {
+    sedx()
+        .arg(r"s/a\/b/X/")
+        .write_stdin("a/b\n")
+        .assert()
+        .success()
+        .stdout("X\n");
+}
+
+#[test]
+fn escaped_delimiter_in_replacement_is_literal() {
+    sedx()
+        .arg(r"s/foo/a\/b/")
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("a/b\n");
+}
+
+#[test]
 fn ere_replacement_double_dollar_before_ampersand_is_literal_dollars_then_match() {
     sedx()
         .args(["-E", r"s/foo/[$$&]/"])
@@ -141,6 +171,16 @@ fn bre_flag_requires_escaped_groups_and_quantifiers() {
 fn bre_bare_ampersand_expands_whole_match() {
     sedx()
         .args(["-B", r"s/foo/[&]/"])
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("[foo]\n");
+}
+
+#[test]
+fn bre_zero_backreference_expands_whole_match() {
+    sedx()
+        .args(["-B", r"s/\(foo\)/[\0]/"])
         .write_stdin("foo\n")
         .assert()
         .success()

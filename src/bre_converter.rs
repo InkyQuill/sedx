@@ -72,7 +72,7 @@ pub fn convert_bre_to_pcre(pattern: &str) -> String {
 ///
 /// # Conversion Rules
 ///
-/// - `\1`..`\9` → `$1`..`$9` - Backreference conversion
+/// - `\0`..`\9` → `$0`..`$9` - Backreference conversion
 /// - `$` → `$$` - Literal dollar in Rust regex replacement syntax
 /// - `&` → `$0` - Match reference
 /// - `\&` → `&` - Literal ampersand
@@ -88,8 +88,8 @@ pub fn convert_sed_backreferences(replacement: &str) -> String {
     for c in chars {
         if escape_next {
             match c {
-                '1'..='9' => {
-                    // Backreference: \1 → $1
+                '0'..='9' => {
+                    // Backreference: \0 → $0, \1 → $1
                     result.push('$');
                     result.push(c);
                 }
@@ -272,6 +272,7 @@ mod tests {
     #[test]
     fn test_convert_sed_backreferences() {
         assert_eq!(convert_sed_backreferences(r#"\1"#), "$1");
+        assert_eq!(convert_sed_backreferences(r#"\0"#), "$0");
         assert_eq!(convert_sed_backreferences(r#"\2\1"#), "$2$1");
         assert_eq!(convert_sed_backreferences(r#"&"#), "$0");
         assert_eq!(convert_sed_backreferences(r#"\&"#), "&");
@@ -383,6 +384,7 @@ mod tests {
     fn test_multiple_backreferences_in_replacement() {
         // Multiple backreferences
         assert_eq!(convert_sed_backreferences(r#"\1\2\3"#), "$1$2$3");
+        assert_eq!(convert_sed_backreferences(r#"\0\1"#), "$0$1");
         assert_eq!(
             convert_sed_backreferences(r#"\9\8\7\6\5\4\3\2\1"#),
             "$9$8$7$6$5$4$3$2$1"

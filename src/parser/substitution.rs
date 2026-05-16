@@ -30,6 +30,48 @@ pub fn fold_substitution_flags(flags: &[char]) -> SubstitutionFlags {
     out
 }
 
+fn scan_substitution_section(
+    rest: &str,
+    start: usize,
+    delimiter: char,
+) -> Option<(String, usize, usize)> {
+    let mut section = String::new();
+    let mut index = start;
+
+    while index < rest.len() {
+        let c = rest[index..].chars().next()?;
+        let c_len = c.len_utf8();
+
+        if c == delimiter {
+            return Some((section, index, index + c_len));
+        }
+
+        if c == '\\' {
+            let next_index = index + c_len;
+            if next_index >= rest.len() {
+                section.push('\\');
+                index = next_index;
+                continue;
+            }
+
+            let next = rest[next_index..].chars().next()?;
+            if next == delimiter {
+                section.push(delimiter);
+            } else {
+                section.push('\\');
+                section.push(next);
+            }
+            index = next_index + next.len_utf8();
+            continue;
+        }
+
+        section.push(c);
+        index += c_len;
+    }
+
+    None
+}
+
 pub fn parse_substitution(cmd: &str) -> Result<Command> {
     let (s_pos, command) = commands::find_command_char(cmd).ok_or_else(|| {
         anyhow!(
@@ -73,60 +115,46 @@ pub fn parse_substitution(cmd: &str) -> Result<Command> {
         )
     })?;
 
-    // Find all delimiter positions
-    let mut delimiter_positions: Vec<usize> = Vec::new();
-
-    // Use char_indices() to get correct byte positions for UTF-8 strings
-    for (byte_pos, c) in rest.char_indices() {
-        if c == delimiter {
-            delimiter_positions.push(byte_pos);
-        }
-    }
-
-    if delimiter_positions.len() < 3 {
-        // Provide specific error based on how many delimiters were found
-        let (description, suggestion) = match delimiter_positions.len() {
-            0 => (
-                format!(
-                    "missing closing delimiter: no '{}' delimiter found after the opening delimiter",
-                    delimiter
-                ),
-                Some(
-                    "Make sure to close the pattern, replacement, and optionally add flags:\n  s/pattern/replacement/\n  s/pattern/replacement/g",
-                ),
-            ),
-            1 => (
-                format!(
+    let pattern_start = delimiter.len_utf8();
+    let Some((pattern, _, replacement_start)) =
+        scan_substitution_section(rest, pattern_start, delimiter)
+    else {
+        return Err(anyhow!(
+            "{}",
+            format_parse_error(
+                cmd,
+                Some(s_pos + 1),
+                &format!(
                     "missing closing delimiter: missing second '{}' delimiter after pattern",
                     delimiter
                 ),
                 Some(
                     "Each substitution needs three delimiters: s/pattern/replacement/\n                ^       ^           ^",
-                ),
-            ),
-            2 => (
-                format!(
+                )
+            )
+        ));
+    };
+
+    let Some((replacement, _, flags_start)) =
+        scan_substitution_section(rest, replacement_start, delimiter)
+    else {
+        return Err(anyhow!(
+            "{}",
+            format_parse_error(
+                cmd,
+                Some(s_pos + 1),
+                &format!(
                     "missing closing delimiter: missing third '{}' delimiter after replacement",
                     delimiter
                 ),
                 Some(
                     "The replacement string must be followed by the delimiter:\n  s/pattern/replacement/",
-                ),
-            ),
-            _ => unreachable!(),
-        };
-
-        return Err(anyhow!(
-            "{}",
-            format_parse_error(cmd, Some(s_pos + 1), &description, suggestion)
+                )
+            )
         ));
-    }
+    };
 
-    // Extract pattern and replacement
-    // delimiter_positions[0] is always 0 (the opening delimiter)
-    let pattern = &rest[delimiter_positions[0] + 1..delimiter_positions[1]];
-    let replacement = &rest[delimiter_positions[1] + 1..delimiter_positions[2]];
-    let flags_part = &rest[delimiter_positions[2] + 1..];
+    let flags_part = &rest[flags_start..];
 
     // Parse flags
     let flags_vec: Vec<char> = flags_part.chars().collect();
@@ -136,8 +164,8 @@ pub fn parse_substitution(cmd: &str) -> Result<Command> {
     let range = parse_optional_range(address_part)?;
 
     Ok(Command::Substitution {
-        pattern: pattern.to_string(),
-        replacement: replacement.to_string(),
+        pattern,
+        replacement,
         flags,
         range,
     })
