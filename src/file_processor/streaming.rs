@@ -501,7 +501,7 @@ impl StreamProcessor {
                         let safe_path = crate::path_policy::validate_script_file_operand(filename)?;
                         crate::path_policy::ensure_not_symlink(&safe_path)?;
                         anyhow::bail!(
-                            "file I/O command '{}' is not supported in forced streaming mode",
+                            "file I/O command '{}' is not supported in streaming mode",
                             filename
                         );
                     }
@@ -509,13 +509,11 @@ impl StreamProcessor {
                         let safe_path = crate::path_policy::validate_script_file_operand(filename)?;
                         crate::path_policy::ensure_not_symlink(&safe_path)?;
                         anyhow::bail!(
-                            "file I/O command '{}' is not supported in forced streaming mode",
+                            "file I/O command '{}' is not supported in streaming mode",
                             filename
                         );
                     }
-                    _ => {
-                        // Ignore other commands in streaming for now
-                    }
+                    _ => bail_unsupported_streaming_command(cmd)?,
                 }
             }
 
@@ -1207,7 +1205,7 @@ impl StreamProcessor {
 
 fn bail_unsupported_streaming_command(command: &Command) -> Result<()> {
     anyhow::bail!(
-        "command '{}' is not supported in forced streaming mode",
+        "command '{}' is not supported in streaming mode",
         StreamProcessor::command_name(command)
     );
 }

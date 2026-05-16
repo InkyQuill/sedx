@@ -80,9 +80,7 @@ fn forced_streaming_rejects_read_file_command() {
         .args(["--streaming", "2r extra.txt", input.to_str().unwrap()])
         .assert()
         .failure()
-        .stderr(predicate::str::contains(
-            "not supported in forced streaming mode",
-        ));
+        .stderr(predicate::str::contains("not supported in streaming mode"));
 }
 
 #[test]
@@ -97,9 +95,7 @@ fn forced_streaming_rejects_grouped_read_file_command() {
         .args(["--streaming", "{2r extra.txt}", input.to_str().unwrap()])
         .assert()
         .failure()
-        .stderr(predicate::str::contains(
-            "not supported in forced streaming mode",
-        ));
+        .stderr(predicate::str::contains("not supported in streaming mode"));
 }
 
 #[test]

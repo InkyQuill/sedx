@@ -172,10 +172,7 @@ fn execute_command(
     let supports_streaming = can_use_streaming(&commands);
     if streaming {
         if let Some(command) = unsupported_streaming_command(&commands) {
-            anyhow::bail!(
-                "command '{}' is not supported in forced streaming mode",
-                command
-            );
+            anyhow::bail!("command '{}' is not supported in streaming mode", command);
         }
     }
 

@@ -363,6 +363,42 @@ fn forced_streaming_duplicate_pattern_ranges_do_not_share_state() {
 }
 
 #[test]
+fn streaming_group_inner_pattern_ranges_have_independent_state() {
+    let parser = Parser::new(RegexFlavor::PCRE);
+    let commands = parser
+        .parse(r"{ \#A#,\#B#s/^/x:/; \#C#,\#D#s/^/y:/ }")
+        .unwrap();
+    let mut processor = StreamProcessor::new(commands);
+    let mut output = Vec::new();
+
+    processor
+        .process_reader_to_writer(
+            Cursor::new("A\nmid1\nB\nC\nmid2\nD\n"),
+            &mut output,
+            "stdin",
+        )
+        .unwrap();
+
+    assert_eq!(
+        String::from_utf8(output).unwrap(),
+        "x:A\nx:mid1\nx:B\ny:C\ny:mid2\ny:D\n"
+    );
+}
+
+#[test]
+fn forced_streaming_rejects_unsupported_branch_command() {
+    let home = TempDir::new().unwrap();
+    let dir = home.path();
+    let file = write_file(dir, "input.txt", "a\n");
+
+    sedx_isolated(dir)
+        .args(["--streaming", ":x; bx", file.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("not supported in streaming mode"));
+}
+
+#[test]
 fn forced_streaming_grouped_duplicate_pattern_ranges_do_not_share_state() {
     sedx()
         .args(["--streaming", "-n", "{ /START/,/END/p; /START/,/END/p }"])
