@@ -94,17 +94,6 @@ fn metadata_backup_path(backup_dir: &Path, backup_path: &Path) -> Result<PathBuf
     Ok(candidate)
 }
 
-fn backup_filename_matches_original(backup_path: &Path, original_path: &Path) -> bool {
-    let Some(backup_name) = backup_path.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    let Some(original_name) = original_path.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-
-    backup_name == original_name || backup_name.strip_suffix(GZ_EXT) == Some(original_name)
-}
-
 /// Gzip-copy `src` to `dst` using streaming I/O so memory stays flat for
 /// large files. The destination gets the full gzip container (magic bytes +
 /// header + deflate stream + trailer), suitable for standard `gunzip`.
@@ -341,16 +330,16 @@ impl BackupManager {
             let original_path =
                 crate::path_policy::validate_restore_target(&file_backup.original_path)?;
             let backup_path = metadata_backup_path(&backup_dir, &file_backup.backup_path)?;
-            if let Some(identity) = &file_backup.path_identity {
-                let expected_identity = path_identity(&original_path);
-                let expected_backup_path = backup_path_for_original(&backup_dir, &original_path);
-                if identity != &expected_identity || backup_path != expected_backup_path {
-                    bail!(
-                        "backup metadata path validation failed for '{}': backup entry does not match original path",
-                        original_path.display()
-                    );
-                }
-            } else if !backup_filename_matches_original(&backup_path, &original_path) {
+            let Some(identity) = &file_backup.path_identity else {
+                bail!(
+                    "backup metadata path validation failed for '{}': missing path identity",
+                    original_path.display()
+                );
+            };
+
+            let expected_identity = path_identity(&original_path);
+            let expected_backup_path = backup_path_for_original(&backup_dir, &original_path);
+            if identity != &expected_identity || backup_path != expected_backup_path {
                 bail!(
                     "backup metadata path validation failed for '{}': backup entry does not match original path",
                     original_path.display()
@@ -1209,10 +1198,9 @@ mod tests {
     // ============================================================================
 
     #[test]
-    fn restore_accepts_legacy_uncompressed_backup() {
-        // Pre-v1.1 backups stored files as raw copies (no .gz). restore_backup
-        // must still handle those so in-flight backups from older installs
-        // remain recoverable after an upgrade.
+    fn restore_rejects_legacy_metadata_without_path_identity() {
+        // Legacy metadata without path_identity cannot bind the backup file to
+        // the original path strongly enough, so restore must reject it.
         let (mut manager, temp_dir) = create_test_manager();
         let original = create_test_file(temp_dir.path(), "legacy.txt", "pre-upgrade");
 
@@ -1241,8 +1229,17 @@ mod tests {
         // Mutate the original so we can detect that restore ran.
         fs::write(&original, "after-edit").unwrap();
 
-        manager.restore_backup(&backup_id).unwrap();
-        assert_eq!(fs::read_to_string(&original).unwrap(), "pre-upgrade");
+        let err = manager.restore_backup(&backup_id).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("backup metadata path validation failed"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            err.to_string().contains("missing path identity"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(fs::read_to_string(&original).unwrap(), "after-edit");
     }
 
     // ============================================================================

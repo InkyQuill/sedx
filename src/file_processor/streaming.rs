@@ -90,6 +90,8 @@ impl StreamProcessor {
     }
 
     fn process_streaming_internal(&mut self, file_path: &Path) -> Result<FileDiff> {
+        crate::path_policy::ensure_not_symlink(file_path)?;
+
         let parent_dir = file_path.parent().unwrap_or(Path::new("."));
         let temp_file = NamedTempFile::new_in(parent_dir)
             .with_context(|| format!("Failed to create temp file in {}", parent_dir.display()))?;
@@ -104,8 +106,6 @@ impl StreamProcessor {
         };
 
         if !self.dry_run {
-            crate::path_policy::ensure_not_symlink(file_path)?;
-
             preserve_perms_after(file_path, || {
                 temp_file.persist(file_path).with_context(|| {
                     format!("Failed to persist temp file to {}", file_path.display())
