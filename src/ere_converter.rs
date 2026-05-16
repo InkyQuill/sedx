@@ -74,7 +74,7 @@ mod tests {
     fn test_no_backreference_conversion() {
         assert_eq!(convert_ere_backreferences(r#"foo"#), "foo");
         assert_eq!(convert_ere_backreferences(r#"foo bar"#), "foo bar");
-        assert_eq!(convert_ere_backreferences(r#"$1$2"#), "$1$2"); // Already PCRE format
+        assert_eq!(convert_ere_backreferences(r#"$1$2"#), "$$1$$2");
     }
 
     #[test]
@@ -88,8 +88,8 @@ mod tests {
 
     #[test]
     fn test_mixed_replacement() {
-        // Mixed ERE and PCRE backreferences
-        assert_eq!(convert_ere_backreferences(r#"foo\1bar$2"#), "foo$1bar$2");
+        // ERE backreferences are converted; bare dollars remain literal.
+        assert_eq!(convert_ere_backreferences(r#"foo\1bar$2"#), "foo$1bar$$2");
     }
 
     #[test]
@@ -257,10 +257,10 @@ mod tests {
 
     #[test]
     fn test_mixed_backreferences_pcre_format() {
-        // Mixed ERE backreferences and PCRE format
-        assert_eq!(convert_ere_backreferences(r#"foo\1bar$2"#), "foo$1bar$2");
-        assert_eq!(convert_ere_backreferences(r#"$1\2$3\4"#), "$1$2$3$4");
-        assert_eq!(convert_ere_backreferences(r#"\1$1\2$2"#), "$1$1$2$2");
+        // ERE backreferences are converted; bare dollars remain literal.
+        assert_eq!(convert_ere_backreferences(r#"foo\1bar$2"#), "foo$1bar$$2");
+        assert_eq!(convert_ere_backreferences(r#"$1\2$3\4"#), "$$1$2$$3$4");
+        assert_eq!(convert_ere_backreferences(r#"\1$1\2$2"#), "$1$$1$2$$2");
     }
 
     #[test]
@@ -295,11 +295,11 @@ mod tests {
 
     #[test]
     fn test_pcre_format_preserved() {
-        // Already PCRE format should pass through
-        assert_eq!(convert_ere_backreferences("$1"), "$1");
-        assert_eq!(convert_ere_backreferences("$1$2$3"), "$1$2$3");
-        assert_eq!(convert_ere_backreferences("$&"), "$&");
-        assert_eq!(convert_ere_backreferences("foo$1bar$2"), "foo$1bar$2");
+        // ERE/sed treats `$` literally, including PCRE-looking sequences.
+        assert_eq!(convert_ere_backreferences("$1"), "$$1");
+        assert_eq!(convert_ere_backreferences("$1$2$3"), "$$1$$2$$3");
+        assert_eq!(convert_ere_backreferences("$&"), "$$$0");
+        assert_eq!(convert_ere_backreferences("foo$1bar$2"), "foo$$1bar$$2");
     }
 
     #[test]

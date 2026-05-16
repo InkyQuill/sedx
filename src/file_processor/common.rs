@@ -217,6 +217,7 @@ impl SubstitutionEngine {
                 // GNU sed treats s///Ng as replacing from the Nth match onward.
                 let mut result = String::with_capacity(line.len() + processed_replacement.len());
                 let mut last_end = 0;
+                let mut replaced = false;
 
                 for (index, captures) in re.captures_iter(line).enumerate() {
                     let occurrence = index + 1;
@@ -241,9 +242,10 @@ impl SubstitutionEngine {
                     result.push_str(&line[last_end..mat.start()]);
                     captures.expand(processed_replacement.as_str(), &mut result);
                     last_end = mat.end();
+                    replaced = true;
                 }
 
-                if global && last_end > 0 {
+                if global && replaced {
                     result.push_str(&line[last_end..]);
                     return Ok(result);
                 }

@@ -73,6 +73,7 @@ pub fn convert_bre_to_pcre(pattern: &str) -> String {
 /// # Conversion Rules
 ///
 /// - `\1`..`\9` → `$1`..`$9` - Backreference conversion
+/// - `$` → `$$` - Literal dollar in Rust regex replacement syntax
 /// - `&` → `$0` - Match reference
 /// - `\&` → `&` - Literal ampersand
 /// - `\\` remains `\\` - Escape processing happens after conversion
@@ -115,7 +116,10 @@ pub fn convert_sed_backreferences(replacement: &str) -> String {
             escape_next = false;
         } else if c == '\\' {
             escape_next = true;
-        } else if c == '&' && !result.ends_with('$') {
+        } else if c == '$' {
+            result.push('$');
+            result.push('$');
+        } else if c == '&' {
             result.push('$');
             result.push('0');
         } else {
@@ -124,6 +128,57 @@ pub fn convert_sed_backreferences(replacement: &str) -> String {
     }
 
     // Handle trailing backslash
+    if escape_next {
+        result.push('\\');
+    }
+
+    result
+}
+
+/// Convert sed-style whole-match references while preserving PCRE/Rust `$` syntax.
+///
+/// Default regex mode accepts Rust regex replacement references such as `$1`,
+/// `$&`, and `$$`. Bare `&` is still accepted as a sed-compatible whole-match
+/// reference.
+pub fn convert_pcre_replacement(replacement: &str) -> String {
+    let mut result = String::new();
+    let chars = replacement.chars().peekable();
+    let mut escape_next = false;
+
+    for c in chars {
+        if escape_next {
+            match c {
+                '1'..='9' => {
+                    result.push('$');
+                    result.push(c);
+                }
+                '&' => {
+                    result.push('&');
+                }
+                '\\' => {
+                    result.push('\\');
+                    result.push('\\');
+                }
+                'n' => {
+                    result.push('\\');
+                    result.push('n');
+                }
+                _ => {
+                    result.push('\\');
+                    result.push(c);
+                }
+            }
+            escape_next = false;
+        } else if c == '\\' {
+            escape_next = true;
+        } else if c == '&' && !result.ends_with('$') {
+            result.push('$');
+            result.push('0');
+        } else {
+            result.push(c);
+        }
+    }
+
     if escape_next {
         result.push('\\');
     }
@@ -223,12 +278,25 @@ mod tests {
         assert_eq!(convert_sed_backreferences(r#"\\"#), r#"\\"#);
         assert_eq!(convert_sed_backreferences(r#"\n"#), "\\n");
         assert_eq!(convert_sed_backreferences(r#"foo\1bar"#), "foo$1bar");
+        assert_eq!(convert_sed_backreferences(r#"$&"#), "$$$0");
+        assert_eq!(convert_sed_backreferences(r#"$$"#), "$$$$");
+        assert_eq!(convert_sed_backreferences(r#"$$&"#), "$$$$$0");
     }
 
     #[test]
     fn test_no_backreference_conversion() {
         assert_eq!(convert_sed_backreferences(r#"foo"#), "foo");
         assert_eq!(convert_sed_backreferences(r#"foo bar"#), "foo bar");
+    }
+
+    #[test]
+    fn test_pcre_replacement_preserves_dollar_syntax() {
+        assert_eq!(convert_pcre_replacement(r#"$1"#), "$1");
+        assert_eq!(convert_pcre_replacement(r#"$&"#), "$&");
+        assert_eq!(convert_pcre_replacement(r#"$$&"#), "$$&");
+        assert_eq!(convert_pcre_replacement(r#"&"#), "$0");
+        assert_eq!(convert_pcre_replacement(r#"\&"#), "&");
+        assert_eq!(convert_pcre_replacement(r#"\1"#), "$1");
     }
 
     #[test]
@@ -359,7 +427,7 @@ mod tests {
         // Regular text without backreferences
         assert_eq!(convert_sed_backreferences("simple text"), "simple text");
         assert_eq!(convert_sed_backreferences("1234567890"), "1234567890");
-        assert_eq!(convert_sed_backreferences("!@#$%^&*()"), "!@#$%^$0*()");
+        assert_eq!(convert_sed_backreferences("!@#$%^&*()"), "!@#$$%^$0*()");
         assert_eq!(convert_sed_backreferences(""), "");
     }
 

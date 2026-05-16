@@ -65,9 +65,8 @@ impl Parser {
     fn convert_replacement(&self, replacement: &str) -> String {
         match self.regex_flavor {
             RegexFlavor::ERE => crate::ere_converter::convert_ere_backreferences(replacement),
-            RegexFlavor::BRE | RegexFlavor::PCRE => {
-                crate::bre_converter::convert_sed_backreferences(replacement)
-            }
+            RegexFlavor::BRE => crate::bre_converter::convert_sed_backreferences(replacement),
+            RegexFlavor::PCRE => crate::bre_converter::convert_pcre_replacement(replacement),
         }
     }
 }

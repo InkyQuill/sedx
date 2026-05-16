@@ -97,6 +97,36 @@ fn ere_escaped_ampersand_is_literal() {
 }
 
 #[test]
+fn ere_replacement_dollar_is_literal_before_ampersand() {
+    sedx()
+        .args(["-E", r"s/foo/[$&]/"])
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("[$foo]\n");
+}
+
+#[test]
+fn ere_replacement_double_dollar_is_literal() {
+    sedx()
+        .args(["-E", r"s/foo/[$$]/"])
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("[$$]\n");
+}
+
+#[test]
+fn ere_replacement_double_dollar_before_ampersand_is_literal_dollars_then_match() {
+    sedx()
+        .args(["-E", r"s/foo/[$$&]/"])
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("[$$foo]\n");
+}
+
+#[test]
 fn bre_flag_requires_escaped_groups_and_quantifiers() {
     // In BRE mode, groups are \(...\) and +, ?, | are literal unless escaped.
     sedx()
@@ -115,6 +145,16 @@ fn bre_bare_ampersand_expands_whole_match() {
         .assert()
         .success()
         .stdout("[foo]\n");
+}
+
+#[test]
+fn bre_replacement_dollar_is_literal_before_ampersand() {
+    sedx()
+        .args(["-B", r"s/foo/[$&]/"])
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("[$foo]\n");
 }
 
 #[test]
@@ -169,6 +209,16 @@ fn substitution_nth_plus_global_replaces_from_nth_match_onward() {
         .assert()
         .success()
         .stdout("a a X X\n");
+}
+
+#[test]
+fn substitution_nth_plus_global_replaces_zero_width_match_at_start() {
+    sedx()
+        .arg("s/^/X/1g")
+        .write_stdin("abc\n")
+        .assert()
+        .success()
+        .stdout("Xabc\n");
 }
 
 #[test]
