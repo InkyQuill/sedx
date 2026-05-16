@@ -929,7 +929,7 @@ git commit -m "fix: surface address regex errors"
 - Modify: `src/file_processor/common.rs`
 - Modify: `src/bre_converter.rs`
 
-- [ ] **Step 1: Add `s///0` compatibility test**
+- [x] **Step 1: Add `s///0` compatibility test**
 
 Append to `tests/regex_flavors.rs`:
 
@@ -945,7 +945,7 @@ fn substitution_zero_occurrence_replaces_all_matches() {
 }
 ```
 
-- [ ] **Step 2: Add BRE/ERE newline replacement tests**
+- [x] **Step 2: Add BRE/ERE newline replacement tests**
 
 Append:
 
@@ -971,7 +971,7 @@ fn ere_replacement_newline_produces_actual_newline() {
 }
 ```
 
-- [ ] **Step 3: Fix `s///0`**
+- [x] **Step 3: Fix `s///0`**
 
 In `src/file_processor/common.rs`, update `SubstitutionEngine::apply`:
 
@@ -983,7 +983,7 @@ Some(0) => Ok(re
 
 Place this before `Some(n) if n > 0`.
 
-- [ ] **Step 4: Clarify BRE converter `\n` handling**
+- [x] **Step 4: Clarify BRE converter `\n` handling**
 
 In `src/bre_converter.rs`, remove the misleading branch that only treats trailing `\n` specially. Preserve `\n` consistently and add this comment near escape handling:
 
@@ -992,7 +992,7 @@ In `src/bre_converter.rs`, remove the misleading branch that only treats trailin
 // The converter only rewrites sed backreferences into regex crate syntax.
 ```
 
-- [ ] **Step 5: Fix newline double-processing**
+- [x] **Step 5: Fix newline double-processing**
 
 Ensure `convert_sed_backreferences` preserves `\n` as a single backslash-n sequence that `process_replacement_escapes` can convert later:
 
@@ -1005,7 +1005,7 @@ Ensure `convert_sed_backreferences` preserves `\n` as a single backslash-n seque
 
 Do not convert it to `\\\\n`.
 
-- [ ] **Step 6: Run regex flavor tests**
+- [x] **Step 6: Run regex flavor tests**
 
 Run:
 
@@ -1015,7 +1015,7 @@ cargo test --test regex_flavors --locked
 
 Expected: pass.
 
-- [ ] **Step 7: Commit compatibility fixes**
+- [x] **Step 7: Commit compatibility fixes**
 
 ```bash
 git add src/file_processor/common.rs src/bre_converter.rs tests/regex_flavors.rs
@@ -1359,4 +1359,3 @@ Write a concise summary with:
 - Commit hashes created during the remediation.
 - Verification commands and pass status.
 - Any accepted residual policy limitations from `docs/REMEDIATION_STATUS.md`.
-
