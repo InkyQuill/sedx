@@ -106,13 +106,13 @@ pub struct CycleState {
     pub line_iter: LineIterator,
 
     /// Line number range states (for 1,3 ranges)
-    /// Maps (start_line, end_line) -> (in_range, ended)
+    /// Maps (command_index, start_line, end_line) -> (in_range, ended)
     /// in_range: true if we're currently inside the range
     /// ended: true if we've passed the end of the range
-    pub line_range_states: HashMap<(usize, usize), (bool, bool)>,
+    pub line_range_states: HashMap<(usize, usize, usize), (bool, bool)>,
 
     /// Pattern range states (for /start/,/end/ ranges)
-    pub pattern_range_states: HashMap<(String, String), PatternRangeState>,
+    pub pattern_range_states: HashMap<(usize, String, String), PatternRangeState>,
 
     /// Substitution flag for t/T commands
     pub substitution_made: bool,
@@ -401,7 +401,7 @@ impl FileProcessor {
                     continue;
                 }
 
-                if !self.should_apply_to_cycle(cmd, &mut state) {
+                if !self.should_apply_to_cycle(pc, cmd, &mut state) {
                     pc += 1;
                     continue;
                 }
@@ -474,58 +474,69 @@ impl FileProcessor {
         Ok(full_output)
     }
 
-    fn should_apply_to_cycle(&mut self, cmd: &Command, state: &mut CycleState) -> bool {
+    fn should_apply_to_cycle(
+        &mut self,
+        command_index: usize,
+        cmd: &Command,
+        state: &mut CycleState,
+    ) -> bool {
         match cmd {
             Command::Substitution { range, .. } => match range {
                 None => true,
-                Some((start, end)) => self.check_range_inclusive(state, start, end),
+                Some((start, end)) => self.check_range_inclusive(command_index, state, start, end),
             },
             Command::Next { range } => match range {
                 None => true,
-                Some((start, end)) => self.check_range_inclusive(state, start, end),
+                Some((start, end)) => self.check_range_inclusive(command_index, state, start, end),
             },
             Command::NextAppend { range } => match range {
                 None => true,
-                Some((start, end)) => self.check_range_inclusive(state, start, end),
+                Some((start, end)) => self.check_range_inclusive(command_index, state, start, end),
             },
             Command::Hold { range } => match range {
                 None => true,
-                Some((start, end)) => self.check_range_inclusive(state, start, end),
+                Some((start, end)) => self.check_range_inclusive(command_index, state, start, end),
             },
             Command::HoldAppend { range } => match range {
                 None => true,
-                Some((start, end)) => self.check_range_inclusive(state, start, end),
+                Some((start, end)) => self.check_range_inclusive(command_index, state, start, end),
             },
             Command::Get { range } => match range {
                 None => true,
-                Some((start, end)) => self.check_range_inclusive(state, start, end),
+                Some((start, end)) => self.check_range_inclusive(command_index, state, start, end),
             },
             Command::GetAppend { range } => match range {
                 None => true,
-                Some((start, end)) => self.check_range_inclusive(state, start, end),
+                Some((start, end)) => self.check_range_inclusive(command_index, state, start, end),
             },
             Command::Exchange { range } => match range {
                 None => true,
-                Some((start, end)) => self.check_range_inclusive(state, start, end),
+                Some((start, end)) => self.check_range_inclusive(command_index, state, start, end),
             },
             Command::Group { range, .. } => match range {
                 None => true,
-                Some((start, end)) => self.check_range_inclusive(state, start, end),
+                Some((start, end)) => self.check_range_inclusive(command_index, state, start, end),
             },
-            Command::Delete { range } => self.check_range_inclusive(state, &range.0, &range.1),
-            Command::Print { range } => self.check_range_inclusive(state, &range.0, &range.1),
+            Command::Delete { range } => {
+                self.check_range_inclusive(command_index, state, &range.0, &range.1)
+            }
+            Command::Print { range } => {
+                self.check_range_inclusive(command_index, state, &range.0, &range.1)
+            }
             Command::PrintFirstLine { range } => match range {
                 None => true,
-                Some((start, end)) => self.check_range_inclusive(state, start, end),
+                Some((start, end)) => self.check_range_inclusive(command_index, state, start, end),
             },
             Command::DeleteFirstLine { range } => match range {
                 None => true,
-                Some((start, end)) => self.check_range_inclusive(state, start, end),
+                Some((start, end)) => self.check_range_inclusive(command_index, state, start, end),
             },
             Command::Insert { address, .. } | Command::Append { address, .. } => {
                 self.address_matches_cycle(address, state)
             }
-            Command::Change { range, .. } => self.check_range_inclusive(state, &range.0, &range.1),
+            Command::Change { range, .. } => {
+                self.check_range_inclusive(command_index, state, &range.0, &range.1)
+            }
             Command::Quit { address } | Command::QuitWithoutPrint { address } => match address {
                 None => true,
                 Some(addr) => self.address_matches_cycle(addr, state),
@@ -535,7 +546,7 @@ impl FileProcessor {
             | Command::Test { range, .. }
             | Command::TestFalse { range, .. } => match range {
                 None => true,
-                Some((start, end)) => self.check_range_inclusive(state, start, end),
+                Some((start, end)) => self.check_range_inclusive(command_index, state, start, end),
             },
             Command::ReadFile { range, .. }
             | Command::WriteFile { range, .. }
@@ -568,6 +579,7 @@ impl FileProcessor {
 
     fn check_range_inclusive(
         &mut self,
+        command_index: usize,
         state: &mut CycleState,
         start: &Address,
         end: &Address,
@@ -578,7 +590,7 @@ impl FileProcessor {
                 if start_line == end_line {
                     return state.line_num == *start_line;
                 }
-                let key = (*start_line, *end_line);
+                let key = (command_index, *start_line, *end_line);
                 let (in_range, ended) =
                     state.line_range_states.entry(key).or_insert((false, false));
                 if *ended {
@@ -601,7 +613,7 @@ impl FileProcessor {
 
                 let start_match = self.address_matches_cycle(start, state);
                 let end_match = self.address_matches_cycle(end, state);
-                let key = (start_pat.clone(), end_pat.clone());
+                let key = (command_index, start_pat.clone(), end_pat.clone());
                 let range_state = state
                     .pattern_range_states
                     .entry(key)
