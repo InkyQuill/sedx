@@ -1,7 +1,7 @@
 use crate::cli::RegexFlavor;
 use crate::command::{Address, Command};
 use crate::file_processor::common::{
-    AddressContext, ChangeType, FileDiff, LineChange, MixedRangeKey, MixedRangeState,
+    AddressContext, ChangeType, CommandKey, FileDiff, LineChange, MixedRangeKey, MixedRangeState,
     PatternRangeState, SubstitutionEngine, matches_address, preserve_perms_after,
 };
 use anyhow::{Context, Result};
@@ -23,8 +23,8 @@ pub struct StreamProcessor {
     context_size: usize,
     // State for reading context after a change
     context_lines_to_read: usize,
-    // Pattern range states: (command_index, start_pattern, end_pattern) -> state
-    pattern_range_states: HashMap<(usize, String, String), PatternRangeState>,
+    // Pattern range states: (command_key, start_pattern, end_pattern) -> state
+    pattern_range_states: HashMap<(CommandKey, String, String), PatternRangeState>,
     // Mixed range states for tracking complex ranges
     mixed_range_states: HashMap<MixedRangeKey, MixedRangeState>,
     // Dry run mode: if true, don't persist changes to disk
@@ -150,6 +150,7 @@ impl StreamProcessor {
             let mut change_replacement_emitted = false;
 
             for (cmd_index, cmd) in commands.iter().enumerate() {
+                let command_key = CommandKey::root(cmd_index);
                 match cmd {
                     Command::Substitution {
                         pattern,
@@ -161,7 +162,7 @@ impl StreamProcessor {
                             Some(range) => self.should_apply_command_with_range(
                                 &processed_line,
                                 range,
-                                cmd_index,
+                                &command_key,
                             )?,
                             None => true,
                         };
@@ -189,7 +190,7 @@ impl StreamProcessor {
                         let should_delete = self.should_apply_command_with_range(
                             &processed_line,
                             &range,
-                            cmd_index,
+                            &command_key,
                         )?;
 
                         if should_delete {
@@ -203,7 +204,7 @@ impl StreamProcessor {
                         let should_print = self.should_apply_command_with_range(
                             &processed_line,
                             &range,
-                            cmd_index,
+                            &command_key,
                         )?;
 
                         if should_print {
@@ -231,7 +232,7 @@ impl StreamProcessor {
                         let should_apply = self.should_apply_command_with_range(
                             &processed_line,
                             &(range.0.clone(), range.1.clone()),
-                            cmd_index,
+                            &command_key,
                         )?;
                         if should_apply {
                             let reached_end =
@@ -263,7 +264,7 @@ impl StreamProcessor {
                             Some((start, end)) => self.should_apply_command_with_range(
                                 &processed_line,
                                 &(start.clone(), end.clone()),
-                                cmd_index,
+                                &command_key,
                             )?,
                         };
                         if should_apply {
@@ -298,7 +299,7 @@ impl StreamProcessor {
                             Some((start, end)) => self.should_apply_command_with_range(
                                 &processed_line,
                                 &(start.clone(), end.clone()),
-                                cmd_index,
+                                &command_key,
                             )?,
                         };
                         if should_apply {
@@ -328,7 +329,7 @@ impl StreamProcessor {
                             Some((start, end)) => self.should_apply_command_with_range(
                                 &processed_line,
                                 &(start.clone(), end.clone()),
-                                cmd_index,
+                                &command_key,
                             )?,
                         };
                         if should_apply {
@@ -364,7 +365,7 @@ impl StreamProcessor {
                             Some((start, end)) => self.should_apply_command_with_range(
                                 &processed_line,
                                 &(start.clone(), end.clone()),
-                                cmd_index,
+                                &command_key,
                             )?,
                         };
                         if should_apply {
@@ -377,7 +378,7 @@ impl StreamProcessor {
                             Some((start, end)) => self.should_apply_command_with_range(
                                 &processed_line,
                                 &(start.clone(), end.clone()),
-                                cmd_index,
+                                &command_key,
                             )?,
                         };
                         if should_apply {
@@ -393,7 +394,7 @@ impl StreamProcessor {
                             Some((start, end)) => self.should_apply_command_with_range(
                                 &processed_line,
                                 &(start.clone(), end.clone()),
-                                cmd_index,
+                                &command_key,
                             )?,
                         };
                         if should_apply && !self.hold_space.is_empty() {
@@ -407,7 +408,7 @@ impl StreamProcessor {
                             Some((start, end)) => self.should_apply_command_with_range(
                                 &processed_line,
                                 &(start.clone(), end.clone()),
-                                cmd_index,
+                                &command_key,
                             )?,
                         };
                         if should_apply && !self.hold_space.is_empty() {
@@ -422,7 +423,7 @@ impl StreamProcessor {
                             Some((start, end)) => self.should_apply_command_with_range(
                                 &processed_line,
                                 &(start.clone(), end.clone()),
-                                cmd_index,
+                                &command_key,
                             )?,
                         };
                         if should_apply {
@@ -448,12 +449,13 @@ impl StreamProcessor {
                             Some((start, end)) => self.should_apply_command_with_range(
                                 &processed_line,
                                 &(start.clone(), end.clone()),
-                                cmd_index,
+                                &command_key,
                             )?,
                         };
 
                         if should_apply {
-                            for group_cmd in group_commands {
+                            for (group_index, group_cmd) in group_commands.iter().enumerate() {
+                                let child_key = command_key.child(group_index);
                                 match group_cmd {
                                     Command::Substitution {
                                         pattern,
@@ -466,7 +468,7 @@ impl StreamProcessor {
                                             Some(r) => self.should_apply_command_with_range(
                                                 &processed_line,
                                                 r,
-                                                cmd_index,
+                                                &child_key,
                                             )?,
                                         };
                                         if should_apply_sub {
@@ -492,7 +494,7 @@ impl StreamProcessor {
                                         let should_delete = self.should_apply_command_with_range(
                                             &processed_line,
                                             &range,
-                                            cmd_index,
+                                            &child_key,
                                         )?;
                                         if should_delete {
                                             skip_line = true;
@@ -506,7 +508,7 @@ impl StreamProcessor {
                                         let should_print = self.should_apply_command_with_range(
                                             &processed_line,
                                             &range,
-                                            cmd_index,
+                                            &child_key,
                                         )?;
                                         if should_print {
                                             print_line = true;
@@ -519,7 +521,7 @@ impl StreamProcessor {
                                                 .should_apply_command_with_range(
                                                     &processed_line,
                                                     &(start.clone(), end.clone()),
-                                                    cmd_index,
+                                                    &child_key,
                                                 )?,
                                         };
                                         if should_apply {
@@ -562,7 +564,7 @@ impl StreamProcessor {
                                                 .should_apply_command_with_range(
                                                     &processed_line,
                                                     &(start.clone(), end.clone()),
-                                                    cmd_index,
+                                                    &child_key,
                                                 )?,
                                         };
                                         if should_apply {
@@ -596,7 +598,7 @@ impl StreamProcessor {
                                                 .should_apply_command_with_range(
                                                     &processed_line,
                                                     &(start.clone(), end.clone()),
-                                                    cmd_index,
+                                                    &child_key,
                                                 )?,
                                         };
                                         if should_apply {
@@ -650,7 +652,7 @@ impl StreamProcessor {
                                         let should_apply = self.should_apply_command_with_range(
                                             &processed_line,
                                             &(range.0.clone(), range.1.clone()),
-                                            cmd_index,
+                                            &child_key,
                                         )?;
                                         if should_apply {
                                             let reached_end = self
@@ -679,7 +681,7 @@ impl StreamProcessor {
                                                 .should_apply_command_with_range(
                                                     &processed_line,
                                                     &(start.clone(), end.clone()),
-                                                    cmd_index,
+                                                    &child_key,
                                                 )?,
                                         };
                                         if should_apply {
@@ -693,7 +695,7 @@ impl StreamProcessor {
                                                 .should_apply_command_with_range(
                                                     &processed_line,
                                                     &(start.clone(), end.clone()),
-                                                    cmd_index,
+                                                    &child_key,
                                                 )?,
                                         };
                                         if should_apply {
@@ -710,7 +712,7 @@ impl StreamProcessor {
                                                 .should_apply_command_with_range(
                                                     &processed_line,
                                                     &(start.clone(), end.clone()),
-                                                    cmd_index,
+                                                    &child_key,
                                                 )?,
                                         };
                                         if should_apply && !self.hold_space.is_empty() {
@@ -725,7 +727,7 @@ impl StreamProcessor {
                                                 .should_apply_command_with_range(
                                                     &processed_line,
                                                     &(start.clone(), end.clone()),
-                                                    cmd_index,
+                                                    &child_key,
                                                 )?,
                                         };
                                         if should_apply && !self.hold_space.is_empty() {
@@ -741,7 +743,7 @@ impl StreamProcessor {
                                                 .should_apply_command_with_range(
                                                     &processed_line,
                                                     &(start.clone(), end.clone()),
-                                                    cmd_index,
+                                                    &child_key,
                                                 )?,
                                         };
                                         if should_apply {
@@ -927,9 +929,13 @@ impl StreamProcessor {
         line: &str,
         start_pat: &str,
         end_pat: &str,
-        command_index: usize,
+        command_key: &CommandKey,
     ) -> Result<bool> {
-        let key = (command_index, start_pat.to_string(), end_pat.to_string());
+        let key = (
+            command_key.clone(),
+            start_pat.to_string(),
+            end_pat.to_string(),
+        );
         let state = self
             .pattern_range_states
             .entry(key.clone())
@@ -967,9 +973,11 @@ impl StreamProcessor {
         line: &str,
         start_pat: &str,
         end_line: usize,
-        command_index: usize,
+        command_key: &CommandKey,
     ) -> Result<bool> {
-        let key = MixedRangeKey { command_index };
+        let key = MixedRangeKey {
+            command_key: command_key.clone(),
+        };
         let state = self
             .mixed_range_states
             .entry(key)
@@ -1003,9 +1011,11 @@ impl StreamProcessor {
         line: &str,
         start_line: usize,
         end_pat: &str,
-        command_index: usize,
+        command_key: &CommandKey,
     ) -> Result<bool> {
-        let key = MixedRangeKey { command_index };
+        let key = MixedRangeKey {
+            command_key: command_key.clone(),
+        };
         let state = self
             .mixed_range_states
             .entry(key)
@@ -1038,9 +1048,11 @@ impl StreamProcessor {
         line: &str,
         pattern: &str,
         offset: isize,
-        command_index: usize,
+        command_key: &CommandKey,
     ) -> Result<bool> {
-        let key = MixedRangeKey { command_index };
+        let key = MixedRangeKey {
+            command_key: command_key.clone(),
+        };
 
         let pat_re =
             Regex::new(pattern).with_context(|| format!("Invalid regex pattern: {}", pattern))?;
@@ -1091,23 +1103,23 @@ impl StreamProcessor {
         &mut self,
         line: &str,
         range: &(Address, Address),
-        command_index: usize,
+        command_key: &CommandKey,
     ) -> Result<bool> {
         use Address::*;
 
         match (&range.0, &range.1) {
             (_, Single(address)) => Ok(self.address_matches_current(address, line)),
             (Pattern(start_pat), Pattern(end_pat)) => {
-                self.check_pattern_range(line, start_pat, end_pat, command_index)
+                self.check_pattern_range(line, start_pat, end_pat, command_key)
             }
             (Pattern(start_pat), LineNumber(end_line)) => {
-                self.check_mixed_pattern_to_line(line, start_pat, *end_line, command_index)
+                self.check_mixed_pattern_to_line(line, start_pat, *end_line, command_key)
             }
             (LineNumber(start_line), Pattern(end_pat)) => {
-                self.check_mixed_line_to_pattern(line, *start_line, end_pat, command_index)
+                self.check_mixed_line_to_pattern(line, *start_line, end_pat, command_key)
             }
             (Pattern(start_pat), Relative { base: _, offset }) => {
-                self.check_relative_range(line, start_pat, *offset, command_index)
+                self.check_relative_range(line, start_pat, *offset, command_key)
             }
             (LineNumber(start), LineNumber(end)) if start > end => Ok(self.current_line == *start),
             (LineNumber(start), LineNumber(end)) => {

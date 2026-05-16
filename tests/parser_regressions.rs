@@ -115,7 +115,7 @@ fn group_parser_ignores_literal_closing_brace_in_custom_delimiter_address() {
         .write_stdin("x\na}b\n")
         .assert()
         .success()
-        .stdout("x\nx\na}b\na}b\n")
+        .stdout("x\na}b\na}b\n")
         .stderr(predicate::str::is_empty());
 }
 

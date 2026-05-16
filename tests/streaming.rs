@@ -349,6 +349,36 @@ fn forced_streaming_duplicate_pattern_ranges_do_not_share_state() {
 }
 
 #[test]
+fn forced_streaming_grouped_duplicate_pattern_ranges_do_not_share_state() {
+    sedx()
+        .args(["--streaming", "-n", "{ /START/,/END/p; /START/,/END/p }"])
+        .write_stdin("AAA\nSTART\nBBB\nEND\nCCC\n")
+        .assert()
+        .success()
+        .stdout("START\nSTART\nBBB\nBBB\nEND\nEND\n");
+}
+
+#[test]
+fn forced_streaming_grouped_duplicate_line_ranges_do_not_share_state() {
+    sedx()
+        .args(["--streaming", "-n", "{ 2,4p; 2,4p }"])
+        .write_stdin("one\ntwo\nthree\nfour\nfive\n")
+        .assert()
+        .success()
+        .stdout("two\ntwo\nthree\nthree\nfour\nfour\n");
+}
+
+#[test]
+fn forced_streaming_grouped_same_pattern_range_uses_normal_range_state() {
+    sedx()
+        .args(["--streaming", "-n", "{ /MARK/,/MARK/p }"])
+        .write_stdin("before\nMARK\nmiddle\nMARK\nafter\n")
+        .assert()
+        .success()
+        .stdout("MARK\nmiddle\nMARK\n");
+}
+
+#[test]
 fn forced_streaming_same_pattern_range_uses_normal_range_state() {
     sedx()
         .args(["--streaming", "-n", "/MARK/,/MARK/p"])

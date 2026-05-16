@@ -136,9 +136,24 @@ pub struct FileDiff {
     pub is_streaming: bool, // True if processed in streaming mode (all_lines may be empty)
 }
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct CommandKey(Box<[usize]>);
+
+impl CommandKey {
+    pub fn root(index: usize) -> Self {
+        Self(Box::new([index]))
+    }
+
+    pub fn child(&self, index: usize) -> Self {
+        let mut path = self.0.to_vec();
+        path.push(index);
+        Self(path.into_boxed_slice())
+    }
+}
+
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub struct MixedRangeKey {
-    pub command_index: usize,
+    pub command_key: CommandKey,
 }
 
 #[derive(Clone, PartialEq)]
