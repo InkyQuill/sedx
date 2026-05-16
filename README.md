@@ -398,6 +398,20 @@ sedx config --show
 | `config --show` | View current configuration |
 | `help` | Print help message |
 
+### Safety Policies
+
+- Sed file I/O commands (`r`, `R`, `w`, `W`) are restricted to safe relative
+  paths under the current working directory. Absolute paths, `..` traversal,
+  platform path prefixes, and symlink targets are rejected.
+- Automatically selected streaming falls back to in-memory processing when a
+  command is unsupported in streaming mode. Explicit `--streaming` errors on
+  unsupported commands instead of ignoring them.
+- Streaming mode is bounded for ordinary line processing, but sed commands that
+  accumulate hold space, such as `H`, can grow memory with input size.
+- Multi-file edits are backed up first and each file write is atomic, but the
+  multi-file operation is not one transaction. Use `sedx rollback <id>` if an
+  operation is interrupted.
+
 ## Limitations
 
 SedX aims for ~90% GNU sed compatibility. The following are **NOT** yet implemented:

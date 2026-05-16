@@ -642,6 +642,37 @@ sedx '/unwanted/{z; s/EMPTY/cleaned/}' file.txt
 
 ---
 
+### Safe File I/O Restrictions
+
+SedX supports sed file I/O commands (`r`, `R`, `w`, `W`) only for safe
+relative paths under the current working directory. Absolute paths, parent
+directory traversal (`..`), and platform path prefixes are rejected. This is
+stricter than GNU sed by design: SedX treats sed scripts as potentially
+untrusted input and avoids arbitrary file read/write behavior.
+
+### Streaming Compatibility
+
+When streaming is selected automatically, SedX falls back to in-memory
+processing for commands that do not have streaming support. When `--streaming`
+is explicitly provided, unsupported commands produce an error instead of being
+silently ignored.
+
+### Hold Space And Memory
+
+Streaming mode keeps line processing bounded for ordinary substitutions,
+deletes, and range operations. Sed commands that intentionally accumulate data,
+such as `H`, can grow hold space with input size. This matches sed semantics
+and is not a constant-memory operation.
+
+### Multi-File Atomicity
+
+SedX backs up files before applying multi-file edits. Each file write is
+atomic, but the whole multi-file operation is not a single transaction. If the
+process is interrupted mid-operation, use the printed backup ID with
+`sedx rollback <id>` to restore affected files.
+
+---
+
 ## Troubleshooting
 
 ### "Command not found" after installation

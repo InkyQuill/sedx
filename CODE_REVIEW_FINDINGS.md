@@ -3,6 +3,7 @@
 **Date**: 2026-05-16  
 **Review scope**: All `src/` modules, tests, configuration, backup system, parsers, streaming processor, converters  
 **Review methodology**: Full source audit; every `.rs` file read and analyzed; all high-severity issues reproduced and confirmed with the release binary  
+**Remediation status**: See `docs/REMEDIATION_STATUS.md` for fixed items and accepted residual policy limitations.
 
 ---
 

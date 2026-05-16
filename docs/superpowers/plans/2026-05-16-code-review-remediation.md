@@ -1202,7 +1202,7 @@ git commit -m "chore: remove fragile unwraps and tmp paths"
 - Modify: `docs/SPECIFICATION.md`
 - Modify: `CODE_REVIEW_FINDINGS.md` or create: `docs/REMEDIATION_STATUS.md`
 
-- [ ] **Step 1: Document sed file I/O restrictions**
+- [x] **Step 1: Document sed file I/O restrictions**
 
 Add to `docs/USER_GUIDE.md` command reference:
 
@@ -1216,7 +1216,7 @@ stricter than GNU sed by design: SedX treats sed scripts as potentially
 untrusted input and avoids arbitrary file read/write behavior.
 ```
 
-- [ ] **Step 2: Document streaming fallback policy**
+- [x] **Step 2: Document streaming fallback policy**
 
 Add:
 
@@ -1229,7 +1229,7 @@ is explicitly provided, unsupported commands produce an error instead of being
 silently ignored.
 ```
 
-- [ ] **Step 3: Document hold-space memory caveat**
+- [x] **Step 3: Document hold-space memory caveat**
 
 Add:
 
@@ -1242,7 +1242,7 @@ such as `H`, can grow hold space with input size. This matches sed semantics
 and is not a constant-memory operation.
 ```
 
-- [ ] **Step 4: Document multi-file atomicity policy**
+- [x] **Step 4: Document multi-file atomicity policy**
 
 Add:
 
@@ -1255,7 +1255,7 @@ process is interrupted mid-operation, use the printed backup ID with
 `sedx rollback <id>` to restore affected files.
 ```
 
-- [ ] **Step 5: Add remediation status**
+- [x] **Step 5: Add remediation status**
 
 Create `docs/REMEDIATION_STATUS.md`:
 
@@ -1288,7 +1288,7 @@ Source review: `CODE_REVIEW_FINDINGS.md`
 - DES-005: Stale temp files after SIGKILL remain an accepted OS-level limitation.
 ```
 
-- [ ] **Step 6: Run doc command**
+- [x] **Step 6: Run doc command**
 
 Run:
 
@@ -1298,7 +1298,7 @@ cargo doc --no-deps --all-features --locked
 
 Expected: pass.
 
-- [ ] **Step 7: Commit docs**
+- [x] **Step 7: Commit docs**
 
 ```bash
 git add README.md docs/USER_GUIDE.md docs/SPECIFICATION.md docs/REMEDIATION_STATUS.md CODE_REVIEW_FINDINGS.md

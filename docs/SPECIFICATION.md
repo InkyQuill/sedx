@@ -517,20 +517,19 @@ applied per-cycle with proper state tracking across cycles.
 - ✅ **t** - Branch if substitution made (conditional on successful substitution)
 - ✅ **T** - Branch if NO substitution made (inverse conditional)
 
-**Phase 5 File I/O Commands (Parsing Only - Stub Implementation):**
-- 🔶 **r** - Read file (parses correctly, no-op implementation)
-- 🔶 **w** - Write to file (parses correctly, no-op implementation)
-- 🔶 **R** - Read one line from file (parses correctly, no-op implementation)
-- 🔶 **W** - Write first line to file (parses correctly, no-op implementation)
+**Phase 5 File I/O Commands:**
+- ✅ **r** - Read file (safe relative paths only)
+- ✅ **w** - Write to file (safe relative paths only)
+- ✅ **R** - Read one line from file (safe relative paths only)
+- ✅ **W** - Write first line to file (safe relative paths only)
 
-**Phase 5 Additional Commands (Parsing Only - Stub Implementation):**
-- 🔶 **=** - Print line number (parses correctly, no-op implementation)
-- 🔶 **F** - Print filename (parses correctly, no-op implementation)
-- 🔶 **z** - Clear pattern space (parses correctly, no-op implementation)
+**Phase 5 Additional Commands:**
+- ✅ **=** - Print line number
+- ✅ **F** - Print filename
+- ✅ **z** - Clear pattern space
 
 **Legend:**
 - ✅ Fully implemented and tested
-- 🔶 Parses correctly but not fully implemented (stub/no-op)
 
 #### Planned - Tier 3 (v0.6.0)
 
@@ -830,37 +829,49 @@ sedx '/error/{ s/error/ERROR/; t log; }; s/normal/OK/; b end; :log; s/^/[LOG] /;
 
 ---
 
-### 4.3 Command Reference (Planned)
+### 4.3 Command Reference
 
-#### File I/O (Parsing Only - Full Implementation Pending)
+#### File I/O
 
-**Note:** The following file I/O commands parse correctly but are currently stubs (no-op implementation).
+**Safety policy:** SedX supports sed file I/O commands (`r`, `R`, `w`, `W`)
+only for safe relative paths under the current working directory. Absolute
+paths, parent traversal (`..`), platform path prefixes, and symlink operands are
+rejected. This is stricter than GNU sed by design because sed expressions may
+come from untrusted scripts or CI configuration.
 
 **Read file (`r`):**
 ```bash
-# Currently parses but doesn't execute
 sedx '5r header.txt' file.txt
 sedx '/error/r error_template.txt' log.txt
 ```
 
 **Write to file (`w`):**
 ```bash
-# Currently parses but doesn't execute
 sedx '/error/w errors.log' log.txt
 sedx '5,10w excerpt.txt' file.txt
 ```
 
 **Read line (`R`):**
 ```bash
-# Currently parses but doesn't execute
 sedx '5R include.txt' file.txt
 ```
 
 **Write first line (`W`):**
 ```bash
-# Currently parses but doesn't execute
 sedx '/header/W headers.log' file.txt
 ```
+
+#### Streaming And Atomicity Policies
+
+- Automatically selected streaming falls back to in-memory processing for
+  commands without streaming support. Explicit `--streaming` rejects
+  unsupported commands instead of silently ignoring them.
+- Streaming is constant-memory for ordinary substitutions, deletes, and range
+  operations. Commands that intentionally accumulate hold space, such as `H`,
+  can grow memory with input size; this follows sed semantics.
+- Each file write is atomic, and backups are created before multi-file edits.
+  The whole multi-file operation is not a transaction; if interrupted,
+  rollback with the printed backup ID.
 
 ---
 
