@@ -75,21 +75,59 @@ impl Parser {
 pub fn parse_sed_expression(expr: &str) -> Result<Vec<Command>> {
     let mut commands = Vec::new();
     let mut current_expr = String::new();
-    let mut in_braces = 0;
+    let mut brace_depth = 0usize;
+    let mut pattern_delimiter: Option<char> = None;
+    let mut escaped = false;
 
-    for c in expr.chars() {
+    let mut chars = expr.chars().peekable();
+    while let Some(c) = chars.next() {
+        if let Some(delimiter) = pattern_delimiter {
+            current_expr.push(c);
+
+            if escaped {
+                escaped = false;
+                continue;
+            }
+
+            if c == '\\' {
+                escaped = true;
+                continue;
+            }
+
+            if c == delimiter {
+                pattern_delimiter = None;
+            }
+
+            continue;
+        }
+
+        if can_start_pattern_address(&current_expr) {
+            if c == '/' {
+                pattern_delimiter = Some('/');
+                current_expr.push(c);
+                continue;
+            }
+
+            if c == '\\' {
+                if let Some(delimiter) = chars.next() {
+                    pattern_delimiter = Some(delimiter);
+                    current_expr.push(c);
+                    current_expr.push(delimiter);
+                    continue;
+                }
+            }
+        }
+
         match c {
             '{' => {
-                in_braces += 1;
+                brace_depth += 1;
                 current_expr.push(c);
             }
             '}' => {
-                if in_braces > 0 {
-                    in_braces -= 1;
-                }
+                brace_depth = brace_depth.saturating_sub(1);
                 current_expr.push(c);
             }
-            ';' if in_braces == 0 => {
+            ';' if brace_depth == 0 => {
                 let part = current_expr.trim();
                 if !part.is_empty() {
                     commands.push(parse_single_command(part)?);
@@ -108,6 +146,85 @@ pub fn parse_sed_expression(expr: &str) -> Result<Vec<Command>> {
     }
 
     Ok(commands)
+}
+
+fn can_start_pattern_address(current_expr: &str) -> bool {
+    matches!(
+        current_expr.chars().rev().find(|c| !c.is_whitespace()),
+        None | Some(',') | Some('{') | Some(';')
+    )
+}
+
+pub(crate) fn find_structural_group_close(expr: &str, open_pos: usize) -> Option<usize> {
+    let mut current_expr = String::new();
+    let mut brace_depth = 0usize;
+    let mut tracking_group = false;
+    let mut pattern_delimiter: Option<char> = None;
+    let mut escaped = false;
+
+    let mut chars = expr.char_indices().peekable();
+    while let Some((pos, c)) = chars.next() {
+        if let Some(delimiter) = pattern_delimiter {
+            current_expr.push(c);
+
+            if escaped {
+                escaped = false;
+                continue;
+            }
+
+            if c == '\\' {
+                escaped = true;
+                continue;
+            }
+
+            if c == delimiter {
+                pattern_delimiter = None;
+            }
+
+            continue;
+        }
+
+        if can_start_pattern_address(&current_expr) {
+            if c == '/' {
+                pattern_delimiter = Some('/');
+                current_expr.push(c);
+                continue;
+            }
+
+            if c == '\\' {
+                if let Some((_, delimiter)) = chars.next() {
+                    pattern_delimiter = Some(delimiter);
+                    current_expr.push(c);
+                    current_expr.push(delimiter);
+                    continue;
+                }
+            }
+        }
+
+        match c {
+            '{' => {
+                if tracking_group {
+                    brace_depth += 1;
+                } else if pos == open_pos {
+                    tracking_group = true;
+                    brace_depth = 1;
+                }
+                current_expr.push(c);
+            }
+            '}' => {
+                if tracking_group {
+                    brace_depth -= 1;
+                    if brace_depth == 0 {
+                        return Some(pos);
+                    }
+                }
+                current_expr.push(c);
+            }
+            _ => current_expr.push(c),
+        }
+    }
+
+    None
 }
 
 pub fn parse_single_command(cmd: &str) -> Result<Command> {

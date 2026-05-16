@@ -86,6 +86,40 @@ fn grouped_custom_delimiter_range_with_brace_in_start_pattern_prints_range() {
 }
 
 #[test]
+fn top_level_splitter_ignores_escaped_brace_in_custom_delimiter_address() {
+    common::sedx()
+        .args(["-n", r"\#a\{b#,\#c#{p};p"])
+        .write_stdin("before\na{b\nc\nafter\n")
+        .assert()
+        .success()
+        .stdout("before\na{b\na{b\nc\nc\nafter\n")
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
+fn group_parser_rejects_trailing_command_without_semicolon_separator() {
+    common::sedx()
+        .arg("{p}p")
+        .write_stdin("line\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "unexpected trailing content after group command: p",
+        ));
+}
+
+#[test]
+fn group_parser_ignores_literal_closing_brace_in_custom_delimiter_address() {
+    common::sedx()
+        .args(["-n", r"{\#a}b#p};p"])
+        .write_stdin("x\na}b\n")
+        .assert()
+        .success()
+        .stdout("x\nx\na}b\na}b\n")
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
 fn custom_delimiter_address_can_gate_branch_command() {
     common::sedx()
         .arg(r"\#alpha#b done; :done")

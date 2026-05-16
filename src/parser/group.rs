@@ -2,7 +2,8 @@ use crate::command::Command;
 use crate::parser::address::parse_optional_range;
 use crate::parser::commands;
 use crate::parser::errors::format_parse_error;
-use crate::parser::parse_single_command;
+use crate::parser::find_structural_group_close;
+use crate::parser::parse_sed_expression;
 use anyhow::{Result, anyhow};
 
 // Retained for public library API compatibility; binary dispatch uses known positions.
@@ -40,29 +41,12 @@ pub fn parse_group_at(cmd: &str, pos: usize) -> Result<Command> {
     let group_part = cmd
         .get(pos..)
         .ok_or_else(|| anyhow!("invalid group command position {}", pos))?;
-    let body_part = group_part
+    group_part
         .strip_prefix('{')
         .ok_or_else(|| anyhow!("expected group command at position {}", pos))?;
 
-    // Find the matching closing brace
     let brace_start = pos + '{'.len_utf8();
-    let mut depth = 1;
-    let mut close_brace = None;
-
-    // Use char_indices() to get correct byte positions for UTF-8 strings
-    for (i, c) in body_part.char_indices() {
-        if c == '{' {
-            depth += 1;
-        } else if c == '}' {
-            depth -= 1;
-            if depth == 0 {
-                close_brace = Some(brace_start + i);
-                break;
-            }
-        }
-    }
-
-    let close_brace = close_brace.ok_or_else(|| {
+    let close_brace = find_structural_group_close(cmd, pos).ok_or_else(|| {
         anyhow!(
             "{}",
             format_parse_error(
@@ -76,17 +60,17 @@ pub fn parse_group_at(cmd: &str, pos: usize) -> Result<Command> {
 
     // Extract commands inside the braces
     let commands_str = cmd[brace_start..close_brace].trim();
+    let trailing = cmd[close_brace + '}'.len_utf8()..].trim();
+    if !trailing.is_empty() {
+        return Err(anyhow!(
+            "unexpected trailing content after group command: {}",
+            trailing
+        ));
+    }
 
     let range = parse_optional_range(addr_part)?;
 
-    // Parse commands inside the group (separated by semicolons)
-    let mut commands = Vec::new();
-    for cmd_str in commands_str.split(';') {
-        let cmd_str = cmd_str.trim();
-        if !cmd_str.is_empty() {
-            commands.push(parse_single_command(cmd_str)?);
-        }
-    }
+    let commands = parse_sed_expression(commands_str)?;
 
     if commands.is_empty() {
         return Err(anyhow!(
