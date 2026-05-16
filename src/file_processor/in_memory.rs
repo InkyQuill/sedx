@@ -1,7 +1,7 @@
 use crate::command::{Address, Command, SubstitutionFlags};
 use crate::file_processor::common::{
-    AddressContext, ChangeType, FileDiff, LineChange, SubstitutionEngine, matches_address,
-    preserve_perms_after,
+    AddressContext, ChangeType, FileDiff, LineChange, PatternRangeState, SubstitutionEngine,
+    matches_address, preserve_perms_after,
 };
 use anyhow::{Context, Result};
 use std::collections::HashMap;
@@ -111,6 +111,9 @@ pub struct CycleState {
     /// ended: true if we've passed the end of the range
     pub line_range_states: HashMap<(usize, usize), (bool, bool)>,
 
+    /// Pattern range states (for /start/,/end/ ranges)
+    pub pattern_range_states: HashMap<(String, String), PatternRangeState>,
+
     /// Substitution flag for t/T commands
     pub substitution_made: bool,
 }
@@ -129,6 +132,7 @@ impl CycleState {
             current_filename: filename,
             line_iter: LineIterator::new(lines),
             line_range_states: HashMap::new(),
+            pattern_range_states: HashMap::new(),
             substitution_made: false,
         }
     }
@@ -594,9 +598,31 @@ impl FileProcessor {
                 if start_pat == end_pat {
                     return self.address_matches_cycle(start, state);
                 }
+
                 let start_match = self.address_matches_cycle(start, state);
                 let end_match = self.address_matches_cycle(end, state);
-                start_match || end_match
+                let key = (start_pat.clone(), end_pat.clone());
+                let range_state = state
+                    .pattern_range_states
+                    .entry(key)
+                    .or_insert(PatternRangeState::LookingForStart);
+
+                match range_state {
+                    PatternRangeState::LookingForStart => {
+                        if start_match {
+                            *range_state = PatternRangeState::InRange;
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    PatternRangeState::InRange => {
+                        if end_match {
+                            *range_state = PatternRangeState::LookingForStart;
+                        }
+                        true
+                    }
+                }
             }
             _ => {
                 let start_match = self.address_matches_cycle(start, state);
