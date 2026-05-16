@@ -316,7 +316,10 @@ impl SubstitutionEngine {
             } else if c == '$' {
                 // Handle backreferences: $1, $2, ${name}, and sed-compatible $&.
                 let mut reference = String::from('$');
-                if chars.peek() == Some(&'&') {
+                if chars.peek() == Some(&'$') {
+                    chars.next();
+                    reference.push('$');
+                } else if chars.peek() == Some(&'&') {
                     chars.next();
                     reference.push('0');
                 } else {

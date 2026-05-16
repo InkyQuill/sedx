@@ -142,6 +142,26 @@ fn direct_dollar_ampersand_expands_whole_match_for_nth_substitution() {
 }
 
 #[test]
+fn escaped_dollar_preserves_literal_dollar_ampersand() {
+    sedx()
+        .arg(r"s/foo/[$$&]/")
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("[$&]\n");
+}
+
+#[test]
+fn escaped_dollar_preserves_literal_dollar_ampersand_for_nth_substitution() {
+    sedx()
+        .arg(r"s/foo/[$$&]/2")
+        .write_stdin("foo foo\n")
+        .assert()
+        .success()
+        .stdout("foo [$&]\n");
+}
+
+#[test]
 fn bre_replacement_newline_produces_actual_newline() {
     sedx()
         .args(["-B", r"s/foo/bar\nbaz/"])
