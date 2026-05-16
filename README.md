@@ -12,7 +12,7 @@
 - **Preview mode** to see changes before applying
 - **One-command rollback** to undo mistakes
 - **Human-readable diffs** with colored context
-- **Streaming mode** for large files (100GB+ with <100MB RAM)
+- **Streaming mode** for large files with bounded memory for ordinary line-oriented commands
 - **Modern regex** (PCRE) as the default
 
 ## Table of Contents
@@ -330,7 +330,7 @@ sedx --no-streaming 's/foo/bar/g' file.txt
 ```
 
 **Streaming benefits:**
-- Constant memory usage (<100MB regardless of file size)
+- Bounded memory for ordinary line-oriented commands; sed hold-space commands can intentionally accumulate input
 - Can process 100GB+ files efficiently
 - Sliding window diff for context around changes
 

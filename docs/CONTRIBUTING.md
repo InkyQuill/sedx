@@ -216,7 +216,7 @@ fn substitution_swaps_via_backreferences() {
 
 For large file handling, create tests that verify:
 - Correctness (output matches in-memory processing)
-- Memory efficiency (constant memory usage)
+- Memory efficiency for ordinary line-oriented commands
 - Performance (reasonable processing time)
 
 ```bash

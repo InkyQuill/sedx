@@ -56,7 +56,7 @@ SedX is a **safe, modern text processing tool** that combines the power of GNU s
 
 | Use Case | Example | SedX Advantage |
 |----------|---------|-----------------|
-| **Log Analysis** | Process 100GB logs | Stream processing, <100MB RAM |
+| **Log Analysis** | Process 100GB logs | Bounded-memory stream processing for ordinary line-oriented commands |
 | **Config Management** | Replace values in configs | Backup + rollback, preview |
 | **DevOps Automation** | CI/CD text transformations | `--no-backup`, reliable |
 | **Data Processing** | ETL on text files | Pipe-friendly, fast |
@@ -1487,7 +1487,7 @@ find . -name "*.txt" | sedx 's/\.txt$/.bak/'
 
 **Stream processing (v0.2.0+):**
 ```bash
-# Process 100GB file with <100MB RAM
+# Process 100GB file with bounded memory for ordinary substitutions
 sedx 's/error/ERROR/g' huge.log
 
 # With context
@@ -1927,7 +1927,7 @@ Target performance (v1.0.0):
 |-----------|--------|-------|
 | **Simple substitution** | Within 1.5x of GNU sed | For simple cases |
 | **Complex scripts** | Within 2x of GNU sed | For complex patterns |
-| **Memory usage** | <100MB for 100GB file | Constant regardless of file size |
+| **Memory usage** | <100MB for ordinary line-oriented streaming over 100GB files | Hold-space commands may intentionally grow with accumulated input |
 | **Startup time** | <50ms | CLI overhead |
 | **Backup creation** | Native copy speed | `cp` performance |
 

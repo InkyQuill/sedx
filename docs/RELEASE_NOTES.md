@@ -23,7 +23,7 @@ This release culminates 5 major development phases covering:
 - **Automatic backups** before every file modification
 - **Preview mode** to see changes before applying
 - **One-command rollback** to undo mistakes
-- **Streaming mode** processes 100GB+ files with <100MB RAM
+- **Streaming mode** processes 100GB+ files with bounded memory for ordinary line-oriented commands
 - **PCRE by default** with optional BRE/ERE modes
 - **Full flow control** (labels, branches, conditional execution)
 - **File I/O operations** (read, write during processing)
@@ -78,7 +78,7 @@ sedx '/unwanted/z' file.txt
 ### Completed Phases 1-4
 
 **Phase 1: Stream Processing**
-- Constant memory processing regardless of file size
+- Bounded-memory processing for ordinary line-oriented commands
 - Sliding window diff generation
 - Atomic file writes for safety
 
@@ -237,7 +237,7 @@ streaming = false
 |-----------|---------|------|-------|
 | Simple s/foo/bar/ (10MB) | 0.05s | 2.1s | 42x slower (overhead: backup + diff) |
 | Complex regex (100MB) | 0.6s | 12.3s | 20x slower (acceptable trade-off) |
-| Large file streaming (10GB) | 60s | 720s | 12x slower (constant memory) |
+| Large file streaming (10GB) | 60s | 720s | 12x slower (bounded memory) |
 
 **Trade-off Analysis:**
 - SedX prioritizes **safety** over raw speed

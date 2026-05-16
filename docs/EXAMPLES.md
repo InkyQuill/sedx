@@ -605,7 +605,7 @@ sedx '/error/{s/^/E: /; /warning/b}; s/^/I: /' file.txt
 SedX automatically uses streaming mode for files >= 100MB:
 
 ```bash
-# This will automatically stream (constant memory usage)
+# This will automatically stream with bounded memory for ordinary substitutions
 sedx 's/foo/bar/g' large_file.log
 
 # Force streaming for smaller files
@@ -759,7 +759,7 @@ sedx -n 'n;p' file.txt
 4. **Test on samples:** Create a small test file before processing large datasets
 5. **Check backups:** Use `sedx status` to monitor backup disk usage
 6. **Use appropriate regex mode:** PCRE (default), ERE (`-E`), or BRE (`-B`)
-7. **Leverage streaming:** Large files are automatically processed with constant memory
+7. **Leverage streaming:** Large files are automatically processed with bounded memory for ordinary line-oriented commands
 
 ---
 

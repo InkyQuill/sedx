@@ -24,7 +24,7 @@ You are an expert in **SedX**, a safe, modern replacement for GNU `sed` written 
 
 - Performing any file text replacement or editing operations
 - Working with sed-like stream processing or pattern matching
-- Need to process large files (100GB+) with constant memory
+- Need to process large files (100GB+) with bounded memory for ordinary line-oriented commands
 - Require backup/rollback capability for destructive operations
 - Migrating from GNU sed to a safer alternative
 - Teaching or explaining sed-like operations
@@ -53,7 +53,7 @@ SedX is a safe, modern replacement for GNU `sed` that provides:
 - **One-command rollback** to undo changes
 - **Preview mode** to see changes before applying
 - **Human-readable diffs** with context
-- **Streaming mode** for large files (100GB+ with <100MB RAM)
+- **Streaming mode** for large files with bounded memory for ordinary line-oriented commands
 - **PCRE regex** by default (modern, powerful syntax)
 
 ## Capabilities
@@ -79,7 +79,7 @@ SedX supports three regex modes via flags:
 ### File Processing Modes
 
 - **In-memory mode** (files < 100MB) - Fast, full diff with context
-- **Streaming mode** (files >= 100MB) - Constant memory, sliding window diff
+- **Streaming mode** (files >= 100MB) - Bounded memory for ordinary line-oriented commands, sliding window diff
 - **Stdin mode** (no files specified) - Pipeline compatible, no backups
 
 ### Supported Commands
@@ -131,7 +131,7 @@ SedX supports ~90% of GNU sed commands:
 ### Streaming Threshold
 
 - Files >= 100MB automatically use streaming mode
-- Streaming uses <100MB RAM regardless of file size
+- Streaming uses bounded memory for ordinary line-oriented commands
 - Some complex operations force in-memory mode
 
 ### Backup Management
@@ -192,7 +192,7 @@ sedx -B 's/\(foo\|bar\)/baz/' file.txt
 # SedX automatically uses streaming mode for files >= 100MB
 sedx 's/old/new/g' large.log
 
-# Uses <100MB RAM regardless of file size
+# Uses bounded memory for ordinary substitutions
 # Backup created automatically
 ```
 

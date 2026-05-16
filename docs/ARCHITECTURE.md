@@ -9,7 +9,7 @@ This document describes the internal architecture of SedX, a safe, modern replac
 SedX processes text files using sed-like expressions with three key design goals:
 
 1. **Safety**: Automatic backups, preview mode, and rollback functionality
-2. **Performance**: Streaming mode for processing 100GB+ files with <100MB RAM
+2. **Performance**: Streaming mode for processing 100GB+ files with bounded memory for ordinary line-oriented commands
 3. **Compatibility**: ~90% GNU sed compatibility with PCRE as the default regex flavor
 
 ## High-Level Architecture
@@ -188,7 +188,7 @@ struct CycleState {
 #### Streaming Mode (StreamProcessor)
 
 For files >= 100MB with streamable commands:
-- Constant memory usage (<100MB regardless of file size)
+- Bounded memory for ordinary line-oriented commands
 - Line-by-line processing with `BufReader`
 - Sliding window diff context (VecDeque)
 
