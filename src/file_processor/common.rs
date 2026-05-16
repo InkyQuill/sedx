@@ -214,22 +214,22 @@ impl SubstitutionEngine {
                 .replace_all(line, processed_replacement.as_str())
                 .to_string()),
             Some(n) => {
-                // Replace only the Nth occurrence
-                let mut result = line.to_string();
-                let mut count = 0;
-                for mat in re.find_iter(line) {
-                    count += 1;
-                    if count == n {
-                        result = format!(
-                            "{}{}{}",
-                            &line[..mat.start()],
-                            processed_replacement,
-                            &line[mat.end()..]
-                        );
-                        break;
+                // Replace only the Nth occurrence while preserving regex replacement expansion.
+                for (index, captures) in re.captures_iter(line).enumerate() {
+                    if index + 1 == n {
+                        let mat = captures
+                            .get(0)
+                            .expect("regex captures always include the whole match");
+                        let mut result =
+                            String::with_capacity(line.len() + processed_replacement.len());
+                        result.push_str(&line[..mat.start()]);
+                        captures.expand(processed_replacement.as_str(), &mut result);
+                        result.push_str(&line[mat.end()..]);
+                        return Ok(result);
                     }
                 }
-                Ok(result)
+
+                Ok(line.to_string())
             }
             None => {
                 // Standard behavior

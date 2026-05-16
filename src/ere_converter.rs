@@ -19,6 +19,8 @@
 ///
 /// For **replacements**, backreferences need conversion:
 /// - `\1`..`\9` → `$1`..`$9` - Backreference conversion
+/// - `\&` → `$0` - Match reference
+/// - `\\` remains `\\` - Escape processing happens after conversion
 ///
 pub fn convert_ere_to_pcre_pattern(pattern: &str) -> String {
     // ERE patterns are already PCRE-compatible
@@ -31,8 +33,8 @@ pub fn convert_ere_to_pcre_pattern(pattern: &str) -> String {
 /// # Conversion Rules
 ///
 /// - `\1`..`\9` → `$1`..`$9` - Backreference conversion
-/// - `\&` → `$&` - Match reference
-/// - `\\` → `\` - Escape backslash
+/// - `\&` → `$0` - Match reference
+/// - `\\` remains `\\` - Escape processing happens after conversion
 ///
 /// This is identical to BRE backreference conversion since both BRE and ERE
 /// use the same backreference syntax in replacements.
@@ -62,8 +64,8 @@ mod tests {
     fn test_convert_ere_backreferences() {
         assert_eq!(convert_ere_backreferences(r#"\1"#), "$1");
         assert_eq!(convert_ere_backreferences(r#"\2\1"#), "$2$1");
-        assert_eq!(convert_ere_backreferences(r#"\&"#), "$&");
-        assert_eq!(convert_ere_backreferences(r#"\\"#), "\\");
+        assert_eq!(convert_ere_backreferences(r#"\&"#), "$0");
+        assert_eq!(convert_ere_backreferences(r#"\\"#), r#"\\"#);
         assert_eq!(convert_ere_backreferences(r#"foo\1bar"#), "foo$1bar");
     }
 
@@ -93,7 +95,7 @@ mod tests {
     fn test_escape_sequences() {
         assert_eq!(convert_ere_backreferences(r#"\n"#), "\\n");
         assert_eq!(convert_ere_backreferences(r#"\t"#), "\\t");
-        assert_eq!(convert_ere_backreferences(r#"\\\n"#), "\\\\n"); // \\n → \n (escaped backslash becomes single)
+        assert_eq!(convert_ere_backreferences(r#"\\\n"#), r#"\\\n"#);
     }
 
     // Additional comprehensive tests
@@ -244,14 +246,14 @@ mod tests {
     #[test]
     fn test_match_reference_various() {
         // Match reference \& in various contexts
-        assert_eq!(convert_ere_backreferences(r#"\&"#), "$&");
-        assert_eq!(convert_ere_backreferences(r#"foo\&bar"#), "foo$&bar");
-        assert_eq!(convert_ere_backreferences(r#"\&\&"#), "$&$&");
+        assert_eq!(convert_ere_backreferences(r#"\&"#), "$0");
+        assert_eq!(convert_ere_backreferences(r#"foo\&bar"#), "foo$0bar");
+        assert_eq!(convert_ere_backreferences(r#"\&\&"#), "$0$0");
         assert_eq!(
             convert_ere_backreferences(r#"start:\&:end"#),
-            "start:$&:end"
+            "start:$0:end"
         );
-        assert_eq!(convert_ere_backreferences(r#"\1\&\2"#), "$1$&$2");
+        assert_eq!(convert_ere_backreferences(r#"\1\&\2"#), "$1$0$2");
     }
 
     #[test]
@@ -265,12 +267,12 @@ mod tests {
     #[test]
     fn test_backslash_sequences_replacement() {
         // Various backslash sequences in replacements
-        assert_eq!(convert_ere_backreferences(r#"\\"#), "\\");
-        assert_eq!(convert_ere_backreferences(r#"foo\\bar"#), "foo\\bar");
+        assert_eq!(convert_ere_backreferences(r#"\\"#), r#"\\"#);
+        assert_eq!(convert_ere_backreferences(r#"foo\\bar"#), r#"foo\\bar"#);
         assert_eq!(convert_ere_backreferences(r#"\n"#), "\\n");
         assert_eq!(convert_ere_backreferences(r#"\t"#), "\\t");
-        assert_eq!(convert_ere_backreferences(r#"\\\n"#), "\\\\n"); // \\n → \n
-        assert_eq!(convert_ere_backreferences(r#"\\\\\1"#), "\\\\$1"); // \\\\1 → \\$1
+        assert_eq!(convert_ere_backreferences(r#"\\\n"#), r#"\\\n"#);
+        assert_eq!(convert_ere_backreferences(r#"\\\\\1"#), r#"\\\\$1"#);
     }
 
     #[test]
@@ -288,7 +290,7 @@ mod tests {
         assert_eq!(convert_ere_backreferences(r#"foo\"#), r#"foo\"#);
         assert_eq!(convert_ere_backreferences(r#"\"#), r#"\"#);
         assert_eq!(convert_ere_backreferences(r#"\1\"#), r#"$1\"#);
-        assert_eq!(convert_ere_backreferences(r#"\&\"#), r#"$&\"#);
+        assert_eq!(convert_ere_backreferences(r#"\&\"#), r#"$0\"#);
     }
 
     #[test]

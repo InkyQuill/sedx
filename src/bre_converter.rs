@@ -73,8 +73,8 @@ pub fn convert_bre_to_pcre(pattern: &str) -> String {
 /// # Conversion Rules
 ///
 /// - `\1`..`\9` → `$1`..`$9` - Backreference conversion
-/// - `\&` → `$&` - Match reference
-/// - `\\` → `\` - Escape backslash
+/// - `\&` → `$0` - Match reference
+/// - `\\` remains `\\` - Escape processing happens after conversion
 ///
 /// This is used separately from pattern conversion because replacement strings
 /// have slightly different rules than patterns.
@@ -92,12 +92,13 @@ pub fn convert_sed_backreferences(replacement: &str) -> String {
                     result.push(c);
                 }
                 '&' => {
-                    // Match backreference: \& → $&
+                    // Match backreference: \& → $0
                     result.push('$');
-                    result.push('&');
+                    result.push('0');
                 }
                 '\\' => {
-                    // Double backslash → single
+                    // Preserve escaped backslashes for the substitution engine to process.
+                    result.push('\\');
                     result.push('\\');
                 }
                 // Replacement escape sequences such as \n are interpreted by SubstitutionEngine.
@@ -215,8 +216,8 @@ mod tests {
     fn test_convert_sed_backreferences() {
         assert_eq!(convert_sed_backreferences(r#"\1"#), "$1");
         assert_eq!(convert_sed_backreferences(r#"\2\1"#), "$2$1");
-        assert_eq!(convert_sed_backreferences(r#"\&"#), "$&");
-        assert_eq!(convert_sed_backreferences(r#"\\"#), "\\");
+        assert_eq!(convert_sed_backreferences(r#"\&"#), "$0");
+        assert_eq!(convert_sed_backreferences(r#"\\"#), r#"\\"#);
         assert_eq!(convert_sed_backreferences(r#"\n"#), "\\n");
         assert_eq!(convert_sed_backreferences(r#"foo\1bar"#), "foo$1bar");
     }
@@ -329,10 +330,10 @@ mod tests {
     #[test]
     fn test_match_reference_in_replacement() {
         // Match reference \&
-        assert_eq!(convert_sed_backreferences(r#"\&"#), "$&");
-        assert_eq!(convert_sed_backreferences(r#"foo\&bar"#), "foo$&bar");
-        assert_eq!(convert_sed_backreferences(r#"\&\&"#), "$&$&");
-        assert_eq!(convert_sed_backreferences(r#"\1\&\2"#), "$1$&$2");
+        assert_eq!(convert_sed_backreferences(r#"\&"#), "$0");
+        assert_eq!(convert_sed_backreferences(r#"foo\&bar"#), "foo$0bar");
+        assert_eq!(convert_sed_backreferences(r#"\&\&"#), "$0$0");
+        assert_eq!(convert_sed_backreferences(r#"\1\&\2"#), "$1$0$2");
     }
 
     #[test]
@@ -346,7 +347,7 @@ mod tests {
             convert_sed_backreferences(r#"Result: \1, \2"#),
             "Result: $1, $2"
         );
-        assert_eq!(convert_sed_backreferences(r#"\1:\&:\2"#), "$1:$&:$2");
+        assert_eq!(convert_sed_backreferences(r#"\1:\&:\2"#), "$1:$0:$2");
     }
 
     #[test]
@@ -388,10 +389,10 @@ mod tests {
 
     #[test]
     fn test_double_backslash_replacement() {
-        // Double backslash to single in replacement
-        assert_eq!(convert_sed_backreferences(r#"\\"#), "\\");
-        assert_eq!(convert_sed_backreferences(r#"foo\\bar"#), "foo\\bar");
-        assert_eq!(convert_sed_backreferences(r#"\1\\n"#), "$1\\n");
+        // Double backslashes are preserved for later replacement escape processing.
+        assert_eq!(convert_sed_backreferences(r#"\\"#), r#"\\"#);
+        assert_eq!(convert_sed_backreferences(r#"foo\\bar"#), r#"foo\\bar"#);
+        assert_eq!(convert_sed_backreferences(r#"\1\\n"#), r#"$1\\n"#);
     }
 
     #[test]

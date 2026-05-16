@@ -140,3 +140,33 @@ fn ere_replacement_newline_produces_actual_newline() {
         .success()
         .stdout("bar\nbaz\n");
 }
+
+#[test]
+fn ere_escaped_replacement_newline_stays_literal() {
+    sedx()
+        .args(["-E", r"s/foo/bar\\nbaz/"])
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("bar\\nbaz\n");
+}
+
+#[test]
+fn ere_nth_substitution_expands_backrefs() {
+    sedx()
+        .args(["-E", r"s/(foo)(bar)/\2\1/2"])
+        .write_stdin("foobar foobar\n")
+        .assert()
+        .success()
+        .stdout("foobar barfoo\n");
+}
+
+#[test]
+fn ere_nth_substitution_expands_whole_match() {
+    sedx()
+        .args(["-E", r"s/foobar/[\&]/2"])
+        .write_stdin("foobar foobar\n")
+        .assert()
+        .success()
+        .stdout("foobar [foobar]\n");
+}
