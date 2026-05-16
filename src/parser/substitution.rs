@@ -6,14 +6,14 @@ use anyhow::{Result, anyhow};
 
 pub(crate) const ESCAPED_PATTERN_DELIMITER_MARKER: char = '\u{1f}';
 
-pub(crate) fn restore_escaped_pattern_delimiters(pattern: &str) -> String {
+pub(crate) fn restore_escaped_pattern_delimiters(pattern: &str, escape_pipe: bool) -> String {
     let mut restored = String::with_capacity(pattern.len());
     let mut chars = pattern.chars();
 
     while let Some(c) = chars.next() {
         if c == ESCAPED_PATTERN_DELIMITER_MARKER {
             if let Some(delimiter) = chars.next() {
-                if delimiter == '|' {
+                if delimiter == '|' && escape_pipe {
                     restored.push('\\');
                 }
                 restored.push(delimiter);

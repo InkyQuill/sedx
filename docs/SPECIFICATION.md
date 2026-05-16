@@ -1036,16 +1036,16 @@ sedx -E 's/(foo)(bar)/$2$1/' file.txt  # Uses $1, $2 internally
 
 ---
 
-#### Ambiguity Detection
+#### Capture Reference Boundaries
 
-SedX detects ambiguous capture references:
+Direct PCRE replacement references follow Rust regex replacement syntax. Use
+the braced form when literal text immediately follows a capture number:
 
 ```bash
 $ sedx 's/(\d+)/$1user/' file.txt
-error: Ambiguous capture reference: $1user
-hint: Use ${1}user to disambiguate: s/(\d+)/${1}user/
+# Interpreted by Rust regex replacement syntax, not as "$1" + "user".
 
-$ sedx 's/(\d+)/${1}user/' file.txt  # OK
+$ sedx 's/(\d+)/${1}user/' file.txt  # Unambiguous
 123 → 123user
 ```
 

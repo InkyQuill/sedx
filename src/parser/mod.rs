@@ -61,7 +61,10 @@ impl Parser {
             RegexFlavor::PCRE => pattern.to_string(),
         };
 
-        substitution::restore_escaped_pattern_delimiters(&pattern)
+        substitution::restore_escaped_pattern_delimiters(
+            &pattern,
+            matches!(self.regex_flavor, RegexFlavor::BRE),
+        )
     }
 
     fn convert_replacement(&self, replacement: &str) -> String {

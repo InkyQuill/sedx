@@ -197,13 +197,13 @@ fn escaped_delimiter_in_replacement_is_literal() {
 }
 
 #[test]
-fn escaped_pipe_delimiter_in_pattern_is_literal() {
+fn default_escaped_pipe_delimiter_in_pattern_is_alternation() {
     sedx()
         .arg(r"s|a\|b|X|")
         .write_stdin("a|b\na\nb\n")
         .assert()
         .success()
-        .stdout("X\na\nb\n");
+        .stdout("X|b\nX\nX\n");
 }
 
 #[test]
@@ -217,13 +217,13 @@ fn bre_escaped_pipe_delimiter_in_pattern_is_literal() {
 }
 
 #[test]
-fn ere_escaped_pipe_delimiter_in_pattern_is_literal() {
+fn ere_escaped_pipe_delimiter_in_pattern_is_alternation() {
     sedx()
         .args(["-E", r"s|a\|b|X|"])
         .write_stdin("a|b\na\nb\n")
         .assert()
         .success()
-        .stdout("X\na\nb\n");
+        .stdout("X|b\nX\nX\n");
 }
 
 #[test]
@@ -305,6 +305,56 @@ fn bre_backslash_backref_before_underscore_is_unambiguous() {
         .assert()
         .success()
         .stdout("foo_bar\n");
+}
+
+#[test]
+fn default_backslash_backref_before_digit_is_unambiguous() {
+    sedx()
+        .arg(r"s/(foo)/\10/")
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("foo0\n");
+}
+
+#[test]
+fn default_backslash_backref_before_underscore_is_unambiguous() {
+    sedx()
+        .arg(r"s/(foo)/\1_/")
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("foo_\n");
+}
+
+#[test]
+fn ere_backslash_backref_before_underscore_is_unambiguous() {
+    sedx()
+        .args(["-E", r"s/(foo)/\1_/"])
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("foo_\n");
+}
+
+#[test]
+fn bre_backslash_backref_before_letters_is_unambiguous() {
+    sedx()
+        .args(["-B", r"s/\(foo\)/\1bar/"])
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("foobar\n");
+}
+
+#[test]
+fn bre_backslash_backref_before_digit_is_unambiguous() {
+    sedx()
+        .args(["-B", r"s/\(foo\)/\10/"])
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("foo0\n");
 }
 
 #[test]
