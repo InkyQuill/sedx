@@ -296,8 +296,9 @@ context_lines = 2
 # Files larger than this threshold use streaming mode
 max_memory_mb = 100
 
-# Enable streaming mode for large files (default: true)
-streaming = true
+# Force streaming mode for compatible file-mode edits (default: false)
+# When false, SedX still streams files larger than max_memory_mb
+streaming = false
 ```
 
 ### Configuration Options
@@ -323,7 +324,7 @@ streaming = true
 |--------|------|---------|-------------|
 | `context_lines` | int | 2 | Context lines around changes (0-10) |
 | `max_memory_mb` | int | 100 | Streaming threshold in MB |
-| `streaming` | bool | true | Enable streaming for large files |
+| `streaming` | bool | false | Force streaming for compatible file-mode edits; large files still stream automatically when false |
 
 ---
 
@@ -633,7 +634,7 @@ sedx '/unwanted/{z; s/EMPTY/cleaned/}' file.txt
 | `-B` | `--bre` | Use Basic Regular Expressions (GNU sed) |
 | `--no-context` | | Show only changed lines (no context) |
 | `--context N` | | Show N lines of context (0-10) |
-| `--streaming` | | Enable streaming mode for large files |
+| `--streaming` | | Force streaming mode for compatible file-mode edits |
 | `--no-streaming` | | Disable streaming mode |
 | `--no-backup` | | Skip backup creation (requires --force) |
 | `--force` | | Force dangerous operations |
@@ -667,13 +668,15 @@ sedx status
 
 ### Large file processing is slow
 
-SedX automatically uses streaming mode for files >= 100MB. If processing is still slow:
+By default, SedX uses in-memory processing for files below `max_memory_mb`
+and streaming for larger files. Set `[processing].streaming = true` to force
+streaming for compatible file-mode edits. If processing is still slow:
 
 ```bash
-# Verify streaming is enabled in config
+# Verify streaming policy in config
 sedx config --show | grep streaming
 
-# Enable streaming if disabled
+# Force streaming for compatible file-mode edits
 sedx config  # Edit file, set streaming = true
 ```
 

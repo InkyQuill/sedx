@@ -89,7 +89,7 @@ pub struct ProcessingConfig {
     #[serde(default = "default_max_memory_mb")]
     pub max_memory_mb: Option<usize>,
 
-    /// Enable streaming mode
+    /// Force streaming mode for compatible file-mode edits
     #[serde(default = "default_streaming")]
     pub streaming: Option<bool>,
 
@@ -103,7 +103,7 @@ impl Default for ProcessingConfig {
         Self {
             context_lines: Some(2),
             max_memory_mb: Some(100),
-            streaming: Some(true),
+            streaming: Some(false),
             debug: Some(false),
         }
     }
@@ -129,7 +129,7 @@ fn default_max_memory_mb() -> Option<usize> {
     Some(100)
 }
 fn default_streaming() -> Option<bool> {
-    Some(true)
+    Some(false)
 }
 
 /// Get the configuration file path
@@ -189,10 +189,10 @@ context_lines = 2
 # Files larger than this threshold will use streaming mode (constant memory).
 max_memory_mb = 100
 
-# Enable streaming mode for files >= threshold (default: true)
-# When true, large files are processed with constant memory usage.
-# When false, all files are loaded into memory (faster but uses more RAM).
-streaming = true
+# Force streaming mode for compatible file-mode edits (default: false)
+# When false, SedX still streams files larger than max_memory_mb.
+# Set true to stream all compatible file-mode edits.
+streaming = false
 
 # Enable debug logging (default: false)
 # When true, operations are logged to /var/log/sedx.log (or ~/.sedx/sedx.log)
@@ -346,7 +346,7 @@ mod tests {
         assert_eq!(config.compatibility.show_warnings, Some(true));
         assert_eq!(config.processing.context_lines, Some(2));
         assert_eq!(config.processing.max_memory_mb, Some(100));
-        assert_eq!(config.processing.streaming, Some(true));
+        assert_eq!(config.processing.streaming, Some(false));
         assert_eq!(config.processing.debug, Some(false));
     }
 
@@ -625,7 +625,7 @@ mod tests {
         assert_eq!(config.compatibility.show_warnings, Some(true)); // default
         assert_eq!(config.processing.context_lines, Some(2)); // default
         assert_eq!(config.processing.max_memory_mb, Some(100)); // default
-        assert_eq!(config.processing.streaming, Some(true)); // default
+        assert_eq!(config.processing.streaming, Some(false)); // default
     }
 
     #[test]
@@ -855,7 +855,7 @@ mod tests {
         let config = ProcessingConfig::default();
         assert_eq!(config.context_lines, Some(2));
         assert_eq!(config.max_memory_mb, Some(100));
-        assert_eq!(config.streaming, Some(true));
+        assert_eq!(config.streaming, Some(false));
     }
 
     #[test]
@@ -1060,6 +1060,6 @@ mod tests {
         assert_eq!(config.compatibility.show_warnings, Some(true));
         assert_eq!(config.processing.context_lines, Some(2));
         assert_eq!(config.processing.max_memory_mb, Some(100));
-        assert_eq!(config.processing.streaming, Some(true));
+        assert_eq!(config.processing.streaming, Some(false));
     }
 }

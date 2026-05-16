@@ -107,10 +107,10 @@ struct Cli {
     #[arg(help = "Show only changed lines without context\nEquivalent to --context=0")]
     no_context: bool,
 
-    /// Enable streaming mode for large files (>=100MB)
+    /// Force streaming mode for compatible file-mode edits
     #[arg(long, alias = "force-streaming")]
     #[arg(
-        help = "Enable streaming mode for large files (auto-detects at 100MB)\nUse --no-streaming to disable"
+        help = "Force streaming mode for compatible file-mode edits\nUse --no-streaming to disable threshold-based streaming"
     )]
     streaming: bool,
 
@@ -240,7 +240,7 @@ CONFIGURATION OPTIONS:
   [processing]
     context_lines = 2             # Context lines to show (max 10)
     max_memory_mb = 100           # Max memory for streaming (MB)
-    streaming = true              # Enable streaming for large files
+    streaming = false             # Force streaming for compatible file-mode edits
     debug = false                 # Enable debug logging
 
 EXAMPLES:

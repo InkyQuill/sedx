@@ -4,6 +4,13 @@ use common::{read_file, sedx, sedx_isolated, write_file};
 use tempfile::TempDir;
 
 #[test]
+fn default_config_does_not_force_streaming_for_small_files() {
+    let config = sedx::config::Config::default();
+    assert_eq!(config.processing.streaming, Some(false));
+    assert_eq!(config.processing.max_memory_mb, Some(100));
+}
+
+#[test]
 fn no_streaming_pattern_range_delete_removes_middle_lines() {
     let home = TempDir::new().unwrap();
     let dir = home.path();

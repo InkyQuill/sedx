@@ -1031,7 +1031,7 @@ git commit -m "fix: align substitution escape compatibility"
 - Modify: `tests/streaming.rs` or `tests/processor_parity.rs`
 - Modify: `docs/USER_GUIDE.md`
 
-- [ ] **Step 1: Add config default regression**
+- [x] **Step 1: Add config default regression**
 
 Append to `tests/processor_parity.rs`:
 
@@ -1054,7 +1054,7 @@ fn default_streaming_is_threshold_only() {
 }
 ```
 
-- [ ] **Step 2: Change default streaming config**
+- [x] **Step 2: Change default streaming config**
 
 In `src/config.rs`, change:
 
@@ -1083,7 +1083,7 @@ And comment:
 # Set true to force streaming for all compatible file-mode edits.
 ```
 
-- [ ] **Step 3: Run config tests**
+- [x] **Step 3: Run config tests**
 
 Run:
 
@@ -1093,7 +1093,7 @@ cargo test config::tests --locked
 
 Expected: update any tests that asserted `Some(true)` to `Some(false)` when they refer to defaults.
 
-- [ ] **Step 4: Update docs**
+- [x] **Step 4: Update docs**
 
 In `docs/USER_GUIDE.md`, document:
 
@@ -1103,7 +1103,7 @@ and streaming for larger files. Set `[processing].streaming = true` to force
 streaming for compatible file-mode edits.
 ```
 
-- [ ] **Step 5: Commit streaming default policy**
+- [x] **Step 5: Commit streaming default policy**
 
 ```bash
 git add src/config.rs docs/USER_GUIDE.md tests/processor_parity.rs
