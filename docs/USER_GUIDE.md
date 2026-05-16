@@ -646,9 +646,9 @@ sedx '/unwanted/{z; s/EMPTY/cleaned/}' file.txt
 
 SedX supports sed file I/O commands (`r`, `R`, `w`, `W`) only for safe
 relative paths under the current working directory. Absolute paths, parent
-directory traversal (`..`), and platform path prefixes are rejected. This is
-stricter than GNU sed by design: SedX treats sed scripts as potentially
-untrusted input and avoids arbitrary file read/write behavior.
+directory traversal (`..`), platform path prefixes, and symlink operands are
+rejected. This is stricter than GNU sed by design: SedX treats sed scripts as
+potentially untrusted input and avoids arbitrary file read/write behavior.
 
 ### Streaming Compatibility
 

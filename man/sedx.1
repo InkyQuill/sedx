@@ -387,6 +387,10 @@ sedx 'w output.txt' file.txt
 # Extract errors to separate file
 sedx '/error/w errors.log' logfile.txt
 .RE
+.PP
+File I/O paths must be safe relative paths under the current working directory.
+Absolute paths, parent traversal (\fB..\fP), platform path prefixes, and symlink
+operands are rejected.
 .SS Additional Commands
 .RS
 .PP
@@ -659,12 +663,17 @@ Set \fBNO_COLOR=1\fP environment variable to disable colors.
 For files >= 100MB, SedX automatically switches to streaming mode:
 .RS
 .IP \(bu 2
-Constant memory usage (<100MB regardless of file size)
+Bounded memory for ordinary substitutions, deletes, and range operations
 .IP \(bu 2
 Line-by-line processing
 .IP \(bu 2
 Sliding window for diff context
 .RE
+.PP
+Commands that intentionally accumulate hold space, such as \fBH\fP, can grow
+memory with input size. When streaming is selected automatically, unsupported
+commands fall back to in-memory processing. Explicit \fB--streaming\fP rejects
+unsupported commands instead of silently ignoring them.
 .PP
 Streaming threshold configurable via:
 .RS

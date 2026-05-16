@@ -16,8 +16,10 @@ Source review: `CODE_REVIEW_FINDINGS.md`
 - BUG-007: Unsupported forced-streaming commands fail clearly.
 - BUG-008: `s///0` replaces all matches.
 - BUG-009: BRE/ERE replacement newlines, ampersands, dollars, and numeric backrefs are tested and handled.
+- DES-001: Replacement escape and backreference interaction is documented and covered by integration tests.
 - DES-004: Default streaming is threshold-based; `streaming = true` now explicitly forces streaming.
 - CQ-002: Fragile unwrap in regex diagnostics removed.
+- CQ-003: Address regex errors now propagate instead of being silently swallowed in processors.
 - CQ-004: Fragile HashMap unwraps removed.
 - CQ-005: Hardcoded `/tmp` tests removed.
 
