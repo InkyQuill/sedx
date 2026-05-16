@@ -131,7 +131,7 @@ pub fn parse_single_command(cmd: &str) -> Result<Command> {
     })?;
 
     match char_at_pos {
-        '{' => group::parse_group(cmd),
+        '{' => group::parse_group_at(cmd, pos),
         's' => substitution::parse_substitution(cmd),
         'i' => commands::parse_insert(cmd),
         'a' => commands::parse_append(cmd),
