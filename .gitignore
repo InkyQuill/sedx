@@ -36,8 +36,6 @@ test_*.sed
 # Auto Claude data directory
 .auto-claude/
 
-# Local planning docs (not committed)
-/docs/superpowers/
 
 # Auto Claude generated files
 .auto-claude-security.json
