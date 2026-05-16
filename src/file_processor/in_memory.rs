@@ -727,7 +727,9 @@ impl FileProcessor {
                     writeln!(writer, "{}", state.pattern_space)?;
                     writer.flush()?;
                 } else {
-                    let file = File::create(filename)?;
+                    let safe_path = crate::path_policy::validate_script_file_operand(filename)?;
+                    crate::path_policy::ensure_not_symlink(&safe_path)?;
+                    let file = File::create(&safe_path)?;
                     let mut writer = BufWriter::new(file);
                     writeln!(writer, "{}", state.pattern_space)?;
                     writer.flush()?;
@@ -741,7 +743,9 @@ impl FileProcessor {
                     writeln!(writer, "{}", first)?;
                     writer.flush()?;
                 } else {
-                    let file = File::create(filename)?;
+                    let safe_path = crate::path_policy::validate_script_file_operand(filename)?;
+                    crate::path_policy::ensure_not_symlink(&safe_path)?;
+                    let file = File::create(&safe_path)?;
                     let mut writer = BufWriter::new(file);
                     writeln!(writer, "{}", first)?;
                     writer.flush()?;
@@ -750,14 +754,16 @@ impl FileProcessor {
                 Ok(CycleResult::Continue)
             }
             Command::ReadFile { filename, .. } => {
-                let content = fs::read_to_string(filename)?;
+                let safe_path = crate::path_policy::validate_script_file_operand(filename)?;
+                let content = fs::read_to_string(&safe_path)?;
                 for line in content.lines() {
                     state.appended_after.push(line.to_string());
                 }
                 Ok(CycleResult::Continue)
             }
             Command::ReadLine { filename, .. } => {
-                let content = fs::read_to_string(filename)?;
+                let safe_path = crate::path_policy::validate_script_file_operand(filename)?;
+                let content = fs::read_to_string(&safe_path)?;
                 let pos = self.read_positions.entry(filename.clone()).or_insert(0);
                 let lines: Vec<&str> = content.lines().collect();
                 if let Some(line) = lines.get(*pos) {

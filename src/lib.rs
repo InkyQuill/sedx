@@ -14,6 +14,7 @@ pub mod ere_converter;
 pub mod file_processor;
 pub mod logger;
 pub mod parser;
+mod path_policy;
 pub mod regex_error;
 
 // Re-export commonly used types for convenience

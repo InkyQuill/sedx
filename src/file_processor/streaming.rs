@@ -7,7 +7,7 @@ use crate::file_processor::common::{
 use anyhow::{Context, Result};
 use regex::Regex;
 use std::collections::{HashMap, VecDeque};
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 use tempfile::NamedTempFile;
@@ -757,6 +757,15 @@ impl StreamProcessor {
                             }
                         }
                         continue;
+                    }
+                    Command::WriteFile { filename, .. }
+                    | Command::WriteFirstLine { filename, .. } => {
+                        let safe_path = crate::path_policy::validate_script_file_operand(filename)?;
+                        crate::path_policy::ensure_not_symlink(&safe_path)?;
+                    }
+                    Command::ReadFile { filename, .. } | Command::ReadLine { filename, .. } => {
+                        let safe_path = crate::path_policy::validate_script_file_operand(filename)?;
+                        let _ = fs::read_to_string(&safe_path)?;
                     }
                     _ => {
                         // Ignore other commands in streaming for now

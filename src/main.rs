@@ -10,6 +10,7 @@ mod error_helpers;
 mod file_processor;
 mod logger;
 mod parser;
+mod path_policy;
 mod regex_error;
 
 use anyhow::{Context, Result};
@@ -182,6 +183,7 @@ fn execute_command(
 
     let mut diffs = Vec::new();
     let mut streaming_files = Vec::new();
+    let mut processing_errors = 0;
 
     let max_mem_bytes = config.processing.max_memory_mb.unwrap_or(100) as u64 * 1024 * 1024;
     let config_streaming = config.processing.streaming.unwrap_or(false);
@@ -218,8 +220,15 @@ fn execute_command(
 
         match diff {
             Ok(diff) => diffs.push(diff),
-            Err(e) => eprintln!("{}", format_processing_error(file_path, &e)),
+            Err(e) => {
+                processing_errors += 1;
+                eprintln!("{}", format_processing_error(file_path, &e));
+            }
         }
+    }
+
+    if processing_errors > 0 {
+        anyhow::bail!("failed to process {} file(s)", processing_errors);
     }
 
     let has_changes = diffs.iter().any(|d| !d.changes.is_empty());
