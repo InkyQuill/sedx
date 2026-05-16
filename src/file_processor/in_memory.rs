@@ -325,31 +325,27 @@ impl FileProcessor {
                         result.push((line_num, content.clone(), ChangeType::Unchanged));
                     }
                 }
-                ChangeType::Deleted => {
-                    if !handled_deletes.contains(&line_num) {
-                        if let Some(new_content) = insertions.get(&line_num) {
-                            result.push((line_num, new_content.clone(), ChangeType::Modified));
-                            handled_deletes.insert(line_num);
-                            handled_inserts.insert(line_num);
-                        } else {
-                            result.push((
-                                line_num,
-                                deletions.get(&line_num).unwrap().clone(),
-                                ChangeType::Deleted,
-                            ));
-                            handled_deletes.insert(line_num);
-                        }
-                    }
-                }
-                ChangeType::Added => {
-                    if !handled_inserts.contains(&line_num) {
+                ChangeType::Deleted if !handled_deletes.contains(&line_num) => {
+                    if let Some(new_content) = insertions.get(&line_num) {
+                        result.push((line_num, new_content.clone(), ChangeType::Modified));
+                        handled_deletes.insert(line_num);
+                        handled_inserts.insert(line_num);
+                    } else {
                         result.push((
                             line_num,
-                            insertions.get(&line_num).unwrap().clone(),
-                            ChangeType::Added,
+                            deletions.get(&line_num).unwrap().clone(),
+                            ChangeType::Deleted,
                         ));
-                        handled_inserts.insert(line_num);
+                        handled_deletes.insert(line_num);
                     }
+                }
+                ChangeType::Added if !handled_inserts.contains(&line_num) => {
+                    result.push((
+                        line_num,
+                        insertions.get(&line_num).unwrap().clone(),
+                        ChangeType::Added,
+                    ));
+                    handled_inserts.insert(line_num);
                 }
                 _ => {}
             }
