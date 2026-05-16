@@ -354,10 +354,11 @@ fn test_false_branch_fires_when_no_substitution() {
 fn read_file_appends_contents_after_address() {
     use tempfile::TempDir;
     let home = TempDir::new().unwrap();
-    let data = common::write_file(home.path(), "extra.txt", "X1\nX2\n");
+    common::write_file(home.path(), "extra.txt", "X1\nX2\n");
 
     common::sedx()
-        .arg(format!("2r {}", data.to_str().unwrap()))
+        .current_dir(home.path())
+        .arg("2r extra.txt")
         .write_stdin("a\nb\nc\n")
         .assert()
         .success()
@@ -370,13 +371,11 @@ fn file_mode_read_file_appends_contents_after_address() {
     let home = TempDir::new().unwrap();
     let dir = home.path();
     let input = common::write_file(dir, "in.txt", "a\nb\nc\n");
-    let data = common::write_file(dir, "extra.txt", "X1\nX2\n");
+    common::write_file(dir, "extra.txt", "X1\nX2\n");
 
     common::sedx_isolated(dir)
-        .args([
-            &format!("2r {}", data.to_str().unwrap()),
-            input.to_str().unwrap(),
-        ])
+        .current_dir(dir)
+        .args(["2r extra.txt", input.to_str().unwrap()])
         .assert()
         .success();
 
@@ -403,10 +402,11 @@ fn write_file_captures_pattern_space() {
 fn read_line_reads_one_line_per_match() {
     use tempfile::TempDir;
     let home = TempDir::new().unwrap();
-    let data = common::write_file(home.path(), "data.txt", "Z1\nZ2\nZ3\n");
+    common::write_file(home.path(), "data.txt", "Z1\nZ2\nZ3\n");
 
     common::sedx()
-        .arg(format!("R {}", data.to_str().unwrap()))
+        .current_dir(home.path())
+        .arg("R data.txt")
         .write_stdin("a\nb\nc\n")
         .assert()
         .success()
@@ -419,13 +419,11 @@ fn file_mode_read_line_reads_one_line_per_match() {
     let home = TempDir::new().unwrap();
     let dir = home.path();
     let input = common::write_file(dir, "in.txt", "a\nb\nc\n");
-    let data = common::write_file(dir, "data.txt", "Z1\nZ2\nZ3\n");
+    common::write_file(dir, "data.txt", "Z1\nZ2\nZ3\n");
 
     common::sedx_isolated(dir)
-        .args([
-            &format!("R {}", data.to_str().unwrap()),
-            input.to_str().unwrap(),
-        ])
+        .current_dir(dir)
+        .args(["R data.txt", input.to_str().unwrap()])
         .assert()
         .success();
 
@@ -441,10 +439,8 @@ fn write_first_line_captures_first_line_of_pattern_space() {
     let input = common::write_file(dir, "in.txt", "a\nb\nc\nd\n");
 
     common::sedx_isolated(dir)
-        .args([
-            &format!("N; W {}", out.to_str().unwrap()),
-            input.to_str().unwrap(),
-        ])
+        .current_dir(dir)
+        .args(["N; W first.txt", input.to_str().unwrap()])
         .assert()
         .success();
 
