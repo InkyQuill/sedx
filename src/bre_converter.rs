@@ -73,7 +73,8 @@ pub fn convert_bre_to_pcre(pattern: &str) -> String {
 /// # Conversion Rules
 ///
 /// - `\1`..`\9` → `$1`..`$9` - Backreference conversion
-/// - `\&` → `$0` - Match reference
+/// - `&` → `$0` - Match reference
+/// - `\&` → `&` - Literal ampersand
 /// - `\\` remains `\\` - Escape processing happens after conversion
 ///
 /// This is used separately from pattern conversion because replacement strings
@@ -92,9 +93,7 @@ pub fn convert_sed_backreferences(replacement: &str) -> String {
                     result.push(c);
                 }
                 '&' => {
-                    // Match backreference: \& → $0
-                    result.push('$');
-                    result.push('0');
+                    result.push('&');
                 }
                 '\\' => {
                     // Preserve escaped backslashes for the substitution engine to process.
@@ -116,6 +115,9 @@ pub fn convert_sed_backreferences(replacement: &str) -> String {
             escape_next = false;
         } else if c == '\\' {
             escape_next = true;
+        } else if c == '&' && !result.ends_with('$') {
+            result.push('$');
+            result.push('0');
         } else {
             result.push(c);
         }
@@ -216,7 +218,8 @@ mod tests {
     fn test_convert_sed_backreferences() {
         assert_eq!(convert_sed_backreferences(r#"\1"#), "$1");
         assert_eq!(convert_sed_backreferences(r#"\2\1"#), "$2$1");
-        assert_eq!(convert_sed_backreferences(r#"\&"#), "$0");
+        assert_eq!(convert_sed_backreferences(r#"&"#), "$0");
+        assert_eq!(convert_sed_backreferences(r#"\&"#), "&");
         assert_eq!(convert_sed_backreferences(r#"\\"#), r#"\\"#);
         assert_eq!(convert_sed_backreferences(r#"\n"#), "\\n");
         assert_eq!(convert_sed_backreferences(r#"foo\1bar"#), "foo$1bar");
@@ -329,11 +332,12 @@ mod tests {
 
     #[test]
     fn test_match_reference_in_replacement() {
-        // Match reference \&
-        assert_eq!(convert_sed_backreferences(r#"\&"#), "$0");
-        assert_eq!(convert_sed_backreferences(r#"foo\&bar"#), "foo$0bar");
-        assert_eq!(convert_sed_backreferences(r#"\&\&"#), "$0$0");
-        assert_eq!(convert_sed_backreferences(r#"\1\&\2"#), "$1$0$2");
+        assert_eq!(convert_sed_backreferences(r#"&"#), "$0");
+        assert_eq!(convert_sed_backreferences(r#"\&"#), "&");
+        assert_eq!(convert_sed_backreferences(r#"foo&bar"#), "foo$0bar");
+        assert_eq!(convert_sed_backreferences(r#"foo\&bar"#), "foo&bar");
+        assert_eq!(convert_sed_backreferences(r#"&&"#), "$0$0");
+        assert_eq!(convert_sed_backreferences(r#"\1&\2"#), "$1$0$2");
     }
 
     #[test]
@@ -347,7 +351,7 @@ mod tests {
             convert_sed_backreferences(r#"Result: \1, \2"#),
             "Result: $1, $2"
         );
-        assert_eq!(convert_sed_backreferences(r#"\1:\&:\2"#), "$1:$0:$2");
+        assert_eq!(convert_sed_backreferences(r#"\1:&:\2"#), "$1:$0:$2");
     }
 
     #[test]
@@ -355,7 +359,7 @@ mod tests {
         // Regular text without backreferences
         assert_eq!(convert_sed_backreferences("simple text"), "simple text");
         assert_eq!(convert_sed_backreferences("1234567890"), "1234567890");
-        assert_eq!(convert_sed_backreferences("!@#$%^&*()"), "!@#$%^&*()");
+        assert_eq!(convert_sed_backreferences("!@#$%^&*()"), "!@#$%^$0*()");
         assert_eq!(convert_sed_backreferences(""), "");
     }
 

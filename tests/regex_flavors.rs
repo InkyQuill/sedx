@@ -77,6 +77,26 @@ fn ere_flag_accepts_backslash_backrefs_in_replacement() {
 }
 
 #[test]
+fn ere_bare_ampersand_expands_whole_match() {
+    sedx()
+        .args(["-E", r"s/foo/[&]/"])
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("[foo]\n");
+}
+
+#[test]
+fn ere_escaped_ampersand_is_literal() {
+    sedx()
+        .args(["-E", r"s/foo/[\&]/"])
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("[&]\n");
+}
+
+#[test]
 fn bre_flag_requires_escaped_groups_and_quantifiers() {
     // In BRE mode, groups are \(...\) and +, ?, | are literal unless escaped.
     sedx()
@@ -85,6 +105,16 @@ fn bre_flag_requires_escaped_groups_and_quantifiers() {
         .assert()
         .success()
         .stdout("barfoo\n");
+}
+
+#[test]
+fn bre_bare_ampersand_expands_whole_match() {
+    sedx()
+        .args(["-B", r"s/foo/[&]/"])
+        .write_stdin("foo\n")
+        .assert()
+        .success()
+        .stdout("[foo]\n");
 }
 
 #[test]
@@ -119,6 +149,26 @@ fn substitution_zero_occurrence_replaces_all_matches() {
         .assert()
         .success()
         .stdout("bar bar\n");
+}
+
+#[test]
+fn substitution_multi_digit_nth_match_flag() {
+    sedx()
+        .arg("s/a/X/10")
+        .write_stdin("a a a a a a a a a a a\n")
+        .assert()
+        .success()
+        .stdout("a a a a a a a a a X a\n");
+}
+
+#[test]
+fn substitution_nth_plus_global_replaces_from_nth_match_onward() {
+    sedx()
+        .arg("s/a/X/3g")
+        .write_stdin("a a a a\n")
+        .assert()
+        .success()
+        .stdout("a a X X\n");
 }
 
 #[test]
@@ -204,7 +254,7 @@ fn ere_nth_substitution_expands_backrefs() {
 #[test]
 fn ere_nth_substitution_expands_whole_match() {
     sedx()
-        .args(["-E", r"s/foobar/[\&]/2"])
+        .args(["-E", r"s/foobar/[&]/2"])
         .write_stdin("foobar foobar\n")
         .assert()
         .success()

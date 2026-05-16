@@ -214,19 +214,38 @@ impl SubstitutionEngine {
                 .replace_all(line, processed_replacement.as_str())
                 .to_string()),
             Some(n) => {
-                // Replace only the Nth occurrence while preserving regex replacement expansion.
+                // GNU sed treats s///Ng as replacing from the Nth match onward.
+                let mut result = String::with_capacity(line.len() + processed_replacement.len());
+                let mut last_end = 0;
+
                 for (index, captures) in re.captures_iter(line).enumerate() {
-                    if index + 1 == n {
-                        let mat = captures
-                            .get(0)
-                            .expect("regex captures always include the whole match");
-                        let mut result =
-                            String::with_capacity(line.len() + processed_replacement.len());
+                    let occurrence = index + 1;
+                    let mat = captures
+                        .get(0)
+                        .expect("regex captures always include the whole match");
+
+                    if occurrence < n {
+                        continue;
+                    }
+
+                    if !global {
+                        let mut result = String::with_capacity(
+                            line.len() + processed_replacement.len() - mat.as_str().len(),
+                        );
                         result.push_str(&line[..mat.start()]);
                         captures.expand(processed_replacement.as_str(), &mut result);
                         result.push_str(&line[mat.end()..]);
                         return Ok(result);
                     }
+
+                    result.push_str(&line[last_end..mat.start()]);
+                    captures.expand(processed_replacement.as_str(), &mut result);
+                    last_end = mat.end();
+                }
+
+                if global && last_end > 0 {
+                    result.push_str(&line[last_end..]);
+                    return Ok(result);
                 }
 
                 Ok(line.to_string())
@@ -319,9 +338,9 @@ impl SubstitutionEngine {
                 if chars.peek() == Some(&'$') {
                     chars.next();
                     reference.push('$');
-                } else if chars.peek() == Some(&'&') {
+                } else if matches!(chars.peek(), Some('&' | '0')) {
                     chars.next();
-                    reference.push('0');
+                    reference.push_str("{0}");
                 } else {
                     while let Some(&next_c) = chars.peek() {
                         if next_c.is_ascii_digit() || next_c == '{' {

@@ -7,17 +7,25 @@ use anyhow::{Result, anyhow};
 /// Fold a raw sed-flag character sequence into a SubstitutionFlags value.
 pub fn fold_substitution_flags(flags: &[char]) -> SubstitutionFlags {
     let mut out = SubstitutionFlags::default();
-    for flag in flags {
-        match flag {
+    let mut index = 0;
+
+    while index < flags.len() {
+        match flags[index] {
             'g' => out.global = true,
             'p' => out.print = true,
             'i' | 'I' => out.case_insensitive = true,
             '0'..='9' => {
-                // ASCII digit guaranteed by the arm's pattern; to_digit can't fail.
-                out.nth = Some(flag.to_digit(10).unwrap() as usize);
+                let mut nth = 0;
+                while index < flags.len() && flags[index].is_ascii_digit() {
+                    nth = nth * 10 + flags[index].to_digit(10).unwrap() as usize;
+                    index += 1;
+                }
+                out.nth = Some(nth);
+                continue;
             }
             _ => {} // Ignore unknown flags
         }
+        index += 1;
     }
     out
 }

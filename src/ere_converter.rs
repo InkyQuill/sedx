@@ -64,7 +64,8 @@ mod tests {
     fn test_convert_ere_backreferences() {
         assert_eq!(convert_ere_backreferences(r#"\1"#), "$1");
         assert_eq!(convert_ere_backreferences(r#"\2\1"#), "$2$1");
-        assert_eq!(convert_ere_backreferences(r#"\&"#), "$0");
+        assert_eq!(convert_ere_backreferences(r#"&"#), "$0");
+        assert_eq!(convert_ere_backreferences(r#"\&"#), "&");
         assert_eq!(convert_ere_backreferences(r#"\\"#), r#"\\"#);
         assert_eq!(convert_ere_backreferences(r#"foo\1bar"#), "foo$1bar");
     }
@@ -245,15 +246,13 @@ mod tests {
 
     #[test]
     fn test_match_reference_various() {
-        // Match reference \& in various contexts
-        assert_eq!(convert_ere_backreferences(r#"\&"#), "$0");
-        assert_eq!(convert_ere_backreferences(r#"foo\&bar"#), "foo$0bar");
-        assert_eq!(convert_ere_backreferences(r#"\&\&"#), "$0$0");
-        assert_eq!(
-            convert_ere_backreferences(r#"start:\&:end"#),
-            "start:$0:end"
-        );
-        assert_eq!(convert_ere_backreferences(r#"\1\&\2"#), "$1$0$2");
+        assert_eq!(convert_ere_backreferences(r#"&"#), "$0");
+        assert_eq!(convert_ere_backreferences(r#"\&"#), "&");
+        assert_eq!(convert_ere_backreferences(r#"foo&bar"#), "foo$0bar");
+        assert_eq!(convert_ere_backreferences(r#"foo\&bar"#), "foo&bar");
+        assert_eq!(convert_ere_backreferences(r#"&&"#), "$0$0");
+        assert_eq!(convert_ere_backreferences(r#"start:&:end"#), "start:$0:end");
+        assert_eq!(convert_ere_backreferences(r#"\1&\2"#), "$1$0$2");
     }
 
     #[test]
@@ -290,7 +289,8 @@ mod tests {
         assert_eq!(convert_ere_backreferences(r#"foo\"#), r#"foo\"#);
         assert_eq!(convert_ere_backreferences(r#"\"#), r#"\"#);
         assert_eq!(convert_ere_backreferences(r#"\1\"#), r#"$1\"#);
-        assert_eq!(convert_ere_backreferences(r#"\&\"#), r#"$0\"#);
+        assert_eq!(convert_ere_backreferences(r#"&\"#), r#"$0\"#);
+        assert_eq!(convert_ere_backreferences(r#"\&\"#), r#"&\"#);
     }
 
     #[test]
