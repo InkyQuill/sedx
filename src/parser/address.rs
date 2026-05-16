@@ -12,7 +12,7 @@ pub fn parse_optional_range(addr_part: &str) -> Result<Option<(Address, Address)
         return Ok(None); // No address = applies to all lines
     }
 
-    if let Some(comma_pos) = addr_part.find(',') {
+    if let Some(comma_pos) = find_range_separator(addr_part) {
         // Range: addr1,addr2
         let start = &addr_part[..comma_pos];
         let end = &addr_part[comma_pos + 1..];
@@ -53,6 +53,49 @@ pub fn parse_optional_range(addr_part: &str) -> Result<Option<(Address, Address)
     // Single address
     let addr = parse_address(addr_part)?;
     Ok(Some((addr.clone(), addr)))
+}
+
+fn find_range_separator(addr_part: &str) -> Option<usize> {
+    let mut chars = addr_part.char_indices().peekable();
+    let mut pattern_delimiter: Option<char> = None;
+    let mut escaped = false;
+
+    while let Some((pos, ch)) = chars.next() {
+        if let Some(delimiter) = pattern_delimiter {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+
+            if ch == '\\' {
+                escaped = true;
+                continue;
+            }
+
+            if ch == delimiter {
+                pattern_delimiter = None;
+            }
+
+            continue;
+        }
+
+        if ch == ',' {
+            return Some(pos);
+        }
+
+        if ch == '/' {
+            pattern_delimiter = Some('/');
+            continue;
+        }
+
+        if ch == '\\' {
+            if let Some((_, delimiter)) = chars.next() {
+                pattern_delimiter = Some(delimiter);
+            }
+        }
+    }
+
+    None
 }
 
 pub fn parse_address(addr: &str) -> Result<Address> {
@@ -212,4 +255,29 @@ fn parse_custom_delimiter_pattern(addr: &str) -> Option<String> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_range_separator;
+
+    #[test]
+    fn range_separator_ignores_comma_inside_slash_pattern() {
+        assert_eq!(find_range_separator("/a,b/"), None);
+    }
+
+    #[test]
+    fn range_separator_ignores_comma_inside_custom_delimiter_pattern() {
+        assert_eq!(find_range_separator(r"\#a,b#"), None);
+    }
+
+    #[test]
+    fn range_separator_splits_between_custom_delimiter_patterns() {
+        assert_eq!(find_range_separator(r"\#start#,\#end#"), Some(8));
+    }
+
+    #[test]
+    fn range_separator_respects_escaped_custom_delimiter() {
+        assert_eq!(find_range_separator(r"\#a\#,#,\#end#"), Some(7));
+    }
 }
