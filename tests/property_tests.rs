@@ -207,20 +207,14 @@ proptest! {
     ) {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("test.txt");
-        let copy_path = temp_dir.path().join("test_copy.txt");
         fs::write(&file_path, lines.join("\n")).unwrap();
 
         let parser = Parser::new(RegexFlavor::PCRE);
         let commands = parser.parse("1,5s/a/z/g").unwrap();
 
-        // In-memory processing (on copy)
-        fs::write(&copy_path, lines.join("\n")).unwrap();
+        // In-memory processing
         let mut memory_processor = FileProcessor::with_regex_flavor(commands.clone(), RegexFlavor::PCRE);
-        let memory_result = memory_processor.process_file_with_context(&copy_path).unwrap();
-        let memory_output: Vec<String> = memory_result.all_lines
-            .iter()
-            .map(|(_, content, _): &(usize, String, ChangeType)| content.clone())
-            .collect();
+        let memory_output = memory_processor.apply_cycle_based(lines.clone()).unwrap();
 
         // Streaming processing (writes to file_path directly)
         let mut stream_processor = StreamProcessor::new(commands.clone());
@@ -514,20 +508,16 @@ proptest! {
     fn prop_line_numbers_preserved_in_substitution(
         lines in prop::collection::vec("[a-z]{1,20}", 1..30)
     ) {
-        let temp_dir = TempDir::new().unwrap();
-        let file_path = temp_dir.path().join("test.txt");
-        fs::write(&file_path, lines.join("\n")).unwrap();
-
         let original_count = lines.len();
 
         let parser = Parser::new(RegexFlavor::PCRE);
         let commands = parser.parse("s/a/z/g").unwrap();
 
         let mut processor = FileProcessor::with_regex_flavor(commands, RegexFlavor::PCRE);
-        let result = processor.process_file_with_context(&file_path).unwrap();
+        let result = processor.apply_cycle_based(lines).unwrap();
 
         // Line count should stay the same for simple substitutions
-        prop_assert_eq!(result.all_lines.len(), original_count);
+        prop_assert_eq!(result.len(), original_count);
     }
 
     /// Parser produces valid commands for common patterns
